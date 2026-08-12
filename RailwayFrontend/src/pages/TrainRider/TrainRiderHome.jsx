@@ -6,8 +6,8 @@ import {
   Play, Map, Calendar, ChevronRight, Bell, BellRing,
   RefreshCw, Wifi, WifiOff
 } from 'lucide-react';
-import Button from '@/components/ui/Button';
-import Card from '@/components/ui/Card';
+import Button from '@/components/ui/button';
+import Card from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import api from '@/api/axios';

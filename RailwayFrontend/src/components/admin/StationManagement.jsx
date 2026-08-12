@@ -3,7 +3,7 @@ import {
   Plus, Edit, Trash2, Search, AlertCircle, Loader,
   MapPin, Navigation, Building2
 } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import StationFormModal from '@/components/StationManage/StationFormModal';
 import ConfirmDialog from '@/components/ScheduleManage/ConfirmDialog';
 import stationsApi from '@/api/stations';

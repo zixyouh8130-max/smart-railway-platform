@@ -1,7 +1,7 @@
 // src/components/TrainManage/TrainFormModal.jsx
 import React, { useState, useEffect } from 'react';
 import { X, Loader } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 
 const TrainFormModal = ({ isOpen, onClose, onSubmit, train, routes }) => {
   const [formData, setFormData] = useState({

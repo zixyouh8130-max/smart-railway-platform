@@ -6,7 +6,7 @@ import TrainFormModal from '@/components/TrainManage/TrainFormModal';
 import TrainScheduleModal from '@/components/TrainManage/TrainScheduleModal'; 
 import FeeConfigurationModal from '@/components/RouteManage/FeeConfigurationModal';
 import ConfirmDialog from '@/components/ScheduleManage/ConfirmDialog';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import trainsApi from '@/api/trains';
 import routesApi from '@/api/routes';
 

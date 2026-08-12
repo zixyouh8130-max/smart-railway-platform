@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Edit, Trash2, Clock, Calendar, AlertCircle, Loader, Search, ChevronLeft, ChevronRight, Moon } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import ScheduleFormModal from '@/components/ScheduleManage/ScheduleFormModal';
 import ConfirmDialog from '@/components/ScheduleManage/ConfirmDialog';
 import schedulesApi from '@/api/schedules';

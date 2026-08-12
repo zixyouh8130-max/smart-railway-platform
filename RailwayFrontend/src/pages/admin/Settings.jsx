@@ -1,6 +1,6 @@
 import React from 'react';
 import { Save, Bell, Shield, Globe, Database } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 
 const Settings = () => {
   return (

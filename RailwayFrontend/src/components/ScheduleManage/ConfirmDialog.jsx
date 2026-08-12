@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 
 const ConfirmDialog = ({ isOpen, onClose, onConfirm, title, message }) => {
   if (!isOpen) return null;

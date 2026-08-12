@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { MapPin, Navigation, Clock, Gauge, Satellite, Train } from 'lucide-react';
-import Card from '@/components/ui/Card';
-import Button from '@/components/ui/Button';
+import Card from '@/components/ui/card';
+import Button from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import TrainTrackerMap from '@/pages/TrainRider/TrainTrackerMap';
 

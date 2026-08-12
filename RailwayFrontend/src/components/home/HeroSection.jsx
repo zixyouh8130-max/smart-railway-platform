@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, ArrowRight, Shield, Clock, Train, Calendar, AlertCircle, ChevronDown, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import StationSearchInput from '@/components/home/StationSearchInput';
 import PassengerCounter from '@/components/home/PassengerCounter';
 import demuTrainImage from '@/assets/images/demu-train.jpg';

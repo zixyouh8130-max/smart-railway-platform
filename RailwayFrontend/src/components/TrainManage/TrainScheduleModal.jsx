@@ -1,7 +1,7 @@
 // src/components/TrainManage/TrainScheduleModal.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, Loader, AlertCircle, Clock, Save, MapPin, Calculator, Gauge } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import ScrollableTimePicker from '@/components/ui/ScrollableTimePicker';
 import trainsApi from '@/api/trains';
 import routesApi from '@/api/routes';

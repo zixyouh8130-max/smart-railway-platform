@@ -1,6 +1,6 @@
 import React from 'react';
 import { Train, Clock, MapPin, AlertTriangle, ChevronRight } from 'lucide-react';
-import Card from '@/components/ui/Card';
+import Card from '@/components/ui/card';
 
 const LiveUpdates = () => {
   const updates = [

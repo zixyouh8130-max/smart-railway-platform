@@ -1,7 +1,7 @@
 // src/components/admin/FeeConfigurationModal.jsx
 import React, { useState, useEffect } from 'react';
 import { X, Save, RotateCcw, Loader, AlertCircle, Train, Info, CheckCircle } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import feesApi from '@/api/fees';
 import trainsApi from '@/api/trains';
 import routesApi from '@/api/routes';

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, GripVertical, Search, Loader, MapPin } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import stationsApi from '@/api/stations';
 import {
   DndContext,

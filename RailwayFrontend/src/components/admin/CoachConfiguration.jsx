@@ -1,7 +1,7 @@
 // src/components/admin/CoachConfiguration.jsx
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, ChevronDown, ChevronUp, Loader, AlertCircle, Copy, ArrowUp, ArrowDown, GripVertical } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import coachesApi from '@/api/coaches';
 import SeatLayout from './SeatLayout';
 

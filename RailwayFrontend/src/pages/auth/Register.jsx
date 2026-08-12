@@ -5,7 +5,7 @@ import {
   ArrowRight, Check, ArrowLeft, Shield
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 
 const Register = () => {
   const navigate = useNavigate();

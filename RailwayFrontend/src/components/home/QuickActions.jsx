@@ -1,6 +1,6 @@
 import React from 'react';
 import { Ticket, Clock, RefreshCw, AlertCircle, Gift, Map, ArrowRight } from 'lucide-react';
-import Card from '@/components/ui/Card';
+import Card from '@/components/ui/card';
 
 const QuickActions = () => {
   const actions = [

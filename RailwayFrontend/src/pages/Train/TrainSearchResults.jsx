@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Train, Clock, MapPin, ArrowRight, Search, AlertCircle, ChevronLeft } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import schedulesApi from '@/api/schedules';
 import stationsApi from '@/api/stations';
 

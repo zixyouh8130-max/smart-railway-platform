@@ -1,6 +1,6 @@
 import React from 'react';
 import { Train, Mail, Phone, MapPin, ArrowRight } from 'lucide-react';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 
 const Footer = () => {
   const footerLinks = {

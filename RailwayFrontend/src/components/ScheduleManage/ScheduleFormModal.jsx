@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import ScrollableTimePicker from '@/components/ui/ScrollableTimePicker';
 import api from '@/api/axios';
 

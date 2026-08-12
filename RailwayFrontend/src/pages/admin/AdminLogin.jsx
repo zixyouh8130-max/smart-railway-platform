@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Train, Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight, Shield } from 'lucide-react';
 import { adminAuthService } from '@/services/adminAuthService';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 
 const AdminLogin = () => {
   const navigate = useNavigate();
