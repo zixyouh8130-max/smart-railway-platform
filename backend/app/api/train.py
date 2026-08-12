@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
+from sqlalchemy import or_, case
 
 from ..core.database import get_db
 from ..models.train import Train
@@ -10,6 +11,164 @@ from ..schemas.train import TrainCreate, TrainUpdate, TrainResponse, TrainListRe
 
 router = APIRouter()
 
+def _train_to_dict(train: Train):
+    return {
+        "id": train.id,
+        "train_no": train.train_no,
+        "train_name": train.train_name,
+        "train_type": train.train_type,
+        "route_id": train.route_id,
+        "total_coaches": train.total_coaches,
+        "capacity": train.capacity,
+        "speed": train.speed,
+        "status": train.status,
+        "created_at": (
+            train.created_at.isoformat()
+            if train.created_at
+            else None
+        ),
+        "updated_at": (
+            train.updated_at.isoformat()
+            if train.updated_at
+            else None
+        ),
+    }
+
+@router.get("/catalog")
+def get_train_catalog(
+    status: Optional[str] = Query(
+        default="ACTIVE"
+    ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=100
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    Passenger-facing train list.
+
+    Used by the AI when the passenger asks for:
+    - available trains
+    - active trains
+    - train list
+    - what trains exist
+    """
+
+    query = db.query(Train)
+
+    if status:
+        query = query.filter(
+            Train.status == status.strip().upper()
+        )
+
+    trains = (
+        query
+        .order_by(Train.id.asc())
+        .limit(limit)
+        .all()
+    )
+
+    return {
+        "count": len(trains),
+        "trains": [
+            _train_to_dict(train)
+            for train in trains
+        ]
+    }
+
+@router.get("/search")
+def search_trains(
+    q: str = Query(
+        ...,
+        min_length=1
+    ),
+    status: Optional[str] = Query(
+        default="ACTIVE"
+    ),
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=20
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    Search trains using passenger-visible information.
+
+    Searches:
+    - train_no
+    - train_name
+    - train_type
+
+    The returned database id is then used internally
+    by the AI for get_train().
+    """
+
+    search_text = q.strip()
+
+    if not search_text:
+        return {
+            "query": q,
+            "count": 0,
+            "trains": []
+        }
+
+    pattern = f"%{search_text}%"
+
+    query = db.query(Train)
+
+    if status:
+        query = query.filter(
+            Train.status == status.strip().upper()
+        )
+
+    query = query.filter(
+        or_(
+            Train.train_no.ilike(pattern),
+            Train.train_name.ilike(pattern),
+            Train.train_type.ilike(pattern),
+        )
+    )
+
+    # Exact train number should appear first,
+    # followed by exact train name, then partial matches.
+    exact_train_no = case(
+        (
+            Train.train_no == search_text,
+            0
+        ),
+        else_=1
+    )
+
+    exact_train_name = case(
+        (
+            Train.train_name == search_text,
+            0
+        ),
+        else_=1
+    )
+
+    trains = (
+        query
+        .order_by(
+            exact_train_no,
+            exact_train_name,
+            Train.id.asc()
+        )
+        .limit(limit)
+        .all()
+    )
+
+    return {
+        "query": search_text,
+        "count": len(trains),
+        "trains": [
+            _train_to_dict(train)
+            for train in trains
+        ]
+    }
 
 @router.get("/", response_model=TrainListResponse)
 async def get_trains(
