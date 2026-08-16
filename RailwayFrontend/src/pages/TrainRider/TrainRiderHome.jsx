@@ -1,8 +1,8 @@
 // pages/TrainRider/TrainRiderHome.jsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Train, Clock, MapPin, Navigation, AlertTriangle, 
+import {
+  Train, Clock, MapPin, Navigation, AlertTriangle,
   Play, Map, Calendar, ChevronRight, Bell, BellRing,
   RefreshCw, Wifi, WifiOff
 } from 'lucide-react';
@@ -28,7 +28,7 @@ const TrainRiderHome = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [lastUpdated, setLastUpdated] = useState(null);
   const [connectionError, setConnectionError] = useState(false);
-  
+
   const pollIntervalRef = useRef(null);
   const clockIntervalRef = useRef(null);
 
@@ -36,30 +36,30 @@ const TrainRiderHome = () => {
   const fetchScheduleData = useCallback(async (showRefreshIndicator = false) => {
     if (showRefreshIndicator) setRefreshing(true);
     setConnectionError(false);
-    
+
     try {
       const userResponse = await api.get('/auth/me');
       setUser(userResponse.data);
-      
+
       if (userResponse.data.staff) {
         setStaffInfo(userResponse.data.staff);
-        
+
         // Get today's assignment
         const staffId = userResponse.data.staff.staff_id;
         const assignmentResponse = await api.get(`/staff/assignments/current/${staffId}`);
-        
+
         if (assignmentResponse.data) {
           const newSchedule = assignmentResponse.data;
           setTodaySchedule(newSchedule);
           setLastUpdated(new Date());
-          
+
           // Update journey status
           if (newSchedule.status === 'ACTIVE') {
             setJourneyActive(true);
           } else {
             setJourneyActive(false);
           }
-          
+
           console.log('📅 Schedule updated:', {
             departure: newSchedule.departure_time,
             status: newSchedule.status,
@@ -82,17 +82,17 @@ const TrainRiderHome = () => {
   // 🆕 Initial load + polling
   useEffect(() => {
     fetchScheduleData();
-    
+
     // Set up polling
     pollIntervalRef.current = setInterval(() => {
       fetchScheduleData(true);
     }, POLL_INTERVAL);
-    
+
     // Update clock every second
     clockIntervalRef.current = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000);
-    
+
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
       if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
@@ -111,19 +111,19 @@ const TrainRiderHome = () => {
       setTimeToDeparture(null);
       return;
     }
-    
+
     try {
       // Build departure datetime from assignment date + departure time
       const timeParts = todaySchedule.departure_time.split(':');
       const departureDateTime = new Date(todaySchedule.assignment_date);
       departureDateTime.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]), 0, 0);
-      
+
       const now = new Date();
       const diffMs = departureDateTime.getTime() - now.getTime();
       const diffMinutes = Math.floor(diffMs / 60000);
-      
+
       setTimeToDeparture(diffMinutes);
-      
+
       // Show alert when 15 minutes or less to departure
       if (diffMinutes <= ALERT_THRESHOLD && diffMinutes > 0 && !journeyActive) {
         setShowAlert(true);
@@ -137,17 +137,30 @@ const TrainRiderHome = () => {
     }
   };
 
-  const handleStartJourney = async () => {
+
+const handleStartJourney = async () => {
     try {
-      await api.post(`/staff/assignments/${todaySchedule.assignment_id}/start-journey`, {
-        device_id: staffInfo?.staff_id || 'TRAIN_RIDER_001'
-      });
-      
+      const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
+
+      console.log('🚂 Starting journey...');
+      console.log('  - assignment_id:', todaySchedule.assignment_id);
+      console.log('  - device_id:', deviceId);
+
+      // ✅ Send device_id in the request body
+      const response = await api.post(
+        `/staff/assignments/${todaySchedule.assignment_id}/start-journey`,
+        { device_id: deviceId }  // Body payload
+      );
+
+      console.log('✅ Journey started:', response.data);
+
       setJourneyActive(true);
       setShowAlert(false);
       navigate('/train-rider/tracking');
     } catch (err) {
-      console.error('Failed to start journey:', err);
+      console.error('❌ Failed to start journey:', err);
+      console.error('Error response:', err.response?.data);
+      alert('Failed to start journey. Please try again.');
     }
   };
 
@@ -219,8 +232,8 @@ const TrainRiderHome = () => {
             <p className="text-gray-500 mb-4">
               {staffInfo ? 'ယနေ့ တာဝန်ချထားခြင်း မရှိသေးပါ။' : 'ကျေးဇူးပြု၍ အက်ဒမင်ထံ ဆက်သွယ်ပါ။'}
             </p>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={handleManualRefresh}
               icon={<RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />}
             >
@@ -247,7 +260,7 @@ const TrainRiderHome = () => {
              staffInfo.role === 'TRAIN_GUARD' ? 'ရထားစောင့်' : 'လက်မှတ်စစ်'}
           </p>
         )}
-        
+
         {/* 🆕 Connection status & last updated */}
         <div className="flex items-center justify-center gap-4 mt-2 text-xs text-gray-400">
           {connectionError ? (
@@ -262,8 +275,8 @@ const TrainRiderHome = () => {
           {lastUpdated && (
             <span>Updated: {lastUpdated.toLocaleTimeString()}</span>
           )}
-          <button 
-            onClick={handleManualRefresh} 
+          <button
+            onClick={handleManualRefresh}
             className="text-railway-red-500 hover:text-railway-red-700"
             title="Refresh"
           >
@@ -282,9 +295,9 @@ const TrainRiderHome = () => {
             <div className="flex-1">
               <p className="font-semibold text-amber-800">ထွက်ခွာချိန် နီးပါပြီ!</p>
               <p className="text-sm text-amber-700">
-                {timeToDeparture > 0 
+                {timeToDeparture > 0
                   ? `နောက်ထပ် ${timeToDeparture} မိနစ်အတွင်း ထွက်ခွာရမည်`
-                  : timeToDeparture === 0 
+                  : timeToDeparture === 0
                     ? 'ထွက်ခွာချိန် ရောက်ရှိပါပြီ'
                     : 'ထွက်ခွာချိန် ကျော်လွန်သွားပါပြီ'}
               </p>
@@ -301,13 +314,13 @@ const TrainRiderHome = () => {
             ယနေ့ ခရီးစဉ်
           </h2>
           <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-            journeyActive 
+            journeyActive
               ? 'bg-green-100 text-green-700 border border-green-200'
               : timeToDeparture <= 0
                 ? 'bg-red-100 text-red-700 border border-red-200'
                 : 'bg-blue-100 text-blue-700 border border-blue-200'
           }`}>
-            {journeyActive ? 'ခရီးစဉ်အတွင်း' : 
+            {journeyActive ? 'ခရီးစဉ်အတွင်း' :
              timeToDeparture <= 0 ? 'ထွက်ခွာရန်' : 'စောင့်ဆိုင်းဆဲ'}
           </span>
         </div>
@@ -346,8 +359,8 @@ const TrainRiderHome = () => {
           {/* 🆕 Countdown Timer */}
           {!journeyActive && timeToDeparture !== null && (
             <div className={`text-center p-4 rounded-lg border-2 ${
-              timeToDeparture <= 0 ? 'bg-red-50 border-red-200' : 
-              timeToDeparture <= 15 ? 'bg-amber-50 border-amber-200' : 
+              timeToDeparture <= 0 ? 'bg-red-50 border-red-200' :
+              timeToDeparture <= 15 ? 'bg-amber-50 border-amber-200' :
               'bg-gray-50 border-gray-200'
             }`}>
               <Label className="text-xs text-gray-500 mb-1">ထွက်ခွာရန် ကျန်ချိန်</Label>
@@ -357,22 +370,22 @@ const TrainRiderHome = () => {
               {/* Progress bar */}
               {timeToDeparture > 0 && (
                 <div className="w-full h-2 bg-gray-200 rounded-full mt-2 overflow-hidden">
-                  <div 
+                  <div
                     className={`h-full rounded-full transition-all duration-1000 ${
                       timeToDeparture <= 15 ? 'bg-amber-500' : 'bg-blue-500'
                     }`}
-                    style={{ 
-                      width: `${Math.max(0, Math.min(100, ((ALERT_THRESHOLD - timeToDeparture) / ALERT_THRESHOLD) * 100))}%` 
+                    style={{
+                      width: `${Math.max(0, Math.min(100, ((ALERT_THRESHOLD - timeToDeparture) / ALERT_THRESHOLD) * 100))}%`
                     }}
                   />
                 </div>
               )}
             </div>
           )}
-          
+
           {/* 🆕 Schedule Status */}
           <div className="text-center text-xs text-gray-400">
-            Status: {todaySchedule.status} | 
+            Status: {todaySchedule.status} |
             Last checked: {lastUpdated?.toLocaleTimeString() || 'Never'}
           </div>
         </div>
@@ -381,20 +394,20 @@ const TrainRiderHome = () => {
       {/* Action Buttons */}
       <div className="space-y-3">
         {!journeyActive ? (
-          <Button 
-            variant="primary" 
+          <Button
+            variant="primary"
             className="w-full text-lg py-4"
             icon={<Play className="w-6 h-6" />}
             onClick={handleStartJourney}
             disabled={timeToDeparture > 15}
           >
-            {timeToDeparture <= 0 ? 'ထွက်ခွာမည်' : 
-             timeToDeparture <= 15 ? 'စောစီးစွာ ထွက်ခွာမည်' : 
+            {timeToDeparture <= 0 ? 'ထွက်ခွာမည်' :
+             timeToDeparture <= 15 ? 'စောစီးစွာ ထွက်ခွာမည်' :
              'ထွက်ခွာချိန် စောင့်ဆိုင်းပါ'}
           </Button>
         ) : (
-          <Button 
-            variant="primary" 
+          <Button
+            variant="primary"
             className="w-full text-lg py-4 bg-green-600 hover:bg-green-700"
             icon={<Map className="w-6 h-6" />}
             onClick={() => navigate('/train-rider/tracking')}
@@ -402,19 +415,9 @@ const TrainRiderHome = () => {
             Live Tracking ကြည့်ရှုရန်
           </Button>
         )}
-
-        <Button 
-          variant="outline" 
-          className="w-full"
-          icon={<Clock className="w-5 h-5" />}
-          onClick={() => navigate('/train-rider/schedule')}
-        >
-          အချိန်ဇယား အပြည့်အစုံ
-        </Button>
-        
         {/* 🆕 Manual refresh button */}
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           className="w-full text-gray-400"
           icon={<RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />}
           onClick={handleManualRefresh}

@@ -2,14 +2,62 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
-from sqlalchemy import or_, case
+from sqlalchemy import or_, case, func
+import re
+import unicodedata
 
 from ..core.database import get_db
 from ..models.train import Train
 from ..models.route import Route
 from ..schemas.train import TrainCreate, TrainUpdate, TrainResponse, TrainListResponse
 
+MYANMAR_DIGITS = "၀၁၂၃၄၅၆၇၈၉"
+ASCII_DIGITS = "0123456789"
+
+MYANMAR_TO_ASCII = str.maketrans(
+    MYANMAR_DIGITS,
+    ASCII_DIGITS
+)
+
 router = APIRouter()
+
+def normalize_railway_search(text: str) -> str:
+    """
+    Normalize passenger-visible railway names/numbers.
+
+    Examples:
+
+    အမှတ် (၇၂) အဆန်
+    အမှတ်(၇၂)အဆန်
+    အမှတ် (72) အဆန်
+
+    all become a comparable representation.
+    """
+
+    if not text:
+        return ""
+
+    text = unicodedata.normalize(
+        "NFKC",
+        str(text)
+    )
+
+    # Myanmar digits -> ASCII
+    text = text.translate(
+        MYANMAR_TO_ASCII
+    )
+
+    text = text.lower().strip()
+
+    # Remove punctuation/spacing that should not
+    # affect railway identity.
+    text = re.sub(
+        r"[\s\-\(\)\[\],.]+",
+        "",
+        text
+    )
+
+    return text
 
 def _train_to_dict(train: Train):
     return {
@@ -80,89 +128,93 @@ def get_train_catalog(
 
 @router.get("/search")
 def search_trains(
-    q: str = Query(
-        ...,
-        min_length=1
-    ),
-    status: Optional[str] = Query(
-        default="ACTIVE"
-    ),
-    limit: int = Query(
-        default=10,
-        ge=1,
-        le=20
-    ),
+    q: str = Query(..., min_length=1),
+    status: str = "ACTIVE",
+    limit: int = Query(10, ge=1, le=20),
     db: Session = Depends(get_db)
 ):
-    """
-    Search trains using passenger-visible information.
+    raw_query = q.strip()
 
-    Searches:
-    - train_no
-    - train_name
-    - train_type
-
-    The returned database id is then used internally
-    by the AI for get_train().
-    """
-
-    search_text = q.strip()
-
-    if not search_text:
+    if not raw_query:
         return {
             "query": q,
             "count": 0,
             "trains": []
         }
 
-    pattern = f"%{search_text}%"
+    normalized_query = normalize_railway_search(
+        raw_query
+    )
+
+    # PostgreSQL-side equivalent:
+    #
+    # 1. Convert Myanmar digits -> ASCII
+    # 2. Remove spaces, (), -, punctuation
+    #
+    normalized_train_name = func.regexp_replace(
+        func.translate(
+            func.coalesce(
+                Train.train_name,
+                ""
+            ),
+            "၀၁၂၃၄၅၆၇၈၉",
+            "0123456789"
+        ),
+        r"[\s\-\(\)\[\],.]+",
+        "",
+        "g"
+    )
+
+    normalized_train_no = func.regexp_replace(
+        func.translate(
+            func.coalesce(
+                Train.train_no,
+                ""
+            ),
+            "၀၁၂၃၄၅၆၇၈၉",
+            "0123456789"
+        ),
+        r"[\s\-\(\)\[\],.]+",
+        "",
+        "g"
+    )
 
     query = db.query(Train)
 
     if status:
         query = query.filter(
-            Train.status == status.strip().upper()
+            Train.status == status.upper()
         )
 
     query = query.filter(
         or_(
-            Train.train_no.ilike(pattern),
-            Train.train_name.ilike(pattern),
-            Train.train_type.ilike(pattern),
+            # Normal raw searches
+            Train.train_no.ilike(
+                f"%{raw_query}%"
+            ),
+            Train.train_name.ilike(
+                f"%{raw_query}%"
+            ),
+
+            # Normalized Myanmar search
+            normalized_train_no.ilike(
+                f"%{normalized_query}%"
+            ),
+            normalized_train_name.ilike(
+                f"%{normalized_query}%"
+            ),
         )
-    )
-
-    # Exact train number should appear first,
-    # followed by exact train name, then partial matches.
-    exact_train_no = case(
-        (
-            Train.train_no == search_text,
-            0
-        ),
-        else_=1
-    )
-
-    exact_train_name = case(
-        (
-            Train.train_name == search_text,
-            0
-        ),
-        else_=1
     )
 
     trains = (
         query
-        .order_by(
-            exact_train_no,
-            exact_train_name,
-            Train.id.asc()
-        )
+        .order_by(Train.id.asc())
         .limit(limit)
         .all()
     )
 
     return {
-        "query": search_text,
+        "query": raw_query,
         "count": len(trains),
         "trains": [
             _train_to_dict(train)

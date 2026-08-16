@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Edit, Trash2, Clock, Calendar, AlertCircle, Loader, Search, ChevronLeft, ChevronRight, Moon } from 'lucide-react';
+import { Plus, Edit, Trash2, Clock, Calendar, AlertCircle, Loader, Search, ChevronLeft, ChevronRight, Moon, Lock } from 'lucide-react';
 import Button from '@/components/ui/button';
 import ScheduleFormModal from '@/components/ScheduleManage/ScheduleFormModal';
 import ConfirmDialog from '@/components/ScheduleManage/ConfirmDialog';
@@ -91,20 +91,33 @@ const SchedulesManagement = () => {
         }
       }
 
-      console.log('Fetched schedules:', schedulesData);
-      console.log('Fetched trains:', trainsData);
-
       setSchedules(schedulesData);
       setTrains(trainsData);
     } catch (err) {
       const errorMessage = err.detail || err.message || 'ဒေတာများ ရယူ၍မရပါ။ ထပ်မံကြိုးစားကြည့်ပါ။';
       setError(errorMessage);
-      console.error('Error fetching data:', err);
       setSchedules([]);
       setTrains([]);
     } finally {
       setLoading(false);
     }
+  };
+
+  // 🆕 Check if schedule is editable
+  const isScheduleEditable = (status) => {
+    return ['SCHEDULED', 'DELAYED', 'CANCELLED'].includes(status);
+  };
+
+  // 🆕 Check if schedule is deletable
+  const isScheduleDeletable = (status) => {
+    return ['SCHEDULED', 'DELAYED', 'CANCELLED'].includes(status);
+  };
+
+  // 🆕 Get lock reason
+  const getLockReason = (status) => {
+    if (status === 'ACTIVE') return 'ရထားပြေးဆွဲနေစဉ် ပြင်ဆင်၍မရပါ';
+    if (status === 'COMPLETED') return 'ပြီးဆုံးသွားသော အချိန်ဇယားကို ပြင်ဆင်၍မရပါ';
+    return null;
   };
 
   const timeToMinutes = (timeStr) => {
@@ -124,132 +137,80 @@ const SchedulesManagement = () => {
   const timeSlots = useMemo(() => {
     const slots = [];
     for (let i = 0; i < 48; i++) {
-      const minutes = i * 30;
-      slots.push(minutes);
+      slots.push(i * 30);
     }
     return slots;
   }, []);
 
-  // Calculate position and height for schedule blocks
   const calculateSchedulePosition = (schedule) => {
     const departureTime = schedule.departure_time;
     const arrivalTime = schedule.arrival_time;
     const isOvernight = schedule.is_overnight || false;
     const isArrivalPart = schedule._isArrivalPart || false;
-    
+
     const startMinutes = timeToMinutes(departureTime);
     let endMinutes = timeToMinutes(arrivalTime);
-    
-    // Handle missing or invalid arrival time
+
     if (!arrivalTime || endMinutes <= startMinutes) {
-      endMinutes = startMinutes + 60; // Default 1 hour
+      endMinutes = startMinutes + 60;
     }
-    
+
     if (isOvernight && isArrivalPart) {
-      // ARRIVAL PART: Shows from midnight (0) to arrival time
       const topPosition = 0;
       const height = (endMinutes / 30) * 40;
-      const duration = endMinutes;
-      
-      return {
-        top: topPosition,
-        height: Math.max(height, 30),
-        duration,
-        startMinutes: 0,
-        endMinutes,
-        isOvernight: true,
-        isArrivalPart: true
-      };
+      return { top: topPosition, height: Math.max(height, 30), duration: endMinutes, startMinutes: 0, endMinutes, isOvernight: true, isArrivalPart: true };
     } else if (isOvernight) {
-      // DEPARTURE PART: Shows from departure time to end of day (midnight)
-      endMinutes = 1440; // 24:00
+      endMinutes = 1440;
       const topPosition = (startMinutes / 30) * 40;
       const height = ((1440 - startMinutes) / 30) * 40;
-      const duration = 1440 - startMinutes;
-      
-      return {
-        top: topPosition,
-        height: Math.max(height, 30),
-        duration,
-        startMinutes,
-        endMinutes: 1440,
-        isOvernight: true,
-        isArrivalPart: false
-      };
+      return { top: topPosition, height: Math.max(height, 30), duration: 1440 - startMinutes, startMinutes, endMinutes: 1440, isOvernight: true, isArrivalPart: false };
     } else {
-      // NORMAL SCHEDULE: Shows from departure to arrival
       const topPosition = (startMinutes / 30) * 40;
       const height = ((endMinutes - startMinutes) / 30) * 40;
-      const duration = endMinutes - startMinutes;
-      
-      return {
-        top: topPosition,
-        height: Math.max(height, 30),
-        duration,
-        startMinutes,
-        endMinutes,
-        isOvernight: false,
-        isArrivalPart: false
-      };
+      return { top: topPosition, height: Math.max(height, 30), duration: endMinutes - startMinutes, startMinutes, endMinutes, isOvernight: false, isArrivalPart: false };
     }
   };
 
-  // Group overlapping schedules and assign lanes
   const assignLanes = (daySchedules) => {
     if (!daySchedules || daySchedules.length === 0) return { lanes: new Map(), totalLanes: 0 };
-    
-    // Create parts with unique keys
+
     const scheduleParts = daySchedules.map(schedule => {
       const pos = calculateSchedulePosition(schedule);
-      const key = schedule._isArrivalPart 
-        ? `${schedule.id}_arrival` 
-        : `${schedule.id}_departure`;
-      
-      return {
-        key,
-        startMinutes: pos.startMinutes,
-        endMinutes: pos.endMinutes,
-        schedule
-      };
+      const key = schedule._isArrivalPart ? `${schedule.id}_arrival` : `${schedule.id}_departure`;
+      return { key, startMinutes: pos.startMinutes, endMinutes: pos.endMinutes, schedule };
     });
-    
-    // Sort by start time
+
     scheduleParts.sort((a, b) => a.startMinutes - b.startMinutes);
-    
+
     const lanes = new Map();
     const laneEndTimes = [];
-    
+
     scheduleParts.forEach(part => {
       let assignedLane = 0;
       while (assignedLane < laneEndTimes.length) {
-        if (laneEndTimes[assignedLane] <= part.startMinutes) {
-          break;
-        }
+        if (laneEndTimes[assignedLane] <= part.startMinutes) break;
         assignedLane++;
       }
-      
       lanes.set(part.key, assignedLane);
       laneEndTimes[assignedLane] = part.endMinutes;
     });
-    
-    const totalLanes = laneEndTimes.length;
-    
-    return { lanes, totalLanes };
+
+    return { lanes, totalLanes: laneEndTimes.length };
   };
 
   const weekDays = useMemo(() => {
     const days = [];
     const dayNames = ['တနင်္လာ', 'အင်္ဂါ', 'ဗုဒ္ဓဟူး', 'ကြာသပတေး', 'သောကြာ', 'စနေ', 'တနင်္ဂနွေ'];
-    
+
     for (let i = 0; i < 7; i++) {
       const date = new Date(currentWeekStart);
       date.setDate(currentWeekStart.getDate() + i);
-      
+
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
       const dateStr = `${year}-${month}-${day}`;
-      
+
       days.push({
         date: date,
         dayName: dayNames[i],
@@ -260,54 +221,29 @@ const SchedulesManagement = () => {
     return days;
   }, [currentWeekStart]);
 
-  // Group schedules by date - includes both departure and arrival dates for overnight
   const schedulesByDate = useMemo(() => {
     const grouped = {};
-    
     if (!Array.isArray(schedules)) return grouped;
 
     schedules.forEach(schedule => {
       if (!schedule || !schedule.departure_date) return;
-      
-      // Add to departure date
+
       const departureDateStr = schedule.departure_date.split('T')[0];
-      
-      if (!grouped[departureDateStr]) {
-        grouped[departureDateStr] = [];
-      }
-      
-      // Add departure part (original schedule)
-      grouped[departureDateStr].push({
-        ...schedule,
-        _isArrivalPart: false
-      });
-      
-      // For overnight schedules, also add arrival part to arrival date
+      if (!grouped[departureDateStr]) grouped[departureDateStr] = [];
+      grouped[departureDateStr].push({ ...schedule, _isArrivalPart: false });
+
       if (schedule.is_overnight && schedule.arrival_date) {
         const arrivalDateStr = schedule.arrival_date.split('T')[0];
-        
-        // Only add if arrival date is different from departure date
         if (arrivalDateStr !== departureDateStr) {
-          if (!grouped[arrivalDateStr]) {
-            grouped[arrivalDateStr] = [];
-          }
-          
-          // Check for duplicates
-          const alreadyExists = grouped[arrivalDateStr].some(
-            s => s.id === schedule.id && s._isArrivalPart
-          );
-          
+          if (!grouped[arrivalDateStr]) grouped[arrivalDateStr] = [];
+          const alreadyExists = grouped[arrivalDateStr].some(s => s.id === schedule.id && s._isArrivalPart);
           if (!alreadyExists) {
-            grouped[arrivalDateStr].push({
-              ...schedule,
-              _isArrivalPart: true
-            });
+            grouped[arrivalDateStr].push({ ...schedule, _isArrivalPart: true });
           }
         }
       }
     });
 
-    console.log('Schedules grouped by date:', grouped);
     return grouped;
   }, [schedules]);
 
@@ -320,15 +256,8 @@ const SchedulesManagement = () => {
       if (!schedule) return false;
       const trainNo = (schedule.train?.train_no || '').toLowerCase();
       const trainName = (schedule.train?.train_name || '').toLowerCase();
-      const routeOrigin = (schedule.train?.route?.origin || '').toLowerCase();
-      const routeDestination = (schedule.train?.route?.destination || '').toLowerCase();
       const status = (schedule.status || '').toLowerCase();
-
-      return trainNo.includes(searchLower) ||
-             trainName.includes(searchLower) ||
-             routeOrigin.includes(searchLower) ||
-             routeDestination.includes(searchLower) ||
-             status.includes(searchLower);
+      return trainNo.includes(searchLower) || trainName.includes(searchLower) || status.includes(searchLower);
     });
   }, [schedules, searchTerm]);
 
@@ -353,23 +282,14 @@ const SchedulesManagement = () => {
       if (Array.isArray(formData) && formData.length > 1) {
         const response = await schedulesApi.bulkCreate({ schedules: formData });
         if (response.failed && response.failed > 0) {
-          setToast({
-            type: 'warning',
-            message: `အချိန်ဇယား ${response.created || 0} ခု အောင်မြင်စွာ ထည့်သွင်းပြီး ${response.failed} ခု မအောင်မြင်ပါ။`
-          });
+          setToast({ type: 'warning', message: `အချိန်ဇယား ${response.created || 0} ခု အောင်မြင်စွာ ထည့်သွင်းပြီး ${response.failed} ခု မအောင်မြင်ပါ။` });
         } else {
-          setToast({
-            type: 'success',
-            message: `အချိန်ဇယား ${response.created || formData.length} ခု အောင်မြင်စွာ ထည့်သွင်းပြီးပါပြီ။`
-          });
+          setToast({ type: 'success', message: `အချိန်ဇယား ${response.created || formData.length} ခု အောင်မြင်စွာ ထည့်သွင်းပြီးပါပြီ။` });
         }
       } else {
         const singleData = Array.isArray(formData) ? formData[0] : formData;
         await schedulesApi.create(singleData);
-        setToast({
-          type: 'success',
-          message: 'အချိန်ဇယား အောင်မြင်စွာ ထည့်သွင်းပြီးပါပြီ။'
-        });
+        setToast({ type: 'success', message: 'အချိန်ဇယား အောင်မြင်စွာ ထည့်သွင်းပြီးပါပြီ။' });
       }
       await fetchData();
       setError(null);
@@ -385,19 +305,25 @@ const SchedulesManagement = () => {
 
   const handleUpdate = async (formData) => {
     if (!selectedSchedule) return;
+
+    // 🆕 Check if schedule is editable
+    if (!isScheduleEditable(selectedSchedule.status)) {
+      const reason = getLockReason(selectedSchedule.status);
+      setToast({ type: 'error', message: reason });
+      throw new Error(reason);
+    }
+
     const data = Array.isArray(formData) ? formData[0] : formData;
-    
+
     setActionLoading(true);
     try {
       const updateData = {};
-      
+
       if (data.train_id && parseInt(data.train_id) !== selectedSchedule.train_id) {
         updateData.train_id = parseInt(data.train_id);
       }
       if (data.departure_date) {
-        const dateStr = data.departure_date instanceof Date 
-          ? data.departure_date.toISOString().split('T')[0]
-          : data.departure_date.split('T')[0];
+        const dateStr = data.departure_date instanceof Date ? data.departure_date.toISOString().split('T')[0] : data.departure_date.split('T')[0];
         if (dateStr !== selectedSchedule.departure_date.split('T')[0]) {
           updateData.departure_date = dateStr;
         }
@@ -415,18 +341,16 @@ const SchedulesManagement = () => {
         updateData.is_overnight = data.is_overnight;
       }
       if (data.arrival_date) {
-        const arrivalDateStr = data.arrival_date instanceof Date 
-          ? data.arrival_date.toISOString().split('T')[0]
-          : data.arrival_date.split('T')[0];
+        const arrivalDateStr = data.arrival_date instanceof Date ? data.arrival_date.toISOString().split('T')[0] : data.arrival_date.split('T')[0];
         updateData.arrival_date = arrivalDateStr;
       }
-      
+
       if (Object.keys(updateData).length === 0) {
         setToast({ type: 'warning', message: 'ပြောင်းလဲမှုမရှိပါ' });
         setActionLoading(false);
         return;
       }
-      
+
       await schedulesApi.update(selectedSchedule.id, updateData);
       await fetchData();
       setError(null);
@@ -443,16 +367,27 @@ const SchedulesManagement = () => {
 
   const handleDelete = async () => {
     if (!deleteId) return;
+
+    // 🆕 Check if schedule is deletable
+    const schedule = schedules.find(s => s.id === deleteId);
+    if (schedule && !isScheduleDeletable(schedule.status)) {
+      const reason = getLockReason(schedule.status);
+      setToast({ type: 'error', message: reason });
+      setIsDeleteDialogOpen(false);
+      setDeleteId(null);
+      return;
+    }
+
     setActionLoading(true);
     try {
       await schedulesApi.delete(deleteId);
-      setSchedules(prev => Array.isArray(prev) ? prev.filter(schedule => schedule.id !== deleteId) : []);
+      setSchedules(prev => Array.isArray(prev) ? prev.filter(s => s.id !== deleteId) : []);
       setIsDeleteDialogOpen(false);
       setDeleteId(null);
       setError(null);
       setToast({ type: 'success', message: 'အချိန်ဇယား အောင်မြင်စွာ ဖျက်သိမ်းပြီးပါပြီ။' });
     } catch (err) {
-      const errorMessage = err.detail || err.message || 'ဖျက်သိမ်း၍မရပါ။ ထပ်မံကြိုးစားကြည့်ပါ။';
+      const errorMessage = err.detail || err.message || 'ဖျက်သိမ်း၍မရပါ';
       setError(errorMessage);
       setToast({ type: 'error', message: errorMessage });
       setIsDeleteDialogOpen(false);
@@ -463,16 +398,24 @@ const SchedulesManagement = () => {
   };
 
   const handleDeleteFromForm = async (id) => {
+    // 🆕 Check if schedule is deletable
+    const schedule = schedules.find(s => s.id === id);
+    if (schedule && !isScheduleDeletable(schedule.status)) {
+      const reason = getLockReason(schedule.status);
+      setToast({ type: 'error', message: reason });
+      throw new Error(reason);
+    }
+
     setActionLoading(true);
     try {
       await schedulesApi.delete(id);
-      setSchedules(prev => Array.isArray(prev) ? prev.filter(schedule => schedule.id !== id) : []);
+      setSchedules(prev => Array.isArray(prev) ? prev.filter(s => s.id !== id) : []);
       setIsFormOpen(false);
       setSelectedSchedule(null);
       setError(null);
       setToast({ type: 'success', message: 'အချိန်ဇယား အောင်မြင်စွာ ဖျက်သိမ်းပြီးပါပြီ။' });
     } catch (err) {
-      const errorMessage = err.detail || err.message || 'ဖျက်သိမ်း၍မရပါ။ ထပ်မံကြိုးစားကြည့်ပါ။';
+      const errorMessage = err.detail || err.message || 'ဖျက်သိမ်း၍မရပါ';
       setError(errorMessage);
       setToast({ type: 'error', message: errorMessage });
       throw err;
@@ -482,6 +425,13 @@ const SchedulesManagement = () => {
   };
 
   const handleEditClick = (schedule) => {
+    // 🆕 Check if schedule is editable
+    if (!isScheduleEditable(schedule.status)) {
+      const reason = getLockReason(schedule.status);
+      setToast({ type: 'warning', message: reason });
+      return;
+    }
+
     const originalSchedule = schedules.find(s => s.id === schedule.id);
     setSelectedSchedule(originalSchedule || schedule);
     setIsFormOpen(true);
@@ -489,6 +439,15 @@ const SchedulesManagement = () => {
 
   const handleDeleteClick = (id, e) => {
     if (e) e.stopPropagation();
+
+    // 🆕 Check if schedule is deletable
+    const schedule = schedules.find(s => s.id === id);
+    if (schedule && !isScheduleDeletable(schedule.status)) {
+      const reason = getLockReason(schedule.status);
+      setToast({ type: 'warning', message: reason });
+      return;
+    }
+
     setDeleteId(id);
     setIsDeleteDialogOpen(true);
   };
@@ -548,17 +507,18 @@ const SchedulesManagement = () => {
     const position = calculateSchedulePosition(schedule);
     const isOvernight = schedule.is_overnight || false;
     const isArrivalPart = schedule._isArrivalPart || false;
-    
+    const isLocked = !isScheduleEditable(schedule.status);
+
     const width = totalLanes > 0 ? `${(100 / totalLanes) - 2}%` : '98%';
     const left = totalLanes > 0 ? `${(lane * 100) / totalLanes + 1}%` : '1%';
-    
+
     const isActive = schedule.status === 'ACTIVE' && !isArrivalPart;
     const isDelayed = schedule.status === 'DELAYED' && !isArrivalPart;
-    
+
     return (
       <div
         className={`
-          absolute ${styles.bg} ${styles.text} 
+          absolute ${styles.bg} ${styles.text}
           rounded-md cursor-pointer
           transition-all duration-200
           hover:shadow-lg hover:z-10
@@ -566,6 +526,7 @@ const SchedulesManagement = () => {
           ${isDelayed ? 'animate-pulse ring-2 ring-yellow-300' : ''}
           ${isOvernight && !isArrivalPart ? 'border-r-4 border-r-indigo-300' : ''}
           ${isArrivalPart ? 'border-l-4 border-l-indigo-300 opacity-90' : ''}
+          ${isLocked ? 'opacity-75' : ''}
           overflow-hidden
         `}
         style={{
@@ -576,16 +537,17 @@ const SchedulesManagement = () => {
           minHeight: '30px'
         }}
         onClick={() => handleEditClick(schedule)}
-        title={`${schedule.train?.train_no || ''} - ${getStatusText(schedule.status)}${isOvernight ? ' (Overnight)' : ''}${isArrivalPart ? ' (Arrival)' : ''}\n${formatDuration(position.duration)}`}
+        title={`${schedule.train?.train_no || ''} - ${getStatusText(schedule.status)}${isOvernight ? ' (Overnight)' : ''}${isArrivalPart ? ' (Arrival)' : ''}${isLocked ? ' - ပြင်ဆင်၍မရပါ' : ''}\n${formatDuration(position.duration)}`}
       >
-        <div className="p-1.5 h-full flex flex-col justify-center">
+        <div className="p-1.5 h-full flex flex-col justify-center relative">
+          {isLocked && (
+            <Lock className="absolute top-1 right-1 w-3 h-3 opacity-70" />
+          )}
           {isArrivalPart ? (
             <>
               <div className="flex items-center gap-1 mb-0.5">
                 <Moon className="w-3 h-3 text-indigo-200 flex-shrink-0" />
-                <span className="font-bold text-xs truncate">
-                  {schedule.train?.train_no || `#${schedule.train_id}`}
-                </span>
+                <span className="font-bold text-xs truncate">{schedule.train?.train_no || `#${schedule.train_id}`}</span>
               </div>
               {position.height >= 40 && (
                 <div className="text-[10px] font-medium mt-auto text-indigo-100">
@@ -597,39 +559,18 @@ const SchedulesManagement = () => {
             <>
               <div className="flex items-center gap-1 mb-0.5">
                 <div className={`w-1.5 h-1.5 rounded-full ${styles.dot} flex-shrink-0`}></div>
-                <span className="font-bold text-xs truncate">
-                  {schedule.train?.train_no || `#${schedule.train_id}`}
-                </span>
+                <span className="font-bold text-xs truncate">{schedule.train?.train_no || `#${schedule.train_id}`}</span>
                 {isOvernight && <Moon className="w-3 h-3 text-indigo-200 flex-shrink-0" />}
               </div>
-              {position.height >= 50 && (
-                <div className="text-[10px] opacity-90 truncate">{schedule.train?.train_name}</div>
-              )}
+              {position.height >= 50 && <div className="text-[10px] opacity-90 truncate">{schedule.train?.train_name}</div>}
               <div className="text-[10px] font-medium mt-auto">
                 {schedule.departure_time ? minutesTo12Hour(timeToMinutes(schedule.departure_time)) : '--:--'}
-                {schedule.arrival_time && (
-                  <>
-                    {' → '}
-                    {isOvernight ? (
-                      <span className="text-indigo-200">{minutesTo12Hour(timeToMinutes(schedule.arrival_time))} (နောက်နေ့)</span>
-                    ) : (
-                      minutesTo12Hour(timeToMinutes(schedule.arrival_time))
-                    )}
-                  </>
-                )}
+                {schedule.arrival_time && <> → {isOvernight ? <span className="text-indigo-200">{minutesTo12Hour(timeToMinutes(schedule.arrival_time))} (နောက်နေ့)</span> : minutesTo12Hour(timeToMinutes(schedule.arrival_time))}</>}
               </div>
               {position.height >= 60 && schedule.train?.route && (
-                <div className="text-[9px] opacity-75 truncate mt-0.5">
-                  {schedule.train.route.origin} → {schedule.train.route.destination}
-                </div>
+                <div className="text-[9px] opacity-75 truncate mt-0.5">{schedule.train.route.origin} → {schedule.train.route.destination}</div>
               )}
             </>
-          )}
-          {isOvernight && !isArrivalPart && position.height >= 40 && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-300/50"></div>
-          )}
-          {isArrivalPart && position.height >= 40 && (
-            <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-300/50"></div>
           )}
         </div>
       </div>
@@ -781,12 +722,22 @@ const SchedulesManagement = () => {
         စုစုပေါင်း {filteredSchedules.length} ခု တွေ့ရှိပါသည်{searchTerm && ` (ရှာဖွေမှု: "${searchTerm}")`}
       </div>
 
-      <ScheduleFormModal isOpen={isFormOpen} onClose={handleCloseForm} onSubmit={handleFormSubmit}
-        schedule={selectedSchedule} trains={trains} onDelete={handleDeleteFromForm} />
+      <ScheduleFormModal
+        isOpen={isFormOpen}
+        onClose={handleCloseForm}
+        onSubmit={handleFormSubmit}
+        schedule={selectedSchedule}
+        trains={trains}
+        onDelete={handleDeleteFromForm}
+      />
 
-      <ConfirmDialog isOpen={isDeleteDialogOpen} onClose={() => { setIsDeleteDialogOpen(false); setDeleteId(null); }}
-        onConfirm={handleDelete} title="အချိန်ဇယားဖျက်သိမ်းမည်"
-        message="ဤအချိန်ဇယားအား ဖျက်သိမ်းလိုသည်မှာ သေချာပါသလား? ဤလုပ်ဆောင်ချက်ကို ပြန်လည်ရုပ်သိမ်း၍မရပါ။" />
+      <ConfirmDialog
+        isOpen={isDeleteDialogOpen}
+        onClose={() => { setIsDeleteDialogOpen(false); setDeleteId(null); }}
+        onConfirm={handleDelete}
+        title="အချိန်ဇယားဖျက်သိမ်းမည်"
+        message="ဤအချိန်ဇယားအား ဖျက်သိမ်းလိုသည်မှာ သေချာပါသလား? ဤလုပ်ဆောင်ချက်ကို ပြန်လည်ရုပ်သိမ်း၍မရပါ။"
+      />
 
       {actionLoading && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-[60]">

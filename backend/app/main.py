@@ -19,6 +19,7 @@ from .api.staff import router as staff_router
 from .api.dashboard import router as dashboard_router
 from .api.chatbot.router import router as chatbot_router
 from .api.inspection import router as inspection_router
+from .api.routes_and_stations import router as routes_and_station_router
 
 # Import database models for Alembic metadata
 from .core.database import Base, SessionLocal
@@ -117,7 +118,7 @@ app.include_router(staff_router, prefix="/api/staff", tags=["Staff Management"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(chatbot_router, prefix="/api/chatbot", tags=["AI Chatbot"])
 app.include_router(inspection_router, prefix="/api/inspection", tags=["Inspection"])
-
+app.include_router(routes_and_station_router, prefix="/api", tags=["Routes&Stations"])
 
 @app.get("/")
 async def root():

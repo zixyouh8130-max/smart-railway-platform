@@ -1,7 +1,7 @@
 // components/ScheduleFormModal.jsx
 import React, { useState, useEffect } from 'react';
-import { 
-  X, Calendar, Clock, Repeat, AlertCircle, Trash2, Moon, 
+import {
+  X, Calendar, Clock, Repeat, AlertCircle, Trash2, Moon,
   User, UserCheck, Users, ChevronDown, Loader
 } from 'lucide-react';
 import DatePicker from 'react-datepicker';
@@ -29,14 +29,14 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
     guard_id: '',
     ticket_checker_ids: [],
   });
-  
+
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [generatedSchedules, setGeneratedSchedules] = useState([]);
   const [showPreview, setShowPreview] = useState(false);
   const [showDeletePopup, setShowDeletePopup] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  
+
   // Staff lists
   const [availableDrivers, setAvailableDrivers] = useState([]);
   const [availableAssistants, setAvailableAssistants] = useState([]);
@@ -79,13 +79,13 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
 
   const fetchAvailableStaff = async () => {
       if (!formData.train_id) return;
-      
+
       setLoadingStaff(true);
       try {
           const params = {
               assignment_date: formatDateStr(formData.departure_date)
           };
-          
+
           // Add time parameters for better conflict detection
           if (formData.departure_time) {
               params.departure_time = formData.departure_time;
@@ -96,13 +96,13 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
           if (formData.is_overnight) {
               params.is_overnight = true;
           }
-          
+
           const response = await api.get(`/staff/available-for-train/${formData.train_id}`, {
               params
           });
-          
+
           const allStaff = response.data || [];
-          
+
           // Filter by role
           setAvailableDrivers(allStaff.filter(s => s.role === 'TRAIN_DRIVER'));
           setAvailableAssistants(allStaff.filter(s => s.role === 'ASSISTANT_DRIVER'));
@@ -118,14 +118,14 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
   useEffect(() => {
     if (schedule) {
       // EDIT MODE
-      const departureDate = schedule.departure_date 
-        ? new Date(schedule.departure_date + 'T00:00:00') 
+      const departureDate = schedule.departure_date
+        ? new Date(schedule.departure_date + 'T00:00:00')
         : null;
-      
-      const arrivalDate = schedule.arrival_date 
-        ? new Date(schedule.arrival_date + 'T00:00:00') 
+
+      const arrivalDate = schedule.arrival_date
+        ? new Date(schedule.arrival_date + 'T00:00:00')
         : null;
-      
+
       setFormData({
         train_id: schedule.train_id || '',
         departure_date: departureDate,
@@ -198,11 +198,11 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
     }
     setFormData(prev => {
       const updated = { ...prev, [field]: date };
-      
+
       if (field === 'departure_date' && prev.is_overnight) {
         updated.arrival_date = addDays(date, 1);
       }
-      
+
       return updated;
     });
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
@@ -248,7 +248,7 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
 
     const startDateOnly = new Date(startDate);
     startDateOnly.setHours(0, 0, 0, 0);
-    
+
     const endDateOnly = new Date(endDate);
     endDateOnly.setHours(23, 59, 59, 999);
 
@@ -273,13 +273,13 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
         startOfWeek.setDate(startOfWeek.getDate() - dayOfWeek);
 
         const currentWeekStart = new Date(startOfWeek);
-        
+
         while (currentWeekStart <= endDateOnly) {
           selectedDays.forEach(day => {
             const scheduleDate = new Date(currentWeekStart);
             scheduleDate.setDate(currentWeekStart.getDate() + day);
             scheduleDate.setHours(0, 0, 0, 0);
-            
+
             if (scheduleDate >= startDateOnly && scheduleDate <= endDateOnly) {
               scheduleDates.push(new Date(scheduleDate));
             }
@@ -296,17 +296,17 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
 
         const startMonth = new Date(startDateOnly.getFullYear(), startDateOnly.getMonth(), 1);
         const currentMonth = new Date(startMonth);
-        
+
         while (currentMonth <= endDateOnly) {
           const year = currentMonth.getFullYear();
           const month = currentMonth.getMonth();
           const daysInMonth = new Date(year, month + 1, 0).getDate();
-          
+
           selectedDays.forEach(day => {
             if (day >= 1 && day <= daysInMonth) {
               const scheduleDate = new Date(year, month, day);
               scheduleDate.setHours(0, 0, 0, 0);
-              
+
               if (scheduleDate >= startDateOnly && scheduleDate <= endDateOnly) {
                 scheduleDates.push(new Date(scheduleDate));
               }
@@ -348,7 +348,7 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
       } else if (formData.repeat_end_date < formData.departure_date) {
         newErrors.repeat_end_date = 'End date must be on or after start date';
       }
-      
+
       if (formData.repeat_mode !== 'DAILY' && formData.selectedDays.length === 0) {
         newErrors.selectedDays = 'Please select at least one day';
       }
@@ -383,7 +383,7 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
           guard_id: formData.guard_id || null,
           ticket_checker_ids: formData.ticket_checker_ids || [],
         };
-        
+
         await onSubmit(updateData);
         onClose();
         return;
@@ -400,8 +400,8 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
           arrival_time: formData.arrival_time,
           status: formData.status,
           is_overnight: formData.is_overnight || false,
-          arrival_date: formData.is_overnight 
-            ? formatDateStr(formData.arrival_date || addDays(formData.departure_date, 1)) 
+          arrival_date: formData.is_overnight
+            ? formatDateStr(formData.arrival_date || addDays(formData.departure_date, 1))
             : null,
           driver_id: formData.driver_id || null,
           assistant_driver_id: formData.assistant_driver_id || null,
@@ -410,7 +410,7 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
         }];
       } else {
         const dateList = generateRecurringSchedules();
-        
+
         if (dateList.length === 0) {
           setErrors({ submit: 'No schedules to create. Please check your settings.' });
           setLoading(false);
@@ -420,11 +420,11 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
         schedulesToCreate = dateList.map(date => {
           const departureDateStr = formatDateStr(date);
           let arrivalDateStr = null;
-          
+
           if (formData.is_overnight) {
             arrivalDateStr = formatDateStr(addDays(date, 1));
           }
-          
+
           return {
             train_id: parseInt(formData.train_id),
             departure_date: departureDateStr,
@@ -445,7 +445,7 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
       onClose();
     } catch (error) {
       console.error("Submit error:", error);
-      console.error("Response data:", error.response?.data); 
+      console.error("Response data:", error.response?.data);
       setErrors({ submit: error.response?.data?.detail || error.message || 'An error occurred' });
 
     } finally {
@@ -459,7 +459,7 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
 
   const handleDeleteConfirm = async () => {
     if (!schedule || !onDelete) return;
-    
+
     setDeleteLoading(true);
     try {
       await onDelete(schedule.id);
@@ -557,7 +557,7 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
                   <Repeat className="w-5 h-5 text-blue-600" />
                   <span className="font-medium text-gray-700">အချိန်ဇယား အမျိုးအစား</span>
                 </div>
-                
+
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {['SINGLE', 'DAILY', 'WEEKLY', 'MONTHLY'].map((mode) => (
                     <label
@@ -599,9 +599,9 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
                 <div className="flex items-center gap-2 text-blue-700">
                   <AlertCircle className="w-4 h-4" />
                   <span className="text-sm">
-                    {formData.repeat_mode === 'DAILY' 
-                      ? 'နေ့စဉ် အချိန်ဇယားများ ဖန်တီးပေးမည်' 
-                      : formData.repeat_mode === 'WEEKLY' 
+                    {formData.repeat_mode === 'DAILY'
+                      ? 'နေ့စဉ် အချိန်ဇယားများ ဖန်တီးပေးမည်'
+                      : formData.repeat_mode === 'WEEKLY'
                         ? 'ရွေးချယ်ထားသော ရက်များတွင် အပတ်စဉ် အချိန်ဇယားများ ဖန်တီးပေးမည်'
                         : 'ရွေးချယ်ထားသော ရက်များတွင် လစဉ် အချိန်ဇယားများ ဖန်တီးပေးမည်'}
                   </span>
@@ -800,48 +800,6 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
                 </select>
               </div>
 
-              {/* Assistant Driver */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <UserCheck className="w-4 h-4 inline mr-1" />
-                  လက်ထောက်ရထားမောင်းသူ (Asst. Driver)
-                </label>
-                <select
-                  name="assistant_driver_id"
-                  value={formData.assistant_driver_id}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">လက်ထောက်မောင်းသူ ရွေးချယ်ပါ</option>
-                  {availableAssistants.map((staff) => (
-                    <option key={staff.id} value={staff.id}>
-                      {staff.user?.full_name || 'Unknown'} - {staff.staff_id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Guard */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <UserCheck className="w-4 h-4 inline mr-1" />
-                  ရထားစောင့် (Guard)
-                </label>
-                <select
-                  name="guard_id"
-                  value={formData.guard_id}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">ရထားစောင့် ရွေးချယ်ပါ</option>
-                  {availableGuards.map((staff) => (
-                    <option key={staff.id} value={staff.id}>
-                      {staff.user?.full_name || 'Unknown'} - {staff.staff_id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               {/* Ticket Checkers (Multi-select) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -952,14 +910,14 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
               <Button type="button" onClick={onClose} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700">
                 မလုပ်တော့ပါ
               </Button>
-              
+
               {schedule && onDelete && (
                 <Button type="button" onClick={handleDeleteClick} disabled={loading}
                   className="flex-1 bg-red-600 hover:bg-red-700 text-white flex items-center justify-center gap-2">
                   <Trash2 className="w-4 h-4" />ဖျက်သိမ်းမည်
                 </Button>
               )}
-              
+
               <Button type="submit" disabled={loading} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white">
                 {loading ? 'သိမ်းဆည်းနေသည်...' : schedule ? 'ပြင်ဆင်မည်' : 'အချိန်ဇယားဖန်တီးမည်'}
               </Button>

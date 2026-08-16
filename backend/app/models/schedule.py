@@ -34,8 +34,9 @@ class Schedule(Base):
         Time,
         nullable=True
     )
+    actual_departure_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    actual_arrival_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    # NEW: Indicates if the schedule arrives on the next day
     is_overnight: Mapped[bool] = mapped_column(
         Boolean,
         default=False,

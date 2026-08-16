@@ -1,3 +1,4 @@
+// AdminRoutes.jsx
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Outlet } from "react-router-dom";
 import AdminLogin from '@/pages/admin/AdminLogin';
@@ -10,6 +11,7 @@ import UsersManagement from '@/pages/admin/UsersManagement';
 import Settings from '@/pages/admin/Settings';
 import AdminLayout from '@/layouts/AdminLayout';
 import InspectionDashboard from '@/pages/Inspection/InspectionDashboard';
+import TrainMonitoringPage from '@/pages/admin/TrainMonitoringPage';
 
 const AdminProtectedLayout = () => {
   const adminToken = localStorage.getItem('adminToken');
@@ -23,7 +25,7 @@ const AdminProtectedLayout = () => {
     <AdminLayout>
         <Outlet />
     </AdminLayout>
-        );
+  );
 };
 
 const AdminRoutes = () => {
@@ -43,6 +45,7 @@ const AdminRoutes = () => {
         <Route path="users" element={<UsersManagement />} />
         <Route path="inspection" element={<InspectionDashboard />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="train-monitoring" element={<TrainMonitoringPage />} />
       </Route>
     </Routes>
   );

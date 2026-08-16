@@ -9,7 +9,9 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import {
+  MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap
+} from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { inspectionApi } from '@/api/inspectionAPI';
@@ -50,10 +52,10 @@ const createDefectIcon = (defectType, isSelected = false) => {
     'Track Crack': '#EF4444',
     'Damaged Track': '#DC2626',
   };
-  
+
   const color = colors[defectType] || '#EF4444';
   const size = isSelected ? 36 : 28;
-  
+
   return L.divIcon({
     className: 'custom-defect-marker',
     html: `
@@ -78,38 +80,58 @@ const createDefectIcon = (defectType, isSelected = false) => {
       </div>
     `,
     iconSize: [size, size],
-    iconAnchor: [size/2, size],
+    iconAnchor: [size / 2, size],
     popupAnchor: [0, -size],
   });
+};
+
+// Normalize possible coordinate formats from MongoDB
+const getEventCoordinates = (event) => {
+  const lat = event?.gps?.latitude ?? event?.gps?.lat ?? event?.latitude ?? event?.lat;
+  const lng = event?.gps?.longitude ?? event?.gps?.lng ?? event?.longitude ?? event?.lng;
+
+  if (lat != null && lng != null && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
+    return { latitude: Number(lat), longitude: Number(lng) };
+  }
+
+  if (Array.isArray(event?.gps?.coordinates) && event.gps.coordinates.length >= 2) {
+    return {
+      latitude: Number(event.gps.coordinates[1]),
+      longitude: Number(event.gps.coordinates[0]),
+    };
+  }
+
+  if (Array.isArray(event?.coordinates) && event.coordinates.length >= 2) {
+    return {
+      latitude: Number(event.coordinates[1]),
+      longitude: Number(event.coordinates[0]),
+    };
+  }
+
+  return null;
 };
 
 // Component to fit map bounds
 function FitBounds({ positions }) {
   const map = useMap();
-  
+
   useEffect(() => {
     if (positions && positions.length > 0) {
       const bounds = L.latLngBounds(positions);
       map.fitBounds(bounds, { padding: [50, 50] });
     }
   }, [map, positions]);
-  
+
   return null;
 }
 
 // Map component
-function DefectMap({ events, selectedEventId, onMarkerClick }) {
+function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
   const [mapKey, setMapKey] = useState(0);
-  
+
   // Filter events with valid GPS coordinates
   const validEvents = useMemo(() => {
-    return events.filter(event => 
-      event.gps && 
-      event.gps.latitude !== null && 
-      event.gps.longitude !== null &&
-      !isNaN(event.gps.latitude) &&
-      !isNaN(event.gps.longitude)
-    );
+    return events.filter(event => getEventCoordinates(event));
   }, [events]);
 
   // Group events by defect type for legend
@@ -124,22 +146,34 @@ function DefectMap({ events, selectedEventId, onMarkerClick }) {
     return types;
   }, [validEvents]);
 
-  // Calculate center based on events or use default
+  // Collect all positions: defect GPS + route start/end
+  const allPositions = useMemo(() => {
+    const positions = validEvents.map(event => {
+      const coords = getEventCoordinates(event);
+      return coords ? [coords.latitude, coords.longitude] : null;
+    }).filter(Boolean);
+
+    if (route?.start?.latitude && route?.start?.longitude) {
+      positions.push([route.start.latitude, route.start.longitude]);
+    }
+    if (route?.end?.latitude && route?.end?.longitude) {
+      positions.push([route.end.latitude, route.end.longitude]);
+    }
+
+    return positions;
+  }, [validEvents, route]);
+
+  // Calculate center based on all available positions or use default
   const center = useMemo(() => {
-    if (validEvents.length > 0) {
-      const lat = validEvents.reduce((sum, e) => sum + e.gps.latitude, 0) / validEvents.length;
-      const lng = validEvents.reduce((sum, e) => sum + e.gps.longitude, 0) / validEvents.length;
+    if (allPositions.length > 0) {
+      const lat = allPositions.reduce((sum, p) => sum + p[0], 0) / allPositions.length;
+      const lng = allPositions.reduce((sum, p) => sum + p[1], 0) / allPositions.length;
       return [lat, lng];
     }
     return [16.123456, 96.123456];
-  }, [validEvents]);
+  }, [allPositions]);
 
-  // Get positions for bounds
-  const positions = useMemo(() => {
-    return validEvents.map(e => [e.gps.latitude, e.gps.longitude]);
-  }, [validEvents]);
-
-  if (validEvents.length === 0) {
+  if (allPositions.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full bg-gray-50 rounded-lg">
         <MapPin className="w-12 h-12 text-gray-400 mb-2" />
@@ -162,18 +196,65 @@ function DefectMap({ events, selectedEventId, onMarkerClick }) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        
+
+        {/* Route start/end polyline */}
+        {route?.start?.latitude && route?.end?.latitude && (
+          <Polyline
+            positions={[
+              [route.start.latitude, route.start.longitude],
+              [route.end.latitude, route.end.longitude],
+            ]}
+            pathOptions={{ color: '#3B82F6', weight: 3, dashArray: '5,5' }}
+          />
+        )}
+
+        {/* Route start marker */}
+        {route?.start?.latitude && route?.start?.longitude && (
+          <CircleMarker
+            center={[route.start.latitude, route.start.longitude]}
+            radius={6}
+            pathOptions={{ color: '#10B981', fillColor: '#10B981', fillOpacity: 0.9 }}
+          >
+            <Popup>
+              <div className="text-sm">
+                <strong>Route Start</strong><br />
+                {route.start.latitude.toFixed(6)}, {route.start.longitude.toFixed(6)}
+              </div>
+            </Popup>
+          </CircleMarker>
+        )}
+
+        {/* Route end marker */}
+        {route?.end?.latitude && route?.end?.longitude && (
+          <CircleMarker
+            center={[route.end.latitude, route.end.longitude]}
+            radius={6}
+            pathOptions={{ color: '#EF4444', fillColor: '#EF4444', fillOpacity: 0.9 }}
+          >
+            <Popup>
+              <div className="text-sm">
+                <strong>Route End</strong><br />
+                {route.end.latitude.toFixed(6)}, {route.end.longitude.toFixed(6)}
+              </div>
+            </Popup>
+          </CircleMarker>
+        )}
+
         {validEvents.map((event) => {
-          const isSelected = event.id === selectedEventId;
-          const position = [event.gps.latitude, event.gps.longitude];
-          
+          const coords = getEventCoordinates(event);
+          if (!coords) return null;
+
+          const eventId = event.id ?? event._id;
+          const isSelected = eventId === selectedEventId;
+          const position = [coords.latitude, coords.longitude];
+
           return (
             <Marker
-              key={event.id}
+              key={eventId || `${position[0]}-${position[1]}`}
               position={position}
               icon={createDefectIcon(event.defect_type, isSelected)}
               eventHandlers={{
-                click: () => onMarkerClick(event.id),
+                click: () => onMarkerClick(eventId),
               }}
             >
               <Popup>
@@ -189,16 +270,16 @@ function DefectMap({ events, selectedEventId, onMarkerClick }) {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Time:</span>
-                      <span className="font-medium">{event.start_timestamp.toFixed(1)}s</span>
+                      <span className="font-medium">{Number(event.start_timestamp || 0).toFixed(1)}s</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Detections:</span>
-                      <span className="font-medium">{event.detection_count}</span>
+                      <span className="font-medium">{event.detection_count ?? 0}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Location:</span>
                       <span className="font-medium text-xs">
-                        {event.gps.latitude.toFixed(6)}, {event.gps.longitude.toFixed(6)}
+                        {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
                       </span>
                     </div>
                   </div>
@@ -207,8 +288,8 @@ function DefectMap({ events, selectedEventId, onMarkerClick }) {
             </Marker>
           );
         })}
-        
-        <FitBounds positions={positions} />
+
+        <FitBounds positions={allPositions} />
       </MapContainer>
 
       {/* Legend */}
@@ -216,7 +297,7 @@ function DefectMap({ events, selectedEventId, onMarkerClick }) {
         <div className="text-xs font-medium text-gray-700 mb-2">Defect Types</div>
         {Object.entries(defectTypes).map(([type, count]) => (
           <div key={type} className="flex items-center gap-2 text-xs py-0.5">
-            <div 
+            <div
               className="w-3 h-3 rounded-full border border-white shadow-sm"
               style={{ backgroundColor: DEFECT_COLORS[type] || '#EF4444' }}
             />
@@ -224,6 +305,11 @@ function DefectMap({ events, selectedEventId, onMarkerClick }) {
             <span className="text-gray-400 ml-1">({count})</span>
           </div>
         ))}
+        {route?.distance_m != null && (
+          <div className="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-500">
+            Route: {route.distance_m.toFixed(2)} m
+          </div>
+        )}
       </div>
 
       {/* Stats overlay */}
@@ -305,6 +391,7 @@ const InspectionDashboard = () => {
   };
 
   const handleMarkerClick = (eventId) => {
+    if (!eventId) return;
     setSelectedEventId(eventId);
     // Scroll to the event in the table
     const element = document.getElementById(`event-${eventId}`);
@@ -318,13 +405,66 @@ const InspectionDashboard = () => {
   };
 
   const formatDuration = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
+    const totalSeconds = Number(seconds) || 0;
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = Math.floor(totalSeconds % 60);
     return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   };
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleString();
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
+  };
+
+  // Helpers to handle old and new MongoDB field names
+  const getInspectionName = (inspection) => {
+    return inspection?.video_name
+      || inspection?.gpx_name
+      || inspection?.inspection?.gpx_name
+      || inspection?.inspection?.video_name
+      || inspection?.name
+      || 'N/A';
+  };
+
+  const getInspectionDuration = (inspection) => {
+    return inspection?.duration_seconds
+      ?? inspection?.route?.duration_seconds
+      ?? inspection?.inspection?.duration_seconds
+      ?? inspection?.inspection?.route?.duration_seconds
+      ?? 0;
+  };
+
+  const getInspectionDistance = (inspection) => {
+    return inspection?.route?.distance_m
+      ?? inspection?.inspection?.route?.distance_m
+      ?? null;
+  };
+
+  const getInspectionPointCount = (inspection) => {
+    return inspection?.route?.point_count
+      ?? inspection?.inspection?.route?.point_count
+      ?? null;
+  };
+
+  const getInspectionDefectCount = (inspection) => {
+    const numeric = inspection?.inspection_events
+      ?? inspection?.inspection?.inspection_events
+      ?? inspection?.defect_count
+      ?? inspection?.inspection?.defect_count;
+
+    if (typeof numeric === 'number') return numeric;
+    if (Array.isArray(inspection?.events)) return inspection.events.length;
+    if (Array.isArray(inspection?.inspection?.events)) return inspection.inspection.events.length;
+    return 0;
+  };
+
+  const getInspectionCreatedAt = (inspection) => {
+    return inspection?.created_at || inspection?.inspection?.created_at || null;
+  };
+
+  const getRoute = (inspection) => {
+    return inspection?.route || inspection?.inspection?.route || null;
   };
 
   // Prepare chart data
@@ -335,9 +475,9 @@ const InspectionDashboard = () => {
   }));
 
   const timelineData = inspections.map(insp => ({
-    date: new Date(insp.created_at).toLocaleDateString(),
-    defects: insp.inspection_events,
-    video: insp.video_name?.substring(0, 20) || 'Unknown',
+    date: formatDate(getInspectionCreatedAt(insp)),
+    defects: getInspectionDefectCount(insp),
+    video: getInspectionName(insp),
   })).reverse();
 
   if (loading) {
@@ -386,7 +526,7 @@ const InspectionDashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500">Total Defects</p>
-              <p className="text-2xl font-bold text-red-600">{overviewStats?.total_defects || 0}</p>
+              <p className="text-2xl font-bold text-red-600">{overviewStats?.total_defects ?? overviewStats?.total_events ?? 0}</p>
             </div>
             <AlertTriangle className="w-10 h-10 text-red-500 opacity-70" />
           </div>
@@ -396,12 +536,10 @@ const InspectionDashboard = () => {
             <div>
               <p className="text-sm text-gray-500">Latest Inspection</p>
               <p className="text-sm font-medium text-gray-900 truncate max-w-[150px]">
-                {overviewStats?.latest_inspection?.video_name || 'N/A'}
+                {getInspectionName(overviewStats?.latest_inspection)}
               </p>
               <p className="text-xs text-gray-400">
-                {overviewStats?.latest_inspection?.created_at 
-                  ? formatDate(overviewStats.latest_inspection.created_at)
-                  : 'No data'}
+                {formatDate(getInspectionCreatedAt(overviewStats?.latest_inspection))}
               </p>
             </div>
             <Clock className="w-10 h-10 text-gray-400 opacity-70" />
@@ -447,7 +585,7 @@ const InspectionDashboard = () => {
 
       {/* Tab Content */}
       <div className="mt-6">
-        {/* Overview Tab - Same as before */}
+        {/* Overview Tab */}
         {activeTab === 'overview' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Defect Distribution */}
@@ -538,7 +676,7 @@ const InspectionDashboard = () => {
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search by video name or defect type..."
+                  placeholder="Search by GPX name or defect type..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
@@ -559,10 +697,10 @@ const InspectionDashboard = () => {
                 <table className="w-full">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-500">Video Name</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-500">GPX Name</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Duration</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">FPS</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Frames</th>
+                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Distance</th>
+                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Points</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Defects</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Created</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Action</th>
@@ -576,40 +714,46 @@ const InspectionDashboard = () => {
                         </td>
                       </tr>
                     ) : (
-                      inspections.map((inspection) => (
-                        <tr key={inspection.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4 text-sm text-gray-900">{inspection.video_name}</td>
-                          <td className="py-3 px-4 text-sm text-gray-900 text-center">
-                            {formatDuration(inspection.duration_seconds)}
-                          </td>
-                          <td className="py-3 px-4 text-sm text-gray-900 text-center">
-                            {inspection.processed_fps} / {inspection.original_fps}
-                          </td>
-                          <td className="py-3 px-4 text-sm text-gray-900 text-center">
-                            {inspection.processed_frames} / {inspection.total_frames}
-                          </td>
-                          <td className="py-3 px-4 text-center">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              inspection.inspection_events > 0
-                                ? 'bg-red-100 text-red-800'
-                                : 'bg-green-100 text-green-800'
-                            }`}>
-                              {inspection.inspection_events}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-sm text-gray-500 text-center">
-                            {formatDate(inspection.created_at)}
-                          </td>
-                          <td className="py-3 px-4 text-center">
-                            <button
-                              onClick={() => handleViewDetail(inspection.id)}
-                              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                            >
-                              View Details
-                            </button>
-                          </td>
-                        </tr>
-                      ))
+                      inspections.map((inspection) => {
+                        const inspectionId = inspection.id ?? inspection._id ?? inspection.inspection?.id ?? inspection.inspection?._id;
+                        const distance = getInspectionDistance(inspection);
+                        const pointCount = getInspectionPointCount(inspection);
+
+                        return (
+                          <tr key={inspectionId} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-3 px-4 text-sm text-gray-900">{getInspectionName(inspection)}</td>
+                            <td className="py-3 px-4 text-sm text-gray-900 text-center">
+                              {formatDuration(getInspectionDuration(inspection))}
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-900 text-center">
+                              {distance != null ? `${distance.toFixed(2)} m` : 'N/A'}
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-900 text-center">
+                              {pointCount ?? 'N/A'}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                getInspectionDefectCount(inspection) > 0
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-green-100 text-green-800'
+                              }`}>
+                                {getInspectionDefectCount(inspection)}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-500 text-center">
+                              {formatDate(getInspectionCreatedAt(inspection))}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <button
+                                onClick={() => handleViewDetail(inspectionId)}
+                                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                              >
+                                View Details
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -667,109 +811,158 @@ const InspectionDashboard = () => {
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
                   </div>
                 ) : detailData ? (
-                  <div className="space-y-6">
-                    {/* Summary */}
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                      <div>
-                        <p className="text-sm text-gray-500">Video</p>
-                        <p className="font-medium text-sm truncate">{detailData.inspection.video_name}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Duration</p>
-                        <p className="font-medium">{formatDuration(detailData.inspection.duration_seconds)}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Total Defects</p>
-                        <p className="font-medium text-red-600">{detailData.inspection.inspection_events}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Defects with GPS</p>
-                        <p className="font-medium">
-                          {detailData.events.filter(e => e.gps?.latitude && e.gps?.longitude).length}
-                        </p>
-                      </div>
-                    </div>
+                  (() => {
+                    const inspection = detailData?.inspection || detailData || {};
+                    const events = detailData?.events || inspection?.events || [];
+                    const route = getRoute(inspection);
+                    const inspectionId = inspection.id ?? inspection._id ?? detailData?.inspection?.id ?? detailData?.inspection?._id;
 
-                    {/* Map and Events Section */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      {/* Map */}
-                      <div className="lg:col-span-2 bg-gray-50 rounded-lg overflow-hidden" style={{ height: '450px' }}>
-                        <DefectMap
-                          events={detailData.events}
-                          selectedEventId={selectedEventId}
-                          onMarkerClick={handleMarkerClick}
-                        />
-                      </div>
-
-                      {/* Event List */}
-                      <div className="bg-gray-50 rounded-lg p-4 overflow-y-auto" style={{ maxHeight: '450px' }}>
-                        <div className="flex items-center justify-between mb-3">
-                          <h4 className="font-semibold text-gray-900">Detected Events</h4>
-                          <span className="text-xs text-gray-500">{detailData.events.length} total</span>
+                    return (
+                      <div className="space-y-6">
+                        {/* Summary */}
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                          <div>
+                            <p className="text-sm text-gray-500">GPX File</p>
+                            <p className="font-medium text-sm truncate">{getInspectionName(inspection)}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Duration</p>
+                            <p className="font-medium">{formatDuration(getInspectionDuration(inspection))}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Total Defects</p>
+                            <p className="font-medium text-red-600">{getInspectionDefectCount(inspection)}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Defects with GPS</p>
+                            <p className="font-medium">
+                              {events.filter(e => getEventCoordinates(e)).length}
+                            </p>
+                          </div>
                         </div>
-                        <div className="space-y-2">
-                          {detailData.events.length === 0 ? (
-                            <div className="text-center py-4 text-gray-500 text-sm">
-                              No events detected
+
+                        {/* Route Information */}
+                        {route && (
+                          <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                              <MapPin className="w-4 h-4 text-blue-600" />
+                              <h4 className="font-semibold text-gray-900 text-sm">Route Information</h4>
                             </div>
-                          ) : (
-                            detailData.events.map((event) => {
-                              const hasGps = event.gps?.latitude && event.gps?.longitude;
-                              return (
-                                <div
-                                  key={event.id}
-                                  id={`event-${event.id}`}
-                                  className={`bg-white rounded-lg p-3 shadow-sm border-l-4 transition-all cursor-pointer hover:shadow-md ${
-                                    selectedEventId === event.id ? 'border-l-4 border-blue-500 bg-blue-50' : 'border-l-4 border-transparent'
-                                  } ${hasGps ? 'hover:bg-blue-50' : 'opacity-70'}`}
-                                  onClick={() => {
-                                    if (hasGps) {
-                                      handleMarkerClick(event.id);
-                                    }
-                                  }}
-                                >
-                                  <div className="flex items-start justify-between">
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-lg">{DEFECT_ICONS[event.defect_type] || '🔴'}</span>
-                                        <span className="font-medium text-sm truncate">{event.defect_type}</span>
-                                        {!hasGps && (
-                                          <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                                            No GPS
-                                          </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-sm">
+                              <div>
+                                <p className="text-gray-500">Distance</p>
+                                <p className="font-medium">{route.distance_m != null ? `${route.distance_m.toFixed(2)} m` : 'N/A'}</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-500">Points</p>
+                                <p className="font-medium">{route.point_count ?? 'N/A'}</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-500">Start</p>
+                                <p className="font-medium text-xs">
+                                  {route.start?.latitude?.toFixed(6)}, {route.start?.longitude?.toFixed(6)}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-500">End</p>
+                                <p className="font-medium text-xs">
+                                  {route.end?.latitude?.toFixed(6)}, {route.end?.longitude?.toFixed(6)}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Map and Events Section */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                          {/* Map */}
+                          <div className="lg:col-span-2 bg-gray-50 rounded-lg overflow-hidden" style={{ height: '450px' }}>
+                            <DefectMap
+                              events={events}
+                              selectedEventId={selectedEventId}
+                              onMarkerClick={handleMarkerClick}
+                              route={route}
+                            />
+                          </div>
+
+                          {/* Event List */}
+                          <div className="bg-gray-50 rounded-lg p-4 overflow-y-auto" style={{ maxHeight: '450px' }}>
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="font-semibold text-gray-900">Detected Events</h4>
+                              <span className="text-xs text-gray-500">{events.length} total</span>
+                            </div>
+                            <div className="space-y-2">
+                              {events.length === 0 ? (
+                                <div className="text-center py-4 text-gray-500 text-sm">
+                                  No events detected
+                                </div>
+                              ) : (
+                                events.map((event) => {
+                                  const eventId = event.id ?? event._id;
+                                  const coords = getEventCoordinates(event);
+                                  const hasGps = Boolean(coords);
+
+                                  return (
+                                    <div
+                                      key={eventId}
+                                      id={`event-${eventId}`}
+                                      className={`bg-white rounded-lg p-3 shadow-sm border-l-4 transition-all cursor-pointer hover:shadow-md ${
+                                        selectedEventId === eventId
+                                          ? 'border-l-4 border-blue-500 bg-blue-50'
+                                          : 'border-l-4 border-transparent'
+                                      } ${hasGps ? 'hover:bg-blue-50' : 'opacity-70'}`}
+                                      onClick={() => {
+                                        if (hasGps) {
+                                          handleMarkerClick(eventId);
+                                        }
+                                      }}
+                                    >
+                                      <div className="flex items-start justify-between">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-lg">{DEFECT_ICONS[event.defect_type] || '🔴'}</span>
+                                            <span className="font-medium text-sm truncate">{event.defect_type}</span>
+                                            {!hasGps && (
+                                              <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                                                No GPS
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                            <span>Conf: {((event.confidence ?? 0) * 100).toFixed(1)}%</span>
+                                            <span>•</span>
+                                            <span>{Number(event.start_timestamp || 0).toFixed(1)}s</span>
+                                            <span>•</span>
+                                            <span>{event.detection_count ?? 0} detections</span>
+                                          </div>
+                                          {coords && (
+                                            <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
+                                              <MapPin className="w-3 h-3" />
+                                              <span>
+                                                {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                        {hasGps && (
+                                          <div className="flex-shrink-0 ml-2">
+                                            <div
+                                              className="w-3 h-3 rounded-full"
+                                              style={{ backgroundColor: DEFECT_COLORS[event.defect_type] || '#EF4444' }}
+                                            />
+                                          </div>
                                         )}
                                       </div>
-                                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                                        <span>Conf: {(event.confidence * 100).toFixed(1)}%</span>
-                                        <span>•</span>
-                                        <span>{event.start_timestamp.toFixed(1)}s</span>
-                                        <span>•</span>
-                                        <span>{event.detection_count} detections</span>
-                                      </div>
-                                      {hasGps && (
-                                        <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
-                                          <MapPin className="w-3 h-3" />
-                                          <span>{event.gps.latitude.toFixed(6)}, {event.gps.longitude.toFixed(6)}</span>
-                                        </div>
-                                      )}
                                     </div>
-                                    {hasGps && (
-                                      <div className="flex-shrink-0 ml-2">
-                                        <div 
-                                          className="w-3 h-3 rounded-full"
-                                          style={{ backgroundColor: DEFECT_COLORS[event.defect_type] || '#EF4444' }}
-                                        />
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })
-                          )}
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
+                    );
+                  })()
                 ) : (
                   <div className="text-center py-8 text-red-600">Failed to load inspection details</div>
                 )}

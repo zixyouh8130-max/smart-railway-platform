@@ -1,10 +1,10 @@
 // layouts/TrainRiderLayout.jsx
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { 
-  Train, MapPin, Clock, Users, Settings, LogOut, 
+import {
+  Train, MapPin, Clock, Users, Settings, LogOut,
   Menu, Wifi, WifiOff, Battery, Bell, ChevronRight,
-  Radio
+  Radio, User, UserCircle
 } from 'lucide-react';
 import Button from '@/components/ui/button';
 import Card from '@/components/ui/card';
@@ -43,7 +43,6 @@ const TrainRiderLayout = () => {
     const storedStaff = localStorage.getItem('staffInfo');
 
     if (!token || !storedUser || !storedStaff) {
-      // No staff credentials, redirect to staff login
       navigate('/train-rider/login');
       return;
     }
@@ -52,7 +51,6 @@ const TrainRiderLayout = () => {
       const parsedUser = JSON.parse(storedUser);
       const parsedStaff = JSON.parse(storedStaff);
 
-      // Check if user has staff profile
       if (!parsedUser.staff && !parsedStaff) {
         localStorage.clear();
         navigate('/train-rider/login');
@@ -107,10 +105,10 @@ const TrainRiderLayout = () => {
   };
 
   const navigationItems = [
-    { name: 'Live Tracking', path: '/train-rider', icon: Radio, description: 'Real-time GPS tracking' },
-    { name: 'Route Map', path: '/train-rider/route', icon: MapPin, description: 'View route and stations' },
+    { name: 'Home', path: '/train-rider', icon: Radio, description: 'Real-time GPS tracking' },
     { name: 'Schedule', path: '/train-rider/schedule', icon: Clock, description: 'Train schedule & timing' },
-    { name: 'Settings', path: '/train-rider/settings', icon: Settings, description: 'App settings' },
+    // { name: 'Live Tracking ', path: '/train-rider/settings', icon: Settings, description: 'App settings' },
+    // { name: 'Route Map', path: '/train-rider/route', icon: MapPin, description: 'View route and stations' },
   ];
 
   const getStaffRoleBadge = (role) => {
@@ -134,7 +132,7 @@ const TrainRiderLayout = () => {
   };
 
   if (!isAuthenticated) {
-    return null; // Will redirect to login
+    return null;
   }
 
   return (
@@ -142,22 +140,20 @@ const TrainRiderLayout = () => {
       {/* Top Navigation Bar */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-lg border-b border-gray-200 shadow-sm">
         <div className="flex items-center justify-between px-4 h-16">
-          {/* Left: Menu & Logo */}
           <div className="flex items-center gap-3">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               size="sm"
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
               icon={<Menu className="w-5 h-5" />}
             />
-            
+
             <div className="flex items-center gap-2">
               <Train className="w-6 h-6 text-railway-red-500" />
               <span className="font-bold text-gray-800 hidden sm:block">Train Rider</span>
             </div>
           </div>
 
-          {/* Center: Current Assignment Info */}
           {currentAssignment && (
             <div className="hidden md:flex items-center gap-4">
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold border border-gray-200 bg-white">
@@ -170,10 +166,9 @@ const TrainRiderLayout = () => {
             </div>
           )}
 
-          {/* Right: Status & Profile */}
           <div className="flex items-center gap-2">
             <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-              connectionStatus === 'connected' 
+              connectionStatus === 'connected'
                 ? 'bg-green-50 text-green-700 border border-green-200'
                 : 'bg-red-50 text-red-700 border border-red-200'
             }`}>
@@ -187,8 +182,8 @@ const TrainRiderLayout = () => {
               </span>
             )}
 
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               size="sm"
               onClick={handleLogout}
               icon={<LogOut className="w-5 h-5 text-red-500" />}
@@ -196,7 +191,6 @@ const TrainRiderLayout = () => {
           </div>
         </div>
 
-        {/* Mobile Assignment Info */}
         {currentAssignment && (
           <div className="md:hidden px-4 py-2 bg-blue-50 border-t border-gray-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -210,32 +204,29 @@ const TrainRiderLayout = () => {
         )}
       </header>
 
-      {/* Sidebar */}
+      {/* Sidebar - FIXED: User info moved to bottom */}
       {isSidebarOpen && (
         <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}>
-          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* Header Section - Simplified, no user info here */}
             <div className="p-6 bg-gradient-to-br from-railway-red-500 to-railway-orange-500 text-white">
-              <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
                   <Train className="w-7 h-7" />
                 </div>
                 <div>
                   <h2 className="font-bold text-lg">Train Rider</h2>
-                  <p className="text-sm opacity-80">{getStaffRoleLabel(staffInfo?.role)}</p>
+                  <p className="text-sm opacity-80">Staff Portal</p>
                 </div>
               </div>
-              {staffInfo && (
-                <div className="bg-white/10 rounded-lg p-3">
-                  <p className="text-sm">ID: {staffInfo.staff_id}</p>
-                </div>
-              )}
             </div>
-            
-            <nav className="p-4 space-y-2">
+
+            {/* Navigation Items - Fixed position, stays at top */}
+            <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
               {navigationItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
-                
+
                 return (
                   <button
                     key={item.path}
@@ -259,6 +250,37 @@ const TrainRiderLayout = () => {
                 );
               })}
             </nav>
+
+            {/* User Info Section - Moved to bottom */}
+            {staffInfo && (
+              <div className="border-t border-gray-200 p-4 bg-gray-50">
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-white shadow-sm border border-gray-200">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-railway-red-500 to-railway-orange-500 flex items-center justify-center text-white font-bold text-sm">
+                    {staffInfo.staff_id ? staffInfo.staff_id.substring(0, 2).toUpperCase() : 'ST'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">
+                      {staffInfo.staff_name || staffInfo.staff_id}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getStaffRoleBadge(staffInfo?.role)}`}>
+                        {getStaffRoleLabel(staffInfo?.role)}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        ID: {staffInfo.staff_id}
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleLogout}
+                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                    icon={<LogOut className="w-4 h-4" />}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -280,7 +302,7 @@ const TrainRiderLayout = () => {
           {navigationItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
-            
+
             return (
               <button
                 key={item.path}

@@ -1,10 +1,10 @@
-// layouts/AdminLayout.jsx - Updated with Inspection menu item
+// layouts/AdminLayout.jsx - Updated with Train Monitoring menu item
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Train, LayoutDashboard, Calendar, Route, Users, Settings,
   LogOut, Menu, X, ChevronDown, Bell, User, Shield, MapPin,
-  Search, AlertTriangle // Add these icons for inspection
+  Search, AlertTriangle, Radio  // Add Radio icon for live tracking
 } from 'lucide-react';
 import { adminAuthService } from '@/services/adminAuthService';
 
@@ -62,7 +62,14 @@ const AdminLayout = ({ children }) => {
       path: '/admin/users',
       myanmarLabel: 'အသုံးပြုသူများ'
     },
-    // Add Inspection menu item
+    // 🆕 Train Monitoring menu item
+    {
+      icon: <Radio className="w-5 h-5" />,
+      label: 'Live Tracking',
+      path: '/admin/train-monitoring',
+      myanmarLabel: 'ရထားတည်နေရာ'
+    },
+    // Track Inspection menu item
     {
       icon: <AlertTriangle className="w-5 h-5" />,
       label: 'Track Inspection',
@@ -108,7 +115,7 @@ const AdminLayout = ({ children }) => {
         </div>
 
         {/* Navigation */}
-        <nav className="mt-4 px-2 space-y-1">
+        <nav className="mt-4 px-2 space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 180px)' }}>
           {menuItems.map((item) => (
             <Link
               key={item.path}
@@ -121,17 +128,28 @@ const AdminLayout = ({ children }) => {
               className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
                 location.pathname === item.path
                   ? 'bg-blue-600 text-white'
-                  : 'text-gray-300 hover:bg-slate-800 hover:text-white'
+                  : location.pathname.startsWith(item.path)
+                    ? 'bg-slate-800 text-white'
+                    : 'text-gray-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              {item.icon}
-              <span>{item.myanmarLabel}</span>
+              <span className="flex-shrink-0">{item.icon}</span>
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm truncate">{item.label}</span>
+                <span className="text-xs opacity-70 truncate">{item.myanmarLabel}</span>
+              </div>
+              {/* Active indicator for Live Tracking */}
+              {item.path === '/admin/train-monitoring' && (
+                <span className="ml-auto w-2 h-2 bg-green-500 rounded-full animate-pulse"
+                  title="Live tracking active"
+                />
+              )}
             </Link>
           ))}
         </nav>
 
         {/* User Info & Logout */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-700">
+        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-700 bg-slate-900">
           <div className="flex items-center space-x-3 px-4 py-3 mb-2">
             <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
               <User className="w-4 h-4 text-white" />
@@ -181,6 +199,16 @@ const AdminLayout = ({ children }) => {
             </div>
 
             <div className="flex items-center space-x-4">
+              {/* Quick link to Train Monitoring */}
+              <Link
+                to="/admin/train-monitoring"
+                className="relative text-gray-600 hover:text-blue-600 p-2 rounded-lg hover:bg-blue-50 transition-colors"
+                title="Live Train Tracking"
+              >
+                <Radio className="w-5 h-5" />
+                <span className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              </Link>
+
               <button className="relative text-gray-600 hover:text-gray-900 p-2 rounded-lg hover:bg-gray-100">
                 <Bell className="w-5 h-5" />
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />

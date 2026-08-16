@@ -3,9 +3,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
-from datetime import datetime, timezone, date, time
+from datetime import datetime, timezone, date, time, timedelta
 from pydantic import BaseModel
 from ..core.database import get_db
+from ..models import RouteStation, TrainStop, StationArrivalLog
 from ..models.train_rider_device import TrainRiderDevice
 from ..models.staff import Staff, StaffRole, StaffStatus
 from ..models.train_staff_assignment import TrainStaffAssignment, AssignmentStatus
@@ -379,14 +380,13 @@ async def update_assignment_status(
         "status": request.status
     }
 
-
 @router.post("/assignments/{assignment_id}/start-journey")
 async def start_journey(
         assignment_id: UUID,
-        device_id: Optional[str] = None,
+        request: StartJourneyRequest,
         db: Session = Depends(get_db)
 ):
-    """Start a journey - activate assignment and link device"""
+    """Start a journey - activate assignment, link device, and auto-depart first station"""
     assignment = db.query(TrainStaffAssignment).filter(
         TrainStaffAssignment.id == assignment_id
     ).first()
@@ -394,9 +394,11 @@ async def start_journey(
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
 
+    current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+
     # Update assignment status
     assignment.status = AssignmentStatus.ACTIVE
-    assignment.start_time = datetime.now(timezone.utc)
+    assignment.start_time = current_time
 
     # Update staff status
     staff = db.query(Staff).filter(Staff.id == assignment.staff_id).first()
@@ -404,7 +406,9 @@ async def start_journey(
         staff.status = StaffStatus.ON_DUTY
         staff.is_available = False
 
-    # Link device to train if provided
+    # Link device to train
+    device = None
+    device_id = request.device_id
     if device_id:
         device = db.query(TrainRiderDevice).filter(
             TrainRiderDevice.device_id == device_id
@@ -421,24 +425,207 @@ async def start_journey(
                 status="ACTIVE"
             )
             db.add(device)
+            db.flush()
         else:
             device.train_id = assignment.train_id
             device.schedule_id = assignment.schedule_id
             device.staff_id = staff.id if staff else None
             device.status = "ACTIVE"
 
-    # Also update schedule status
+    # Update schedule status
     if assignment.schedule_id:
         schedule = db.query(Schedule).filter(
             Schedule.id == assignment.schedule_id
         ).first()
         if schedule:
             schedule.status = "ACTIVE"
+            schedule.actual_departure_time = current_time
+
+    if device and assignment.train_id:
+        # Find the first route station
+        train = db.query(Train).filter(Train.id == assignment.train_id).first()
+        if train and train.route_id:
+            first_route_station = db.query(RouteStation).filter(
+                RouteStation.route_id == train.route_id
+            ).order_by(RouteStation.order_number).first()
+
+            if first_route_station:
+                # Get or create train_stop for first station
+                train_stop = db.query(TrainStop).filter(
+                    TrainStop.train_id == assignment.train_id,
+                    TrainStop.route_station_id == first_route_station.id
+                ).first()
+
+                if not train_stop:
+                    train_stop = TrainStop(
+                        train_id=assignment.train_id,
+                        route_station_id=first_route_station.id,
+                        status="SCHEDULED"
+                    )
+                    db.add(train_stop)
+                    db.flush()
+
+                # Set departure time (same as journey start time)
+                departure_time = current_time.replace(tzinfo=None) if current_time.tzinfo else current_time
+
+                # Create arrival log for first station (arrived and departed at same time)
+                arrival_log = StationArrivalLog(
+                    device_id=device.id,
+                    train_id=assignment.train_id,
+                    schedule_id=assignment.schedule_id,
+                    route_station_id=first_route_station.id,
+                    train_stop_id=train_stop.id,
+                    schedule_date=current_time.date(),
+                    arrival_time=departure_time,
+                    departure_time=departure_time,  # Same as arrival
+                    arrival_latitude=device.current_latitude,
+                    arrival_longitude=device.current_longitude,
+                    status="DEPARTED",  # Already departed
+                    stop_duration_seconds=0,
+                    stop_duration_minutes=0
+                )
+                db.add(arrival_log)
+
+                # Update train stop
+                train_stop.status = "DEPARTED"
+                train_stop.actual_arrival_time = departure_time.time()
+                train_stop.actual_departure_time = departure_time.time()
+
+                # Set next station
+                next_station = db.query(RouteStation).filter(
+                    RouteStation.route_id == train.route_id,
+                    RouteStation.order_number > first_route_station.order_number
+                ).order_by(RouteStation.order_number).first()
+
+                if next_station:
+                    arrival_log.next_route_station_id = next_station.id
+                    arrival_log.next_station_name = next_station.station_name
+                    device.current_route_station_id = None  # In transit to next
+                    device.next_route_station_id = next_station.id
+
+                print(f"✅ Auto-departed first station: {first_route_station.station_name}")
 
     db.commit()
 
     return {
         "message": "Journey started successfully",
         "assignment_id": str(assignment.id),
-        "status": "ACTIVE"
+        "status": "ACTIVE",
+        "device_linked": device_id is not None,
+        "first_station_departed": True
+    }
+
+
+@router.get("/{staff_id}/weekly-schedules")
+async def get_staff_weekly_schedules(
+        staff_id: str,
+        db: Session = Depends(get_db)
+):
+    """Get all schedules for a staff member for the current week"""
+
+    # Find staff
+    staff = db.query(Staff).filter(Staff.staff_id == staff_id).first()
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    # Calculate week range (Sunday to Saturday)
+    today = date.today()
+    if today.weekday() == 6:  # Sunday
+        start_of_week = today
+    else:
+        start_of_week = today - timedelta(days=today.weekday() + 1)
+
+    end_of_week = start_of_week + timedelta(days=6)
+
+    print(f"📅 Week range: {start_of_week} to {end_of_week}")
+
+    # Get staff assignments for this week
+    assignments = db.query(TrainStaffAssignment).filter(
+        TrainStaffAssignment.staff_id == staff.id,
+        TrainStaffAssignment.assignment_date >= start_of_week,
+        TrainStaffAssignment.assignment_date <= end_of_week
+    ).all()
+
+    # Get schedule IDs from assignments
+    schedule_ids = [a.schedule_id for a in assignments if a.schedule_id]
+
+    # Get schedules with train info
+    schedules = []
+    if schedule_ids:
+        schedules = db.query(Schedule).filter(
+            Schedule.id.in_(schedule_ids)
+        ).order_by(Schedule.departure_date.desc()).all()
+
+    # Build response with proper train info
+    schedule_list = []
+    for schedule in schedules:
+        # ✅ Fetch train with joinedload to ensure it's loaded
+        train = db.query(Train).filter(Train.id == schedule.train_id).first()
+
+        print(
+            f"🚂 Schedule {schedule.id}: train_id={schedule.train_id}, train={train.train_name if train else 'NOT FOUND'}")
+
+        schedule_list.append({
+            "id": schedule.id,
+            "train_id": schedule.train_id,
+            "train_name": train.train_name if train else "Unknown Train",
+            "train_no": train.train_no if train else "",
+            "route_id": schedule.route_id,
+            "departure_date": schedule.departure_date.isoformat() if schedule.departure_date else None,
+            "departure_time": schedule.departure_time.strftime("%H:%M") if schedule.departure_time else None,
+            "arrival_time": schedule.arrival_time.strftime("%H:%M") if schedule.arrival_time else None,
+            "status": schedule.status,
+            "is_overnight": schedule.is_overnight or False,
+        })
+
+    return {
+        "staff_id": staff_id,
+        "week_start": start_of_week.isoformat(),
+        "week_end": end_of_week.isoformat(),
+        "total": len(schedule_list),
+        "schedules": schedule_list
+    }
+
+@router.get("/{staff_id}/schedule-history")
+async def get_staff_schedule_history(
+        staff_id: str,
+        limit: int = 10,
+        db: Session = Depends(get_db)
+):
+    """Get recent schedule history for a staff member"""
+
+    staff = db.query(Staff).filter(Staff.staff_id == staff_id).first()
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    # Get staff assignments
+    assignments = db.query(TrainStaffAssignment).filter(
+        TrainStaffAssignment.staff_id == staff.id
+    ).order_by(TrainStaffAssignment.assignment_date.desc()).limit(limit).all()
+
+    schedule_ids = [a.schedule_id for a in assignments if a.schedule_id]
+
+    schedules = []
+    if schedule_ids:
+        schedule_records = db.query(Schedule).filter(
+            Schedule.id.in_(schedule_ids)
+        ).order_by(Schedule.departure_date.desc()).all()
+
+        for schedule in schedule_records:
+            train = db.query(Train).filter(Train.id == schedule.train_id).first()
+            schedules.append({
+                "id": schedule.id,
+                "train_id": schedule.train_id,
+                "train_name": train.train_name if train else None,
+                "train_no": train.train_no if train else None,
+                "departure_date": schedule.departure_date.isoformat(),
+                "departure_time": schedule.departure_time.strftime("%H:%M") if schedule.departure_time else None,
+                "arrival_time": schedule.arrival_time.strftime("%H:%M") if schedule.arrival_time else None,
+                "status": schedule.status,
+            })
+
+    return {
+        "staff_id": staff_id,
+        "total": len(schedules),
+        "schedules": schedules
     }

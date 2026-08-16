@@ -9,7 +9,6 @@ import TrainSearchResults from "@/pages/Train/TrainSearchResults";
 import AdminRoutes from "@/routes/AdminRoutes";
 import TrainRiderLayout from '@/layouts/TrainRiderLayout';
 import LiveTrackingPage from '@/pages/TrainRider/LiveTrackingPage';
-import RouteMapPage from '@/pages/TrainRider/RouteMapPage';
 import StaffLoginPage from '@/pages/TrainRider/StaffLoginPage';
 import TrainRiderHome from '@/pages/TrainRider/TrainRiderHome';
 import ScheduleTab from '@/pages/TrainRider/ScheduleTab';
@@ -43,7 +42,6 @@ export default function AppRouter() {
           <Route index element={<TrainRiderHome />} />
           <Route path="tracking" element={<LiveTrackingPage />} />
           <Route path="schedule" element={<ScheduleTab />} />
-          <Route path="route" element={<RouteMapPage />} />
         </Route>
 
         {/* Catch all */}

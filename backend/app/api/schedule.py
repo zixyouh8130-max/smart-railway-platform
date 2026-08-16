@@ -6,7 +6,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta, time as dt_time, timezone, date
 from pydantic import BaseModel, Field
 
-from ..models import TrainStop
+from ..models import TrainStop, TrainRiderDevice
 from ..models.train_staff_assignment import TrainStaffAssignment, AssignmentStatus
 from ..core.database import get_db
 from ..models.schedule import Schedule
@@ -253,6 +253,9 @@ def _enrich_schedule_with_staff(db: Session, schedule: Schedule) -> dict:
         'staff_assignments': staff_data['staff_assignments'],
     }
 
+class ScheduleDepartRequest(BaseModel):
+    device_id: Optional[str] = None
+    staff_id: Optional[str] = None
 
 # ==================== BULK CREATE ====================
 
@@ -563,6 +566,7 @@ async def create_schedule(schedule_data: ScheduleCreate, db: Session = Depends(g
 
 
 # ==================== UPDATE ====================
+# api/schedule.py - In the update_schedule endpoint
 
 @router.put("/{schedule_id}", response_model=ScheduleResponse)
 async def update_schedule(schedule_id: int, schedule_data: ScheduleUpdate, db: Session = Depends(get_db)):
@@ -570,6 +574,25 @@ async def update_schedule(schedule_id: int, schedule_data: ScheduleUpdate, db: S
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # 🆕 Check if schedule is ACTIVE or COMPLETED
+    if schedule.status in ["ACTIVE", "COMPLETED"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot update schedule with status '{schedule.status}'. Only SCHEDULED, DELAYED, or CANCELLED schedules can be updated."
+        )
+
+    # 🆕 Also check if any device is actively tracking this schedule
+    active_device = db.query(TrainRiderDevice).filter(
+        TrainRiderDevice.schedule_id == schedule_id,
+        TrainRiderDevice.status == "ACTIVE"
+    ).first()
+
+    if active_device:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot update schedule while train is actively running. Device '{active_device.device_id}' is currently tracking this schedule."
+        )
 
     try:
         update_data = schedule_data.model_dump(exclude_unset=True)
@@ -581,13 +604,22 @@ async def update_schedule(schedule_id: int, schedule_data: ScheduleUpdate, db: S
         }
         update_data = _clean_schedule_dict(update_data)
 
-        if 'departure_time' in update_data and update_data['departure_time'] and isinstance(update_data['departure_time'], str):
+        # 🔑 Check if train_id is being changed
+        old_train_id = schedule.train_id
+        new_train_id = update_data.get('train_id', old_train_id)
+        train_changed = old_train_id != new_train_id
+
+        # Parse times if needed
+        if 'departure_time' in update_data and update_data['departure_time'] and isinstance(
+                update_data['departure_time'], str):
             h, m = update_data['departure_time'].split(':')
             update_data['departure_time'] = dt_time(int(h), int(m))
-        if 'arrival_time' in update_data and update_data['arrival_time'] and isinstance(update_data['arrival_time'], str):
+        if 'arrival_time' in update_data and update_data['arrival_time'] and isinstance(update_data['arrival_time'],
+                                                                                        str):
             h, m = update_data['arrival_time'].split(':')
             update_data['arrival_time'] = dt_time(int(h), int(m))
 
+        # Update schedule fields
         for key, value in update_data.items():
             if hasattr(schedule, key):
                 setattr(schedule, key, value)
@@ -595,13 +627,36 @@ async def update_schedule(schedule_id: int, schedule_data: ScheduleUpdate, db: S
         if schedule.is_overnight and not schedule.arrival_date:
             schedule.arrival_date = schedule.departure_date + timedelta(days=1)
 
+        # Update TrainRiderDevice if train changed
+        if train_changed:
+            print(f"🔄 Train changed from {old_train_id} to {new_train_id}")
+
+            devices = db.query(TrainRiderDevice).filter(
+                TrainRiderDevice.schedule_id == schedule_id
+            ).all()
+
+            for device in devices:
+                device.train_id = new_train_id
+                print(f"✅ Device {device.device_id} updated: train_id={new_train_id}")
+
+            staff_assignments = db.query(TrainStaffAssignment).filter(
+                TrainStaffAssignment.schedule_id == schedule_id
+            ).all()
+
+            for assignment in staff_assignments:
+                assignment.train_id = new_train_id
+                print(f"✅ Staff assignment {assignment.id} updated: train_id={new_train_id}")
+
+        # Handle staff updates
         has_staff_updates = any(v is not None for v in staff_data.values())
         if has_staff_updates:
             staff_to_validate = {k: v for k, v in staff_data.items() if v is not None and v != []}
             if staff_to_validate:
-                staff_errors = _validate_staff_for_schedule(db, staff_to_validate, schedule.departure_date, schedule_id=schedule_id)
+                staff_errors = _validate_staff_for_schedule(db, staff_to_validate, schedule.departure_date,
+                                                            schedule_id=schedule_id)
                 if staff_errors:
-                    raise HTTPException(status_code=400, detail={"message": "Staff availability conflict", "errors": staff_errors})
+                    raise HTTPException(status_code=400,
+                                        detail={"message": "Staff availability conflict", "errors": staff_errors})
 
             db.query(TrainStaffAssignment).filter(TrainStaffAssignment.schedule_id == schedule_id).delete()
             db.flush()
@@ -624,6 +679,85 @@ async def update_schedule(schedule_id: int, schedule_data: ScheduleUpdate, db: S
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.post("/{schedule_id}/depart")
+async def depart_schedule(
+        schedule_id: int,
+        request: ScheduleDepartRequest = None,
+        db: Session = Depends(get_db)
+):
+    """Set schedule status to DEPARTED and initialize train stops"""
+    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    if schedule.status != "SCHEDULED":
+        raise HTTPException(status_code=400, detail=f"Schedule is already {schedule.status}")
+
+    try:
+        # Update schedule status
+        schedule.status = "ACTIVE"
+        schedule.actual_departure_time = datetime.now(timezone.utc)
+
+        # Initialize all train stops for this journey
+        route_stations = db.query(RouteStation).filter(
+            RouteStation.route_id == schedule.route_id
+        ).all()
+
+        train_stops = db.query(TrainStop).filter(
+            TrainStop.train_id == schedule.train_id
+        ).all()
+
+        # Create train stops if they don't exist
+        existing_route_station_ids = {ts.route_station_id for ts in train_stops}
+
+        for route_station in route_stations:
+            if route_station.id not in existing_route_station_ids:
+                # Calculate expected times based on route station data
+                expected_arrival = None
+                expected_departure = None
+
+                if schedule.departure_time and route_station.time_from_origin_minutes is not None:
+                    base_time = datetime.combine(schedule.departure_date, schedule.departure_time)
+                    arrival_time = base_time + timedelta(minutes=route_station.time_from_origin_minutes)
+                    expected_arrival = arrival_time.time()
+
+                    stop_duration = route_station.stop_duration_minutes or 2
+                    departure_time = arrival_time + timedelta(minutes=stop_duration)
+                    expected_departure = departure_time.time()
+
+                train_stop = TrainStop(
+                    train_id=schedule.train_id,
+                    route_station_id=route_station.id,
+                    expected_arrival_time=expected_arrival,
+                    expected_departure_time=expected_departure,
+                    stop_duration_minutes=route_station.stop_duration_minutes or 2,
+                    is_timed_stop=route_station.is_timed_stop,
+                    status="SCHEDULED"
+                )
+                db.add(train_stop)
+            else:
+                # Reset existing stops to SCHEDULED
+                existing_stop = next(
+                    ts for ts in train_stops
+                    if ts.route_station_id == route_station.id
+                )
+                existing_stop.status = "SCHEDULED"
+                existing_stop.actual_arrival_time = None
+                existing_stop.actual_departure_time = None
+
+        db.commit()
+
+        return {
+            "message": "Schedule departed successfully",
+            "schedule_id": schedule_id,
+            "status": "DEPARTED",
+            "departure_time": schedule.actual_departure_time.isoformat()
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== DELETE ====================
 
@@ -701,7 +835,6 @@ async def get_station_arrival(schedule_id: int, station_order: int, db: Session 
 
 
 # ==================== ROUTE STOPS ====================
-
 @router.get("/{schedule_id}/route-stops")
 async def get_schedule_route_stops(schedule_id: int, db: Session = Depends(get_db)):
     """Get all route stops for a schedule with station coordinates"""
@@ -713,14 +846,22 @@ async def get_schedule_route_stops(schedule_id: int, db: Session = Depends(get_d
     if not train or not train.route_id:
         raise HTTPException(status_code=404, detail="Train or route not found")
 
-    route_stations = db.query(RouteStation).filter(RouteStation.route_id == train.route_id).order_by(RouteStation.order_number).all()
-    train_stops = db.query(TrainStop).filter(TrainStop.train_id == train.id).all()
+    route_stations = db.query(RouteStation).filter(
+        RouteStation.route_id == train.route_id
+    ).order_by(RouteStation.order_number).all()
+
+    train_stops = db.query(TrainStop).filter(
+        TrainStop.train_id == train.id
+    ).all()
     train_stops_map = {ts.route_station_id: ts for ts in train_stops}
 
     from ..models.station_arrival_log import StationArrivalLog
-    arrival_logs = db.query(StationArrivalLog).filter(StationArrivalLog.schedule_id == schedule_id).all()
-    arrival_logs_map = {log.route_station_id: log for log in arrival_logs}
 
+    # ✅ IMPORTANT: Filter arrival logs by CURRENT schedule_id ONLY
+    arrival_logs = db.query(StationArrivalLog).filter(
+        StationArrivalLog.schedule_id == schedule_id  # ✅ Current schedule only
+    ).all()
+    arrival_logs_map = {log.route_station_id: log for log in arrival_logs}
     station_ids = [rs.station_id for rs in route_stations if rs.station_id]
     stations = db.query(Station).filter(Station.id.in_(station_ids)).all() if station_ids else []
     stations_map = {s.id: s for s in stations}
@@ -730,16 +871,32 @@ async def get_schedule_route_stops(schedule_id: int, db: Session = Depends(get_d
         station = stations_map.get(rs.station_id) if rs.station_id else None
         train_stop = train_stops_map.get(rs.id)
         arrival_log = arrival_logs_map.get(rs.id)
+
         stops.append({
-            "station_name": rs.station_name, "station_code": rs.station_code,
-            "order_number": rs.order_number, "distance_from_origin": rs.distance_from_origin,
+            "id": rs.id,
+            "route_station_id": rs.id,
+            "train_stop_id": train_stop.id if train_stop else None,  # ✅ Include train_stop_id
+            "station_name": rs.station_name,
+            "station_code": rs.station_code,
+            "order_number": rs.order_number,
+            "distance_from_origin": rs.distance_from_origin,
             "latitude": station.latitude if station else None,
             "longitude": station.longitude if station else None,
-            "expected_arrival": train_stop.expected_arrival_time.strftime("%H:%M") if train_stop and train_stop.expected_arrival_time else None,
-            "expected_departure": train_stop.expected_departure_time.strftime("%H:%M") if train_stop and train_stop.expected_departure_time else None,
-            "actual_arrival": arrival_log.arrival_time.isoformat() if arrival_log and arrival_log.arrival_time else None,
-            "actual_departure": arrival_log.departure_time.isoformat() if arrival_log and arrival_log.departure_time else None,
+            "expected_arrival": train_stop.expected_arrival_time.strftime(
+                "%H:%M") if train_stop and train_stop.expected_arrival_time else None,
+            "expected_departure": train_stop.expected_departure_time.strftime(
+                "%H:%M") if train_stop and train_stop.expected_departure_time else None,
+            # To include UTC suffix:
+            "actual_arrival": arrival_log.arrival_time.isoformat() + "Z" if arrival_log and arrival_log.arrival_time else None,
+            "actual_departure": arrival_log.departure_time.isoformat() + "Z" if arrival_log and arrival_log.departure_time else None,
             "status": arrival_log.status if arrival_log else (train_stop.status if train_stop else "SCHEDULED"),
             "delay_minutes": arrival_log.arrival_delay_minutes if arrival_log else 0,
+            "stop_duration_minutes": train_stop.stop_duration_minutes if train_stop else None,
         })
-    return {"schedule_id": schedule_id, "train_name": train.train_name, "train_no": train.train_no, "stops": stops}
+
+    return {
+        "schedule_id": schedule_id,
+        "train_name": train.train_name,
+        "train_no": train.train_no,
+        "stops": stops
+    }
