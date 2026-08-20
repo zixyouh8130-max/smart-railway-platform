@@ -66,6 +66,10 @@ class Settings(BaseSettings):
 
     AGENT_MAX_HISTORY: int = 10
 
+    #Google Drive
+    GOOGLE_DRIVE_OAUTH_TOKEN_FILE: str = ""
+    GOOGLE_DRIVE_INSPECTION_ROOT_FOLDER_ID: str = ""
+
     # --------------------------------------------------------
     # Local data directory
     # --------------------------------------------------------

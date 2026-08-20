@@ -1,194 +1,615 @@
-// pages/Inspection/InspectionDashboard.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Search, RefreshCw, TrendingUp, AlertTriangle, Video, Clock,
-  MapPin, ChevronRight, X, Calendar, BarChart3, PieChart as PieChartIcon,
-  Layers, Maximize2
+  Search,
+  RefreshCw,
+  TrendingUp,
+  AlertTriangle,
+  Video,
+  Clock,
+  MapPin,
+  X,
+  BarChart3,
+  Layers,
+  Bot,
+  Wrench,
+  Info,
+  Activity,
+  CheckCircle2,
+  PlayCircle,
+  FileVideo2,
+  ExternalLink,
 } from 'lucide-react';
 import {
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
 } from 'recharts';
 import {
-  MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  Polyline,
+  CircleMarker,
+  useMap,
 } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { inspectionApi } from '@/api/inspectionAPI';
 
-// Fix Leaflet default marker icons
+// -----------------------------------------------------------------------------
+// Leaflet setup
+// -----------------------------------------------------------------------------
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  iconRetinaUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// Color palette for defect types
-const DEFECT_COLORS = {
-  'Faulty Fishplate': '#EF4444',
-  'Missing Fastener': '#F59E0B',
-  'Track Break': '#DC2626',
-  'Track Crack': '#EF4444',
-  'Damaged Track': '#DC2626',
-  'perfect track': '#10B981',
+// -----------------------------------------------------------------------------
+// Current YOLO classes
+// -----------------------------------------------------------------------------
+
+const DEFECT_META = {
+  Corrosion: {
+    color: '#B45309',
+    icon: '🟤',
+    label: 'Corrosion',
+  },
+  'Fishplate Damage': {
+    color: '#E11D48',
+    icon: '🔧',
+    label: 'Fishplate Damage',
+  },
+  'Missing Fastener': {
+    color: '#F59E0B',
+    icon: '🔶',
+    label: 'Missing Fastener',
+  },
+  'Missing Fishplate Bolt': {
+    color: '#7C3AED',
+    icon: '🔩',
+    label: 'Missing Fishplate Bolt',
+  },
+  'Rail Break': {
+    color: '#DC2626',
+    icon: '💥',
+    label: 'Rail Break',
+  },
+  'Railway Joint Defect': {
+    color: '#4F46E5',
+    icon: '⚠️',
+    label: 'Railway Joint Defect',
+  },
 };
 
-const DEFECT_ICONS = {
-  'Faulty Fishplate': '🔴',
-  'Missing Fastener': '🔶',
-  'Track Break': '💥',
-  'Track Crack': '🔴',
-  'Damaged Track': '⚠️',
-  'perfect track': '✅',
+const FALLBACK_DEFECT_META = {
+  color: '#64748B',
+  icon: '⚠️',
+  label: 'Defect',
 };
 
-// Custom marker icons for different defect types
-const createDefectIcon = (defectType, isSelected = false) => {
-  const colors = {
-    'Faulty Fishplate': '#EF4444',
-    'Missing Fastener': '#F59E0B',
-    'Track Break': '#DC2626',
-    'Track Crack': '#EF4444',
-    'Damaged Track': '#DC2626',
+const PRIORITY_META = {
+  routine: {
+    label: 'Routine',
+    classes: 'bg-slate-100 text-slate-700 border-slate-200',
+  },
+  monitor: {
+    label: 'Monitor',
+    classes: 'bg-blue-50 text-blue-700 border-blue-200',
+  },
+  priority_inspection: {
+    label: 'Priority Inspection',
+    classes: 'bg-amber-50 text-amber-800 border-amber-200',
+  },
+  urgent_manual_review: {
+    label: 'Urgent Manual Review',
+    classes: 'bg-red-50 text-red-700 border-red-200',
+  },
+};
+
+const getDefectMeta = (type) => DEFECT_META[type] || FALLBACK_DEFECT_META;
+
+const getPriorityMeta = (priority) =>
+  PRIORITY_META[priority] || {
+    label: priority ? String(priority).replaceAll('_', ' ') : 'Not assessed',
+    classes: 'bg-gray-50 text-gray-600 border-gray-200',
   };
 
-  const color = colors[defectType] || '#EF4444';
-  const size = isSelected ? 36 : 28;
+// -----------------------------------------------------------------------------
+// General helpers
+// -----------------------------------------------------------------------------
 
-  return L.divIcon({
-    className: 'custom-defect-marker',
-    html: `
-      <div style="
-        background-color: ${color};
-        width: ${size}px;
-        height: ${size}px;
-        border-radius: 50%;
-        border: 3px solid white;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: ${size * 0.5}px;
-        color: white;
-        font-weight: bold;
-        cursor: pointer;
-        transition: all 0.2s;
-        transform: ${isSelected ? 'scale(1.2)' : 'scale(1)'};
-      ">
-        ${defectType.charAt(0)}
-      </div>
-    `,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size],
-    popupAnchor: [0, -size],
-  });
+const asNumber = (value, fallback = null) => {
+  if (value === null || value === undefined || value === '') return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-// Normalize possible coordinate formats from MongoDB
-const getEventCoordinates = (event) => {
-  const lat = event?.gps?.latitude ?? event?.gps?.lat ?? event?.latitude ?? event?.lat;
-  const lng = event?.gps?.longitude ?? event?.gps?.lng ?? event?.longitude ?? event?.lng;
+const toIdString = (value) => {
+  if (value === null || value === undefined) return '';
 
-  if (lat != null && lng != null && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
-    return { latitude: Number(lat), longitude: Number(lng) };
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value);
   }
 
-  if (Array.isArray(event?.gps?.coordinates) && event.gps.coordinates.length >= 2) {
-    return {
-      latitude: Number(event.gps.coordinates[1]),
-      longitude: Number(event.gps.coordinates[0]),
-    };
+  if (typeof value === 'object') {
+    if (value.$oid) return String(value.$oid);
+    if (value.id) return toIdString(value.id);
+    if (value._id) return toIdString(value._id);
+  }
+
+  return String(value);
+};
+
+const getInspectionId = (inspection) =>
+  toIdString(
+    inspection?.id ??
+      inspection?._id ??
+      inspection?.inspection?.id ??
+      inspection?.inspection?._id
+  );
+
+const getEventId = (event, index = 0) => {
+  const direct = toIdString(event?.id ?? event?._id);
+  if (direct) return direct;
+
+  return [
+    event?.rail_side || 'rail',
+    event?.defect_type || 'defect',
+    event?.representative_frame ?? 'frame',
+    event?.start_timestamp ?? index,
+  ].join('-');
+};
+
+const formatDate = (dateString) => {
+  if (!dateString) return 'N/A';
+  const date = new Date(dateString);
+  return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
+};
+
+const formatDuration = (seconds) => {
+  const totalSeconds = asNumber(seconds, 0);
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = Math.floor(totalSeconds % 60);
+  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+};
+
+const formatDistance = (value, digits = 2) => {
+  const n = asNumber(value);
+  return n === null ? 'N/A' : `${n.toFixed(digits)} m`;
+};
+
+const formatConfidence = (value) => {
+  const n = asNumber(value);
+  return n === null ? 'N/A' : `${(n * 100).toFixed(1)}%`;
+};
+
+const getInspectionName = (inspection) =>
+  inspection?.gpx_name ||
+  inspection?.video_name ||
+  inspection?.inspection?.gpx_name ||
+  inspection?.inspection?.video_name ||
+  inspection?.run_id ||
+  inspection?.inspection?.run_id ||
+  inspection?.name ||
+  'Inspection';
+
+const getInspectionDuration = (inspection) =>
+  inspection?.duration_seconds ??
+  inspection?.route?.duration_seconds ??
+  inspection?.inspection?.duration_seconds ??
+  inspection?.inspection?.route?.duration_seconds ??
+  0;
+
+const getInspectionDistance = (inspection) =>
+  inspection?.route?.distance_m ??
+  inspection?.inspection?.route?.distance_m ??
+  null;
+
+const getInspectionPointCount = (inspection) =>
+  inspection?.route?.point_count ??
+  inspection?.inspection?.route?.point_count ??
+  null;
+
+const getInspectionCreatedAt = (inspection) =>
+  inspection?.created_at ??
+  inspection?.inspection?.created_at ??
+  inspection?.generated_at ??
+  inspection?.inspection?.generated_at ??
+  null;
+
+const getRoute = (inspection) =>
+  inspection?.route ?? inspection?.inspection?.route ?? null;
+
+const getInspectionEvents = (payload) =>
+  payload?.events ??
+  payload?.inspection?.events ??
+  payload?.inspection?.inspection?.events ??
+  [];
+
+const getInspectionDefectCount = (inspection) => {
+  const numeric =
+    inspection?.inspection_events ??
+    inspection?.inspection?.inspection_events ??
+    inspection?.defect_count ??
+    inspection?.inspection?.defect_count;
+
+  if (typeof numeric === 'number') return numeric;
+
+  const events = getInspectionEvents(inspection);
+  return Array.isArray(events) ? events.length : 0;
+};
+
+const getAiAdvisory = (inspection) =>
+  inspection?.ai_advisory ??
+  inspection?.inspection?.ai_advisory ??
+  null;
+
+const getAiStatus = (inspection) =>
+  inspection?.ai_advisory_status ??
+  inspection?.inspection?.ai_advisory_status ??
+  inspection?.ai_review_status ??
+  inspection?.inspection?.ai_review_status ??
+  null;
+
+const getAiModel = (inspection) =>
+  inspection?.ai_model ??
+  inspection?.inspection?.ai_model ??
+  null;
+
+const getAiGeneratedAt = (inspection) =>
+  inspection?.ai_advisory_generated_at ??
+  inspection?.inspection?.ai_advisory_generated_at ??
+  inspection?.ai_reviewed_at ??
+  inspection?.inspection?.ai_reviewed_at ??
+  null;
+
+const getAiSpatialSummary = (inspection) =>
+  inspection?.ai_spatial_summary ??
+  inspection?.inspection?.ai_spatial_summary ??
+  null;
+
+
+const isBrowserAccessibleMedia = (value) => {
+  if (!value || typeof value !== 'string') return false;
+
+  return (
+    value.startsWith('http://') ||
+    value.startsWith('https://') ||
+    value.startsWith('/api/') ||
+    value.startsWith('/media/') ||
+    value.startsWith('blob:')
+  );
+};
+
+const getInspectionVideoSources = (inspection) => {
+  const media =
+    inspection?.media ??
+    inspection?.inspection?.media ??
+    {};
+
+  const mediaUrls =
+    inspection?.media_urls ??
+    inspection?.inspection?.media_urls ??
+    {};
+
+  const leftUrl =
+    mediaUrls?.left ??
+    media?.left_video_url ??
+    media?.left_rail_video_url ??
+    media?.left_rail_inspection_url ??
+    media?.left_annotated_video_url ??
+    inspection?.left_video_url ??
+    inspection?.left_rail_video_url ??
+    null;
+
+  const rightUrl =
+    mediaUrls?.right ??
+    media?.right_video_url ??
+    media?.right_rail_video_url ??
+    media?.right_rail_inspection_url ??
+    media?.right_annotated_video_url ??
+    inspection?.right_video_url ??
+    inspection?.right_rail_video_url ??
+    null;
+
+  const leftPath =
+    media?.left_video_path ??
+    media?.left_rail_video_path ??
+    media?.left_rail_inspection_path ??
+    media?.left_annotated_video_path ??
+    media?.left_video ??
+    inspection?.left_video_path ??
+    inspection?.left_rail_video_path ??
+    null;
+
+  const rightPath =
+    media?.right_video_path ??
+    media?.right_rail_video_path ??
+    media?.right_rail_inspection_path ??
+    media?.right_annotated_video_path ??
+    media?.right_video ??
+    inspection?.right_video_path ??
+    inspection?.right_rail_video_path ??
+    null;
+
+  return {
+    left: {
+      url: isBrowserAccessibleMedia(leftUrl)
+        ? leftUrl
+        : isBrowserAccessibleMedia(leftPath)
+        ? leftPath
+        : null,
+      storedPath: leftPath || leftUrl || null,
+    },
+    right: {
+      url: isBrowserAccessibleMedia(rightUrl)
+        ? rightUrl
+        : isBrowserAccessibleMedia(rightPath)
+        ? rightPath
+        : null,
+      storedPath: rightPath || rightUrl || null,
+    },
+  };
+};
+
+// -----------------------------------------------------------------------------
+// GPS / route helpers
+// -----------------------------------------------------------------------------
+
+const getEventCoordinates = (event) => {
+  const lat =
+    event?.gps?.latitude ??
+    event?.gps?.lat ??
+    event?.latitude ??
+    event?.lat;
+
+  const lng =
+    event?.gps?.longitude ??
+    event?.gps?.lng ??
+    event?.longitude ??
+    event?.lng;
+
+  if (lat != null && lng != null) {
+    const latitude = Number(lat);
+    const longitude = Number(lng);
+
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      return { latitude, longitude };
+    }
+  }
+
+  // GeoJSON-style [longitude, latitude]
+  if (
+    Array.isArray(event?.gps?.coordinates) &&
+    event.gps.coordinates.length >= 2
+  ) {
+    const longitude = Number(event.gps.coordinates[0]);
+    const latitude = Number(event.gps.coordinates[1]);
+
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      return { latitude, longitude };
+    }
   }
 
   if (Array.isArray(event?.coordinates) && event.coordinates.length >= 2) {
-    return {
-      latitude: Number(event.coordinates[1]),
-      longitude: Number(event.coordinates[0]),
-    };
+    const longitude = Number(event.coordinates[0]);
+    const latitude = Number(event.coordinates[1]);
+
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      return { latitude, longitude };
+    }
   }
 
   return null;
 };
 
-// Component to fit map bounds
+const getEventRouteDistance = (event) =>
+  event?.gps?.distance_from_start_m ??
+  event?.distance_from_start_m ??
+  null;
+
+const getRoutePolyline = (route) => {
+  if (!route) return [];
+
+  if (Array.isArray(route.points)) {
+    const points = route.points
+      .map((point) => {
+        const latitude = asNumber(point?.latitude ?? point?.lat);
+        const longitude = asNumber(point?.longitude ?? point?.lng);
+
+        if (latitude === null || longitude === null) return null;
+        return [latitude, longitude];
+      })
+      .filter(Boolean);
+
+    if (points.length >= 2) return points;
+  }
+
+  const startLat = asNumber(route?.start?.latitude);
+  const startLng = asNumber(route?.start?.longitude);
+  const endLat = asNumber(route?.end?.latitude);
+  const endLng = asNumber(route?.end?.longitude);
+
+  if (
+    startLat !== null &&
+    startLng !== null &&
+    endLat !== null &&
+    endLng !== null
+  ) {
+    return [
+      [startLat, startLng],
+      [endLat, endLng],
+    ];
+  }
+
+  return [];
+};
+
+// -----------------------------------------------------------------------------
+// Supplementary visual findings
+// Only positive findings are surfaced in UI.
+// -----------------------------------------------------------------------------
+
+const getSupplementaryFindings = (event) => {
+  const review = event?.supplementary_visual_review;
+  if (!review || review?.performed !== true) return [];
+
+  const results = [];
+
+  if (Array.isArray(review.findings)) {
+    review.findings.forEach((finding) => {
+      if (!finding?.description) return;
+
+      results.push({
+        type: finding.type || 'supplementary_finding',
+        confidence: finding.confidence || null,
+        description: finding.description,
+      });
+    });
+  }
+
+  const severity = review?.rail_break_visual_severity;
+
+  if (severity?.description && severity?.confidence === 'high') {
+    results.push({
+      type: 'rail_break_visual_severity',
+      confidence: severity.confidence,
+      level: severity.level,
+      description: severity.description,
+    });
+  }
+
+  return results;
+};
+
+// -----------------------------------------------------------------------------
+// Leaflet components
+// -----------------------------------------------------------------------------
+
 function FitBounds({ positions }) {
   const map = useMap();
 
   useEffect(() => {
-    if (positions && positions.length > 0) {
-      const bounds = L.latLngBounds(positions);
-      map.fitBounds(bounds, { padding: [50, 50] });
+    if (!positions?.length) return;
+
+    const bounds = L.latLngBounds(positions);
+
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, {
+        padding: [40, 40],
+        maxZoom: 18,
+      });
     }
   }, [map, positions]);
 
   return null;
 }
 
-// Map component
+const createDefectIcon = (defectType, isSelected = false) => {
+  const meta = getDefectMeta(defectType);
+  const size = isSelected ? 34 : 28;
+
+  return L.divIcon({
+    className: 'custom-defect-marker',
+    html: `
+      <div style="
+        width:${size}px;
+        height:${size}px;
+        border-radius:9999px;
+        background:${meta.color};
+        border:3px solid white;
+        box-shadow:0 4px 12px rgba(15,23,42,.28);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:${Math.round(size * 0.48)}px;
+        transform:${isSelected ? 'scale(1.12)' : 'scale(1)'};
+      ">
+        ${meta.icon}
+      </div>
+    `,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -(size / 2)],
+  });
+};
+
 function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
-  const [mapKey, setMapKey] = useState(0);
+  const validEvents = useMemo(
+    () => events.filter((event) => getEventCoordinates(event)),
+    [events]
+  );
 
-  // Filter events with valid GPS coordinates
-  const validEvents = useMemo(() => {
-    return events.filter(event => getEventCoordinates(event));
-  }, [events]);
+  const routePolyline = useMemo(() => getRoutePolyline(route), [route]);
 
-  // Group events by defect type for legend
-  const defectTypes = useMemo(() => {
-    const types = {};
-    validEvents.forEach(event => {
-      if (!types[event.defect_type]) {
-        types[event.defect_type] = 0;
-      }
-      types[event.defect_type]++;
-    });
-    return types;
-  }, [validEvents]);
-
-  // Collect all positions: defect GPS + route start/end
   const allPositions = useMemo(() => {
-    const positions = validEvents.map(event => {
-      const coords = getEventCoordinates(event);
-      return coords ? [coords.latitude, coords.longitude] : null;
-    }).filter(Boolean);
+    const positions = validEvents
+      .map((event) => {
+        const coords = getEventCoordinates(event);
+        return coords ? [coords.latitude, coords.longitude] : null;
+      })
+      .filter(Boolean);
 
-    if (route?.start?.latitude && route?.start?.longitude) {
-      positions.push([route.start.latitude, route.start.longitude]);
-    }
-    if (route?.end?.latitude && route?.end?.longitude) {
-      positions.push([route.end.latitude, route.end.longitude]);
-    }
+    routePolyline.forEach((point) => positions.push(point));
 
     return positions;
-  }, [validEvents, route]);
+  }, [validEvents, routePolyline]);
 
-  // Calculate center based on all available positions or use default
   const center = useMemo(() => {
-    if (allPositions.length > 0) {
-      const lat = allPositions.reduce((sum, p) => sum + p[0], 0) / allPositions.length;
-      const lng = allPositions.reduce((sum, p) => sum + p[1], 0) / allPositions.length;
-      return [lat, lng];
-    }
-    return [16.123456, 96.123456];
+    if (!allPositions.length) return [16.8409, 96.1735];
+
+    const latitude =
+      allPositions.reduce((sum, point) => sum + point[0], 0) /
+      allPositions.length;
+
+    const longitude =
+      allPositions.reduce((sum, point) => sum + point[1], 0) /
+      allPositions.length;
+
+    return [latitude, longitude];
   }, [allPositions]);
 
-  if (allPositions.length === 0) {
+  const defectTypes = useMemo(() => {
+    return validEvents.reduce((acc, event) => {
+      const type = event?.defect_type || 'Unknown';
+      acc[type] = (acc[type] || 0) + 1;
+      return acc;
+    }, {});
+  }, [validEvents]);
+
+  if (!allPositions.length) {
     return (
-      <div className="flex flex-col items-center justify-center h-full bg-gray-50 rounded-lg">
-        <MapPin className="w-12 h-12 text-gray-400 mb-2" />
-        <p className="text-gray-500 text-sm">No GPS data available for this inspection</p>
-        <p className="text-gray-400 text-xs">Defect locations require GPS coordinates</p>
+      <div className="flex h-full min-h-[360px] flex-col items-center justify-center rounded-xl bg-slate-50">
+        <MapPin className="mb-3 h-10 w-10 text-slate-300" />
+        <p className="font-medium text-slate-600">No GPS data available</p>
+        <p className="mt-1 text-sm text-slate-400">
+          Defect markers require valid inspection coordinates.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="relative h-full w-full rounded-lg overflow-hidden">
+    <div className="relative h-full w-full overflow-hidden rounded-xl">
       <MapContainer
-        key={mapKey}
         center={center}
-        zoom={13}
+        zoom={15}
         style={{ height: '100%', width: '100%' }}
         className="z-0"
       >
@@ -197,89 +618,97 @@ function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {/* Route start/end polyline */}
-        {route?.start?.latitude && route?.end?.latitude && (
+        {routePolyline.length >= 2 && (
           <Polyline
-            positions={[
-              [route.start.latitude, route.start.longitude],
-              [route.end.latitude, route.end.longitude],
-            ]}
-            pathOptions={{ color: '#3B82F6', weight: 3, dashArray: '5,5' }}
+            positions={routePolyline}
+            pathOptions={{
+              color: '#2563EB',
+              weight: 4,
+              opacity: 0.8,
+            }}
           />
         )}
 
-        {/* Route start marker */}
-        {route?.start?.latitude && route?.start?.longitude && (
+        {route?.start?.latitude != null && route?.start?.longitude != null && (
           <CircleMarker
-            center={[route.start.latitude, route.start.longitude]}
-            radius={6}
-            pathOptions={{ color: '#10B981', fillColor: '#10B981', fillOpacity: 0.9 }}
+            center={[Number(route.start.latitude), Number(route.start.longitude)]}
+            radius={7}
+            pathOptions={{
+              color: '#059669',
+              fillColor: '#10B981',
+              fillOpacity: 1,
+              weight: 2,
+            }}
           >
             <Popup>
-              <div className="text-sm">
-                <strong>Route Start</strong><br />
-                {route.start.latitude.toFixed(6)}, {route.start.longitude.toFixed(6)}
-              </div>
+              <strong>Route Start</strong>
             </Popup>
           </CircleMarker>
         )}
 
-        {/* Route end marker */}
-        {route?.end?.latitude && route?.end?.longitude && (
+        {route?.end?.latitude != null && route?.end?.longitude != null && (
           <CircleMarker
-            center={[route.end.latitude, route.end.longitude]}
-            radius={6}
-            pathOptions={{ color: '#EF4444', fillColor: '#EF4444', fillOpacity: 0.9 }}
+            center={[Number(route.end.latitude), Number(route.end.longitude)]}
+            radius={7}
+            pathOptions={{
+              color: '#B91C1C',
+              fillColor: '#EF4444',
+              fillOpacity: 1,
+              weight: 2,
+            }}
           >
             <Popup>
-              <div className="text-sm">
-                <strong>Route End</strong><br />
-                {route.end.latitude.toFixed(6)}, {route.end.longitude.toFixed(6)}
-              </div>
+              <strong>Route End</strong>
             </Popup>
           </CircleMarker>
         )}
 
-        {validEvents.map((event) => {
+        {validEvents.map((event, index) => {
           const coords = getEventCoordinates(event);
-          if (!coords) return null;
-
-          const eventId = event.id ?? event._id;
+          const eventId = getEventId(event, index);
           const isSelected = eventId === selectedEventId;
-          const position = [coords.latitude, coords.longitude];
 
           return (
             <Marker
-              key={eventId || `${position[0]}-${position[1]}`}
-              position={position}
+              key={eventId}
+              position={[coords.latitude, coords.longitude]}
               icon={createDefectIcon(event.defect_type, isSelected)}
               eventHandlers={{
                 click: () => onMarkerClick(eventId),
               }}
             >
               <Popup>
-                <div className="p-2 min-w-[200px]">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-lg">{DEFECT_ICONS[event.defect_type] || '🔴'}</span>
-                    <span className="font-semibold">{event.defect_type}</span>
+                <div className="min-w-[220px] p-1">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="text-lg">
+                      {getDefectMeta(event.defect_type).icon}
+                    </span>
+                    <strong>{event.defect_type}</strong>
                   </div>
+
                   <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Confidence:</span>
-                      <span className="font-medium">{(event.confidence * 100).toFixed(1)}%</span>
+                    <div>
+                      <span className="text-gray-500">Rail: </span>
+                      <span className="font-medium">
+                        {event?.rail_side?.toUpperCase?.() || 'N/A'}
+                      </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Time:</span>
-                      <span className="font-medium">{Number(event.start_timestamp || 0).toFixed(1)}s</span>
+                    <div>
+                      <span className="text-gray-500">Confidence: </span>
+                      <span className="font-medium">
+                        {formatConfidence(event?.confidence)}
+                      </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Detections:</span>
-                      <span className="font-medium">{event.detection_count ?? 0}</span>
+                    <div>
+                      <span className="text-gray-500">Route distance: </span>
+                      <span className="font-medium">
+                        {formatDistance(getEventRouteDistance(event))}
+                      </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Location:</span>
-                      <span className="font-medium text-xs">
-                        {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
+                    <div>
+                      <span className="text-gray-500">Timestamp: </span>
+                      <span className="font-medium">
+                        {asNumber(event?.start_timestamp, 0).toFixed(1)}s
                       </span>
                     </div>
                   </div>
@@ -292,49 +721,580 @@ function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
         <FitBounds positions={allPositions} />
       </MapContainer>
 
-      {/* Legend */}
-      <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg p-3 z-[1000]">
-        <div className="text-xs font-medium text-gray-700 mb-2">Defect Types</div>
-        {Object.entries(defectTypes).map(([type, count]) => (
-          <div key={type} className="flex items-center gap-2 text-xs py-0.5">
-            <div
-              className="w-3 h-3 rounded-full border border-white shadow-sm"
-              style={{ backgroundColor: DEFECT_COLORS[type] || '#EF4444' }}
-            />
-            <span className="text-gray-600">{type}</span>
-            <span className="text-gray-400 ml-1">({count})</span>
-          </div>
-        ))}
-        {route?.distance_m != null && (
-          <div className="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-500">
-            Route: {route.distance_m.toFixed(2)} m
-          </div>
-        )}
-      </div>
+      <div className="absolute bottom-4 right-4 z-[1000] max-w-[220px] rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Defects on map
+        </p>
+        <div className="space-y-1.5">
+          {Object.entries(defectTypes).map(([type, count]) => {
+            const meta = getDefectMeta(type);
 
-      {/* Stats overlay */}
-      <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 z-[1000]">
-        <div className="text-xs text-gray-600">
-          <span className="font-medium">{validEvents.length}</span> defects shown
+            return (
+              <div key={type} className="flex items-center gap-2 text-xs">
+                <span
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: meta.color }}
+                />
+                <span className="flex-1 truncate text-slate-700">{type}</span>
+                <span className="font-medium text-slate-500">{count}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 }
 
+// -----------------------------------------------------------------------------
+// Small UI components
+// -----------------------------------------------------------------------------
+
+function StatCard({ label, value, helper, icon: Icon, tone = 'blue' }) {
+  const tones = {
+    blue: 'bg-blue-50 text-blue-600',
+    red: 'bg-red-50 text-red-600',
+    green: 'bg-emerald-50 text-emerald-600',
+    amber: 'bg-amber-50 text-amber-600',
+    violet: 'bg-violet-50 text-violet-600',
+  };
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-500">{label}</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+          {helper && (
+            <p className="mt-1 truncate text-xs text-slate-400">{helper}</p>
+          )}
+        </div>
+
+        <div
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+            tones[tone] || tones.blue
+          }`}
+        >
+          <Icon className="h-5 w-5" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PriorityBadge({ priority, compact = false }) {
+  const meta = getPriorityMeta(priority);
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border font-semibold ${meta.classes} ${
+        compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1 text-xs'
+      }`}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
+function EmptyState({ title, description }) {
+  return (
+    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+      <Info className="mx-auto mb-3 h-8 w-8 text-slate-300" />
+      <p className="font-medium text-slate-700">{title}</p>
+      {description && (
+        <p className="mx-auto mt-1 max-w-lg text-sm text-slate-500">
+          {description}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// AI advisory panel
+// -----------------------------------------------------------------------------
+
+function AiAdvisoryPanel({ inspection }) {
+  const advisory = getAiAdvisory(inspection);
+  const status = getAiStatus(inspection);
+  const model = getAiModel(inspection);
+  const generatedAt = getAiGeneratedAt(inspection);
+  const spatial = getAiSpatialSummary(inspection);
+
+  if (!advisory) {
+    return (
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50">
+            <Bot className="h-5 w-5 text-violet-600" />
+          </div>
+          <div>
+            <h4 className="font-semibold text-slate-900">
+              AI Maintenance Advisory
+            </h4>
+            <p className="text-sm text-slate-500">
+              Railway-maintenance interpretation of inspection results
+            </p>
+          </div>
+        </div>
+
+        <EmptyState
+          title={status === 'failed' ? 'AI advisory failed' : 'No AI advisory stored'}
+          description={
+            status === 'failed'
+              ? 'The inspection data is still available, but the advisory generation did not complete.'
+              : 'This inspection does not currently contain an ai_advisory result.'
+          }
+        />
+      </section>
+    );
+  }
+
+  const areas = advisory?.areas_of_attention || [];
+  const highPriority = advisory?.individual_high_priority_events || [];
+  const typeAssessments = advisory?.defect_type_assessments || [];
+  const factors = advisory?.possible_contributing_factors || [];
+  const actions = advisory?.recommended_actions || [];
+  const keyFindings = advisory?.key_findings || [];
+  const limitations = advisory?.limitations || [];
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 bg-gradient-to-r from-violet-50 via-white to-blue-50 p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100">
+              <Bot className="h-6 w-6 text-violet-700" />
+            </div>
+
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-lg font-semibold text-slate-900">
+                  AI Railway Maintenance Advisory
+                </h4>
+                <PriorityBadge priority={advisory?.overall_priority} />
+              </div>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Analysis of defect types, locations, concentrations, maintenance
+                significance and recommended follow-up.
+              </p>
+
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+                {model && <span>Model: {model}</span>}
+                {generatedAt && <span>Generated: {formatDate(generatedAt)}</span>}
+                {status && <span>Status: {status}</span>}
+              </div>
+            </div>
+          </div>
+
+          {spatial?.reviewed_event_count != null && (
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+              <p className="text-slate-500">Analyzed events</p>
+              <p className="mt-1 text-xl font-bold text-slate-900">
+                {spatial.reviewed_event_count}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {advisory?.executive_summary && (
+          <div className="mt-5 rounded-xl border border-violet-100 bg-white/80 p-4">
+            <p className="text-sm leading-6 text-slate-700">
+              {advisory.executive_summary}
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-7 p-6">
+        {keyFindings.length > 0 && (
+          <div>
+            <h5 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
+              <Activity className="h-4 w-4 text-blue-600" />
+              Key Findings
+            </h5>
+            <div className="grid gap-2 md:grid-cols-2">
+              {keyFindings.map((finding, index) => (
+                <div
+                  key={`${finding}-${index}`}
+                  className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-5 text-slate-700"
+                >
+                  {finding}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {areas.length > 0 && (
+          <div>
+            <div className="mb-3 flex items-center justify-between gap-4">
+              <h5 className="flex items-center gap-2 font-semibold text-slate-900">
+                <Layers className="h-4 w-4 text-amber-600" />
+                Localized Areas of Attention
+              </h5>
+              <span className="text-xs text-slate-400">
+                {areas.length} area{areas.length === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {areas.map((area, index) => (
+                <div
+                  key={`${area?.rail_side}-${area?.start_distance_m}-${index}`}
+                  className="rounded-xl border border-slate-200 p-4"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-semibold text-slate-900">
+                        {(area?.rail_side || 'Unknown').toUpperCase()} rail ·{' '}
+                        {formatDistance(area?.start_distance_m)} →{' '}
+                        {formatDistance(area?.end_distance_m)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {area?.event_count ?? 0} event
+                        {(area?.event_count ?? 0) === 1 ? '' : 's'} ·{' '}
+                        {Object.entries(area?.defect_counts || {})
+                          .map(([type, count]) => `${type}: ${count}`)
+                          .join(' · ') || 'No defect breakdown'}
+                      </p>
+                    </div>
+
+                    <PriorityBadge priority={area?.priority} />
+                  </div>
+
+                  {area?.assessment && (
+                    <p className="mt-3 text-sm leading-6 text-slate-700">
+                      {area.assessment}
+                    </p>
+                  )}
+
+                  {Array.isArray(area?.recommended_checks) &&
+                    area.recommended_checks.length > 0 && (
+                      <div className="mt-3 rounded-lg bg-slate-50 p-3">
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Recommended checks
+                        </p>
+                        <ul className="space-y-1.5 text-sm text-slate-700">
+                          {area.recommended_checks.map((check, checkIndex) => (
+                            <li
+                              key={`${check}-${checkIndex}`}
+                              className="flex items-start gap-2"
+                            >
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                              <span>{check}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {highPriority.length > 0 && (
+          <div>
+            <h5 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
+              <AlertTriangle className="h-4 w-4 text-red-600" />
+              Individual High-Priority Events
+            </h5>
+
+            <div className="space-y-3">
+              {highPriority.map((event, index) => (
+                <div
+                  key={`${event?.defect_type}-${event?.route_distance_m}-${index}`}
+                  className="rounded-xl border border-red-100 bg-red-50/40 p-4"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-slate-900">
+                      {event?.defect_type || 'Defect'}
+                    </span>
+                    <span className="text-sm text-slate-500">
+                      {(event?.rail_side || 'Unknown').toUpperCase()} rail ·{' '}
+                      {formatDistance(event?.route_distance_m)}
+                    </span>
+                    <PriorityBadge priority={event?.priority} compact />
+                  </div>
+
+                  {event?.assessment && (
+                    <p className="mt-2 text-sm leading-6 text-slate-700">
+                      {event.assessment}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {typeAssessments.length > 0 && (
+          <div>
+            <h5 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
+              <BarChart3 className="h-4 w-4 text-indigo-600" />
+              Defect-Type Assessment
+            </h5>
+
+            <div className="grid gap-3 lg:grid-cols-2">
+              {typeAssessments.map((item, index) => {
+                const meta = getDefectMeta(item?.defect_type);
+
+                return (
+                  <div
+                    key={`${item?.defect_type}-${index}`}
+                    className="rounded-xl border border-slate-200 p-4"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>{meta.icon}</span>
+                      <p className="font-semibold text-slate-900">
+                        {item?.defect_type || 'Defect'}
+                      </p>
+                      <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                        {item?.event_count ?? 0} events
+                      </span>
+                    </div>
+
+                    {item?.maintenance_significance && (
+                      <p className="mt-3 text-sm leading-6 text-slate-700">
+                        {item.maintenance_significance}
+                      </p>
+                    )}
+
+                    {item?.recommended_response && (
+                      <div className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">
+                        <span className="font-semibold">Recommended response: </span>
+                        {item.recommended_response}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {factors.length > 0 && (
+          <div>
+            <h5 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
+              <Info className="h-4 w-4 text-slate-500" />
+              Possible Contributing Factors
+            </h5>
+
+            <p className="mb-3 text-xs text-slate-400">
+              These are possible contributors from the advisory, not diagnosed
+              causes.
+            </p>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              {factors.map((item, index) => (
+                <div
+                  key={`${item?.defect_type}-${index}`}
+                  className="rounded-xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  <p className="font-semibold text-slate-900">
+                    {item?.defect_type || 'Defect'}
+                  </p>
+
+                  {Array.isArray(item?.factors) && item.factors.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {item.factors.map((factor, factorIndex) => (
+                        <span
+                          key={`${factor}-${factorIndex}`}
+                          className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600"
+                        >
+                          {factor}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {item?.context && (
+                    <p className="mt-3 text-sm leading-5 text-slate-600">
+                      {item.context}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {actions.length > 0 && (
+          <div>
+            <h5 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
+              <Wrench className="h-4 w-4 text-emerald-600" />
+              Recommended Actions
+            </h5>
+
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
+              <ol className="space-y-2 text-sm text-slate-700">
+                {actions.map((action, index) => (
+                  <li key={`${action}-${index}`} className="flex items-start gap-3">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <span>{action}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        )}
+
+        {advisory?.trend_assessment && (
+          <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+              Trend Assessment
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">
+              {advisory.trend_assessment}
+            </p>
+          </div>
+        )}
+
+        {limitations.length > 0 && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Limitations
+            </p>
+            <ul className="mt-2 space-y-1.5 text-sm text-slate-600">
+              {limitations.map((limitation, index) => (
+                <li key={`${limitation}-${index}`}>• {limitation}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="border-t border-slate-100 pt-4 text-xs leading-5 text-slate-400">
+          AI-generated maintenance advisory. Final maintenance decisions should
+          be confirmed by qualified railway personnel and the applicable
+          railway maintenance standard.
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Inspection event card
+// -----------------------------------------------------------------------------
+
+function EventCard({ event, index, selected, onSelect }) {
+  const eventId = getEventId(event, index);
+  const meta = getDefectMeta(event?.defect_type);
+  const coords = getEventCoordinates(event);
+  const findings = getSupplementaryFindings(event);
+
+  return (
+    <button
+      id={`event-${eventId}`}
+      type="button"
+      onClick={() => onSelect(eventId)}
+      className={`w-full rounded-xl border p-4 text-left transition ${
+        selected
+          ? 'border-blue-300 bg-blue-50 shadow-sm'
+          : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg"
+            style={{ backgroundColor: `${meta.color}15` }}
+          >
+            {meta.icon}
+          </div>
+
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-semibold text-slate-900">
+                {event?.defect_type || 'Unknown defect'}
+              </p>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium uppercase text-slate-600">
+                {event?.rail_side || 'rail'} rail
+              </span>
+            </div>
+
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+              <span>Confidence {formatConfidence(event?.confidence)}</span>
+              <span>
+                Distance {formatDistance(getEventRouteDistance(event))}
+              </span>
+              <span>
+                Time {asNumber(event?.start_timestamp, 0).toFixed(1)}s
+              </span>
+              <span>{event?.detection_count ?? 0} detections</span>
+            </div>
+          </div>
+        </div>
+
+        <span
+          className="mt-1 h-3 w-3 shrink-0 rounded-full"
+          style={{ backgroundColor: meta.color }}
+        />
+      </div>
+
+      {coords && (
+        <div className="mt-3 flex items-center gap-1.5 text-xs text-slate-400">
+          <MapPin className="h-3.5 w-3.5" />
+          {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
+        </div>
+      )}
+
+      {findings.length > 0 && (
+        <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50 p-3">
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
+            Supplementary AI observation
+          </p>
+
+          {findings.map((finding, findingIndex) => (
+            <div
+              key={`${finding.type}-${findingIndex}`}
+              className="text-sm leading-5 text-violet-900"
+            >
+              {finding.level && (
+                <span className="mr-1 font-semibold capitalize">
+                  {finding.level}:
+                </span>
+              )}
+              {finding.description}
+            </div>
+          ))}
+        </div>
+      )}
+    </button>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Dashboard
+// -----------------------------------------------------------------------------
+
 const InspectionDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
   const [inspections, setInspections] = useState([]);
   const [overviewStats, setOverviewStats] = useState(null);
   const [defectStats, setDefectStats] = useState([]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
+
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState(null);
-  const [mapView, setMapView] = useState('all'); // 'all' or 'defect'
+
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [aiDialogData, setAiDialogData] = useState(null);
+  const [aiDialogLoading, setAiDialogLoading] = useState(false);
+
+  const [videoDialogOpen, setVideoDialogOpen] = useState(false);
+  const [videoDialogData, setVideoDialogData] = useState(null);
+  const [videoDialogLoading, setVideoDialogLoading] = useState(false);
 
   useEffect(() => {
     fetchDashboardData();
@@ -343,18 +1303,20 @@ const InspectionDashboard = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     setError(null);
+
     try {
       const [stats, defectStatsData, inspectionsData] = await Promise.all([
         inspectionApi.getOverviewStatistics(),
         inspectionApi.getDefectStatistics(),
         inspectionApi.getInspections(20, 0),
       ]);
-      setOverviewStats(stats);
-      setDefectStats(defectStatsData);
-      setInspections(inspectionsData);
+
+      setOverviewStats(stats || {});
+      setDefectStats(Array.isArray(defectStatsData) ? defectStatsData : []);
+      setInspections(Array.isArray(inspectionsData) ? inspectionsData : []);
     } catch (err) {
-      setError('Failed to load inspection data');
       console.error(err);
+      setError('Failed to load inspection data.');
     } finally {
       setLoading(false);
     }
@@ -362,128 +1324,128 @@ const InspectionDashboard = () => {
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
-      fetchDashboardData();
+      await fetchDashboardData();
       return;
     }
+
     setLoading(true);
+    setError(null);
+
     try {
-      const results = await inspectionApi.searchInspections(searchQuery);
-      setInspections(results);
+      const results = await inspectionApi.searchInspections(searchQuery.trim());
+      setInspections(Array.isArray(results) ? results : []);
     } catch (err) {
-      setError('Search failed');
+      console.error(err);
+      setError('Inspection search failed.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleViewDetail = async (inspectionId) => {
+    if (!inspectionId) return;
+
     setDetailLoading(true);
     setDetailDialogOpen(true);
+    setDetailData(null);
     setSelectedEventId(null);
+    setError(null);
+
     try {
       const data = await inspectionApi.getInspectionDetail(inspectionId);
       setDetailData(data);
     } catch (err) {
-      setError('Failed to load inspection details');
+      console.error(err);
+      setError('Failed to load inspection details.');
     } finally {
       setDetailLoading(false);
     }
   };
 
-  const handleMarkerClick = (eventId) => {
-    if (!eventId) return;
-    setSelectedEventId(eventId);
-    // Scroll to the event in the table
-    const element = document.getElementById(`event-${eventId}`);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      element.style.backgroundColor = '#FEF3C7';
-      setTimeout(() => {
-        element.style.backgroundColor = '';
-      }, 2000);
+  const handleViewAiResponse = async (inspectionId) => {
+    if (!inspectionId) return;
+
+    setAiDialogOpen(true);
+    setAiDialogLoading(true);
+    setAiDialogData(null);
+    setError(null);
+
+    try {
+      const data = await inspectionApi.getInspectionDetail(inspectionId);
+      setAiDialogData(data);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to load AI advisory.');
+    } finally {
+      setAiDialogLoading(false);
     }
   };
 
-  const formatDuration = (seconds) => {
-    const totalSeconds = Number(seconds) || 0;
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = Math.floor(totalSeconds % 60);
-    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  const handleViewVideos = async (inspectionId) => {
+    if (!inspectionId) return;
+
+    setVideoDialogOpen(true);
+    setVideoDialogLoading(true);
+    setVideoDialogData(null);
+    setError(null);
+
+    try {
+      const data = await inspectionApi.getInspectionDetail(inspectionId);
+      setVideoDialogData(data);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to load inspection video information.');
+    } finally {
+      setVideoDialogLoading(false);
+    }
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
+  const handleEventSelect = (eventId) => {
+    if (!eventId) return;
+
+    setSelectedEventId(eventId);
+
+    window.setTimeout(() => {
+      document.getElementById(`event-${eventId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    }, 50);
   };
 
-  // Helpers to handle old and new MongoDB field names
-  const getInspectionName = (inspection) => {
-    return inspection?.video_name
-      || inspection?.gpx_name
-      || inspection?.inspection?.gpx_name
-      || inspection?.inspection?.video_name
-      || inspection?.name
-      || 'N/A';
-  };
+  const defectChartData = useMemo(
+    () =>
+      defectStats.map((item) => ({
+        name: item?.defect_type || 'Unknown',
+        value: asNumber(item?.count, 0),
+        confidence: asNumber(item?.avg_confidence, 0),
+      })),
+    [defectStats]
+  );
 
-  const getInspectionDuration = (inspection) => {
-    return inspection?.duration_seconds
-      ?? inspection?.route?.duration_seconds
-      ?? inspection?.inspection?.duration_seconds
-      ?? inspection?.inspection?.route?.duration_seconds
-      ?? 0;
-  };
+  const timelineData = useMemo(
+    () =>
+      [...inspections]
+        .reverse()
+        .map((inspection) => ({
+          date: formatDate(getInspectionCreatedAt(inspection)),
+          defects: getInspectionDefectCount(inspection),
+          inspection: getInspectionName(inspection),
+        })),
+    [inspections]
+  );
 
-  const getInspectionDistance = (inspection) => {
-    return inspection?.route?.distance_m
-      ?? inspection?.inspection?.route?.distance_m
-      ?? null;
-  };
+  const completedAiCount = useMemo(
+    () =>
+      inspections.filter((inspection) => getAiStatus(inspection) === 'completed')
+        .length,
+    [inspections]
+  );
 
-  const getInspectionPointCount = (inspection) => {
-    return inspection?.route?.point_count
-      ?? inspection?.inspection?.route?.point_count
-      ?? null;
-  };
-
-  const getInspectionDefectCount = (inspection) => {
-    const numeric = inspection?.inspection_events
-      ?? inspection?.inspection?.inspection_events
-      ?? inspection?.defect_count
-      ?? inspection?.inspection?.defect_count;
-
-    if (typeof numeric === 'number') return numeric;
-    if (Array.isArray(inspection?.events)) return inspection.events.length;
-    if (Array.isArray(inspection?.inspection?.events)) return inspection.inspection.events.length;
-    return 0;
-  };
-
-  const getInspectionCreatedAt = (inspection) => {
-    return inspection?.created_at || inspection?.inspection?.created_at || null;
-  };
-
-  const getRoute = (inspection) => {
-    return inspection?.route || inspection?.inspection?.route || null;
-  };
-
-  // Prepare chart data
-  const defectChartData = defectStats.map(d => ({
-    name: d.defect_type,
-    value: d.count,
-    confidence: d.avg_confidence,
-  }));
-
-  const timelineData = inspections.map(insp => ({
-    date: formatDate(getInspectionCreatedAt(insp)),
-    defects: getInspectionDefectCount(insp),
-    video: getInspectionName(insp),
-  })).reverse();
-
-  if (loading) {
+  if (loading && inspections.length === 0) {
     return (
-      <div className="flex justify-center items-center min-h-[60vh]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600" />
       </div>
     );
   }
@@ -491,90 +1453,98 @@ const InspectionDashboard = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">🚆 Track Inspection Dashboard</h1>
-          <p className="text-gray-500 text-sm mt-1">AI-powered railway track inspection results</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+            Smart Railway Intelligence Platform
+          </p>
+          <h1 className="mt-1 text-2xl font-bold text-slate-900">
+            Track Inspection Dashboard
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Defect detections, route locations and AI maintenance advisories.
+          </p>
         </div>
+
         <button
+          type="button"
           onClick={fetchDashboardData}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          disabled={loading}
+          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-60"
         >
-          <RefreshCw className="w-4 h-4" />
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </button>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
 
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Inspections</p>
-              <p className="text-2xl font-bold text-gray-900">{overviewStats?.total_inspections || 0}</p>
-            </div>
-            <Video className="w-10 h-10 text-blue-500 opacity-70" />
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Defects</p>
-              <p className="text-2xl font-bold text-red-600">{overviewStats?.total_defects ?? overviewStats?.total_events ?? 0}</p>
-            </div>
-            <AlertTriangle className="w-10 h-10 text-red-500 opacity-70" />
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Latest Inspection</p>
-              <p className="text-sm font-medium text-gray-900 truncate max-w-[150px]">
-                {getInspectionName(overviewStats?.latest_inspection)}
-              </p>
-              <p className="text-xs text-gray-400">
-                {formatDate(getInspectionCreatedAt(overviewStats?.latest_inspection))}
-              </p>
-            </div>
-            <Clock className="w-10 h-10 text-gray-400 opacity-70" />
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Avg Confidence</p>
-              <p className="text-2xl font-bold text-green-600">
-                {defectStats.length > 0
-                  ? `${(defectStats.reduce((acc, d) => acc + d.avg_confidence, 0) / defectStats.length * 100).toFixed(1)}%`
-                  : 'N/A'}
-              </p>
-            </div>
-            <TrendingUp className="w-10 h-10 text-green-500 opacity-70" />
-          </div>
-        </div>
+      {/* Statistics */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label="Total Inspections"
+          value={overviewStats?.total_inspections ?? inspections.length}
+          helper="Saved inspection runs"
+          icon={Video}
+          tone="blue"
+        />
+
+        <StatCard
+          label="Total Defect Events"
+          value={overviewStats?.total_defects ?? overviewStats?.total_events ?? 0}
+          helper="Aggregated defect events"
+          icon={AlertTriangle}
+          tone="red"
+        />
+
+        <StatCard
+          label="Average Confidence"
+          value={
+            defectStats.length
+              ? `${(
+                  (defectStats.reduce(
+                    (sum, item) => sum + asNumber(item?.avg_confidence, 0),
+                    0
+                  ) /
+                    defectStats.length) *
+                  100
+                ).toFixed(1)}%`
+              : 'N/A'
+          }
+          helper="Across defect classes"
+          icon={TrendingUp}
+          tone="green"
+        />
+
+        <StatCard
+          label="AI Advisories"
+          value={completedAiCount}
+          helper={`Among ${inspections.length} loaded inspections`}
+          icon={Bot}
+          tone="violet"
+        />
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
-        <nav className="flex space-x-8">
+      <div className="border-b border-slate-200">
+        <nav className="flex gap-7">
           {[
-            { id: 'overview', label: '📊 Overview' },
-            { id: 'list', label: '📋 Inspections' },
-            { id: 'analytics', label: '📈 Analytics' },
+            { id: 'overview', label: 'Overview' },
+            { id: 'inspections', label: 'Inspections' },
+            { id: 'analytics', label: 'Analytics' },
           ].map((tab) => (
             <button
               key={tab.id}
+              type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+              className={`border-b-2 px-1 py-3 text-sm font-medium transition ${
                 activeTab === tab.id
                   ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
               }`}
             >
               {tab.label}
@@ -583,388 +1553,928 @@ const InspectionDashboard = () => {
         </nav>
       </div>
 
-      {/* Tab Content */}
-      <div className="mt-6">
-        {/* Overview Tab */}
-        {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Defect Distribution */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Defect Distribution</h3>
-              {defectChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={defectChartData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={true}
-                      label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                      outerRadius={80}
-                      dataKey="value"
-                    >
-                      {defectChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={DEFECT_COLORS[entry.name] || '#8884d8'} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="text-center py-8 text-gray-500">No defect data available</div>
-              )}
+      {/* Overview */}
+      {activeTab === 'overview' && (
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4">
+              <h3 className="font-semibold text-slate-900">
+                Defect Distribution
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Aggregated defect-event count by class.
+              </p>
             </div>
 
-            {/* Confidence by Defect */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Average Confidence by Defect</h3>
-              {defectChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={defectChartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis domain={[0, 1]} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} />
-                    <Tooltip formatter={(v) => `${(v * 100).toFixed(1)}%`} />
-                    <Bar dataKey="confidence" fill="#3B82F6" />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="text-center py-8 text-gray-500">No confidence data available</div>
-              )}
-            </div>
-
-            {/* Defect Statistics Table */}
-            <div className="lg:col-span-2 bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Defect Statistics Summary</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-500">Defect Type</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-gray-500">Count</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-gray-500">Total Detections</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-gray-500">Avg Confidence</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {defectStats.map((stat) => (
-                      <tr key={stat.defect_type} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-4 text-sm text-gray-900">
-                          <span className="mr-2">{DEFECT_ICONS[stat.defect_type] || '🔴'}</span>
-                          {stat.defect_type}
-                        </td>
-                        <td className="py-3 px-4 text-sm text-gray-900 text-right">{stat.count}</td>
-                        <td className="py-3 px-4 text-sm text-gray-900 text-right">{stat.total_detections}</td>
-                        <td className="py-3 px-4 text-sm text-gray-900 text-right">
-                          {(stat.avg_confidence * 100).toFixed(1)}%
-                        </td>
-                      </tr>
+            {defectChartData.length ? (
+              <ResponsiveContainer width="100%" height={320}>
+                <PieChart>
+                  <Pie
+                    data={defectChartData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={100}
+                    label={({ name, percent }) =>
+                      `${name} ${(percent * 100).toFixed(0)}%`
+                    }
+                  >
+                    {defectChartData.map((entry) => (
+                      <Cell
+                        key={entry.name}
+                        fill={getDefectMeta(entry.name).color}
+                      />
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState title="No defect statistics available" />
+            )}
           </div>
-        )}
 
-        {/* List Tab */}
-        {activeTab === 'list' && (
-          <div>
-            {/* Search Bar */}
-            <div className="flex gap-3 mb-6">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search by GPX name or defect type..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4">
+              <h3 className="font-semibold text-slate-900">
+                Average Detection Confidence
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Model confidence summarized by defect class.
+              </p>
+            </div>
+
+            {defectChartData.length ? (
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart data={defectChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fontSize: 11 }}
+                    interval={0}
+                    angle={-15}
+                    textAnchor="end"
+                    height={70}
+                  />
+                  <YAxis
+                    domain={[0, 1]}
+                    tickFormatter={(value) => `${Math.round(value * 100)}%`}
+                  />
+                  <Tooltip
+                    formatter={(value) => `${(Number(value) * 100).toFixed(1)}%`}
+                  />
+                  <Bar dataKey="confidence" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState title="No confidence statistics available" />
+            )}
+          </div>
+
+          <div className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <h3 className="font-semibold text-slate-900">
+                  Recent Inspections
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Open an inspection to view route events and its AI advisory.
+                </p>
               </div>
+
               <button
-                onClick={handleSearch}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                type="button"
+                onClick={() => setActiveTab('inspections')}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700"
               >
-                Search
+                View all
               </button>
             </div>
 
-            {/* Inspections Table */}
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-500">GPX Name</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Duration</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Distance</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Points</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Defects</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Created</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-500">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {inspections.length === 0 ? (
-                      <tr>
-                        <td colSpan="7" className="text-center py-8 text-gray-500">
-                          No inspections found
-                        </td>
-                      </tr>
-                    ) : (
-                      inspections.map((inspection) => {
-                        const inspectionId = inspection.id ?? inspection._id ?? inspection.inspection?.id ?? inspection.inspection?._id;
-                        const distance = getInspectionDistance(inspection);
-                        const pointCount = getInspectionPointCount(inspection);
+            <div className="divide-y divide-slate-100">
+              {inspections.slice(0, 6).map((inspection) => {
+                const inspectionId = getInspectionId(inspection);
+                const advisory = getAiAdvisory(inspection);
 
-                        return (
-                          <tr key={inspectionId} className="border-b border-gray-100 hover:bg-gray-50">
-                            <td className="py-3 px-4 text-sm text-gray-900">{getInspectionName(inspection)}</td>
-                            <td className="py-3 px-4 text-sm text-gray-900 text-center">
-                              {formatDuration(getInspectionDuration(inspection))}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-gray-900 text-center">
-                              {distance != null ? `${distance.toFixed(2)} m` : 'N/A'}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-gray-900 text-center">
-                              {pointCount ?? 'N/A'}
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                getInspectionDefectCount(inspection) > 0
-                                  ? 'bg-red-100 text-red-800'
-                                  : 'bg-green-100 text-green-800'
-                              }`}>
-                                {getInspectionDefectCount(inspection)}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 text-sm text-gray-500 text-center">
-                              {formatDate(getInspectionCreatedAt(inspection))}
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <button
-                                onClick={() => handleViewDetail(inspectionId)}
-                                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                              >
-                                View Details
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
+                return (
+                  <button
+                    key={inspectionId}
+                    type="button"
+                    onClick={() => handleViewDetail(inspectionId)}
+                    className="flex w-full items-center gap-4 py-4 text-left hover:bg-slate-50"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50">
+                      <Video className="h-5 w-5 text-blue-600" />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-slate-900">
+                        {getInspectionName(inspection)}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {formatDate(getInspectionCreatedAt(inspection))}
+                      </p>
+                    </div>
+
+                    <div className="hidden text-right sm:block">
+                      <p className="text-sm font-semibold text-red-600">
+                        {getInspectionDefectCount(inspection)} defects
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {formatDistance(getInspectionDistance(inspection))}
+                      </p>
+                    </div>
+
+                    {advisory?.overall_priority ? (
+                      <PriorityBadge
+                        priority={advisory.overall_priority}
+                        compact
+                      />
+                    ) : (
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-500">
+                        No advisory
+                      </span>
                     )}
-                  </tbody>
-                </table>
-              </div>
+                  </button>
+                );
+              })}
+
+              {inspections.length === 0 && (
+                <EmptyState title="No inspections found" />
+              )}
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Analytics Tab */}
-        {activeTab === 'analytics' && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Inspection Timeline</h3>
-            {timelineData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={timelineData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line
-                    type="monotone"
-                    dataKey="defects"
-                    stroke="#EF4444"
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="text-center py-8 text-gray-500">No timeline data available</div>
-            )}
+      {/* Inspections */}
+      {activeTab === 'inspections' && (
+        <div className="space-y-4">
+          <div className="flex gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                placeholder="Search inspection, GPX file or defect type..."
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') handleSearch();
+                }}
+                className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSearch}
+              className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Search
+            </button>
           </div>
-        )}
-      </div>
 
-      {/* Detail Modal with Map */}
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[940px]">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Inspection
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Distance
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Duration
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Defects
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      AI Advisory
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Created
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100">
+                  {inspections.map((inspection) => {
+                    const inspectionId = getInspectionId(inspection);
+                    const advisory = getAiAdvisory(inspection);
+                    const status = getAiStatus(inspection);
+
+                    return (
+                      <tr key={inspectionId} className="hover:bg-slate-50">
+                        <td className="px-4 py-4">
+                          <p className="max-w-[280px] truncate text-sm font-medium text-slate-900">
+                            {getInspectionName(inspection)}
+                          </p>
+                          <p className="mt-0.5 text-xs text-slate-400">
+                            ID: {inspectionId || 'N/A'}
+                          </p>
+                        </td>
+
+                        <td className="px-4 py-4 text-center text-sm text-slate-600">
+                          {formatDistance(getInspectionDistance(inspection))}
+                        </td>
+
+                        <td className="px-4 py-4 text-center text-sm text-slate-600">
+                          {formatDuration(getInspectionDuration(inspection))}
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
+                            {getInspectionDefectCount(inspection)}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          {advisory?.overall_priority ? (
+                            <PriorityBadge
+                              priority={advisory.overall_priority}
+                              compact
+                            />
+                          ) : (
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                                status === 'failed'
+                                  ? 'bg-red-50 text-red-700'
+                                  : status === 'processing'
+                                  ? 'bg-amber-50 text-amber-700'
+                                  : 'bg-slate-100 text-slate-500'
+                              }`}
+                            >
+                              {status || 'Not generated'}
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-4 text-center text-xs text-slate-500">
+                          {formatDate(getInspectionCreatedAt(inspection))}
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleViewDetail(inspectionId)}
+                              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                            >
+                              View Details
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleViewAiResponse(inspectionId)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
+                            >
+                              <Bot className="h-3.5 w-3.5" />
+                              AI Response
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleViewVideos(inspectionId)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                            >
+                              <PlayCircle className="h-3.5 w-3.5" />
+                              Videos
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {inspections.length === 0 && (
+                    <tr>
+                      <td colSpan="7" className="px-4 py-10 text-center text-sm text-slate-500">
+                        No inspections found.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Analytics */}
+      {activeTab === 'analytics' && (
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          <div className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="font-semibold text-slate-900">
+              Inspection Defect Timeline
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Defect-event counts across recently loaded inspections.
+            </p>
+
+            <div className="mt-4">
+              {timelineData.length ? (
+                <ResponsiveContainer width="100%" height={340}>
+                  <LineChart data={timelineData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip />
+                    <Line
+                      type="monotone"
+                      dataKey="defects"
+                      stroke="#DC2626"
+                      strokeWidth={3}
+                      dot={{ r: 4 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <EmptyState title="No timeline data available" />
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="font-semibold text-slate-900">Defect Classes</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Current detector taxonomy.
+            </p>
+
+            <div className="mt-5 space-y-3">
+              {Object.entries(DEFECT_META).map(([type, meta]) => {
+                const stat = defectStats.find((item) => item?.defect_type === type);
+
+                return (
+                  <div
+                    key={type}
+                    className="flex items-center gap-3 rounded-xl border border-slate-200 p-3"
+                  >
+                    <div
+                      className="flex h-9 w-9 items-center justify-center rounded-lg"
+                      style={{ backgroundColor: `${meta.color}15` }}
+                    >
+                      {meta.icon}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-slate-800">
+                        {type}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {stat?.count ?? 0} events
+                      </p>
+                    </div>
+
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: meta.color }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detail dialog */}
       {detailDialogOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex items-center justify-center min-h-screen px-4 py-4">
-            <div className="fixed inset-0 bg-black bg-opacity-50" onClick={() => setDetailDialogOpen(false)}></div>
-            <div className="relative bg-white rounded-lg shadow-xl max-w-7xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center z-10">
-                <h3 className="text-lg font-semibold text-gray-900">Inspection Details</h3>
+          <div className="flex min-h-screen items-start justify-center px-3 py-6 sm:px-6">
+            <button
+              type="button"
+              aria-label="Close inspection details"
+              className="fixed inset-0 cursor-default bg-slate-950/55"
+              onClick={() => setDetailDialogOpen(false)}
+            />
+
+            <div className="relative z-10 w-full max-w-7xl overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
+              <div className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900">
+                    Inspection Details
+                  </h3>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Detection evidence, route location and maintenance advisory
+                  </p>
+                </div>
+
                 <button
+                  type="button"
                   onClick={() => setDetailDialogOpen(false)}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
                 >
-                  <X className="w-6 h-6" />
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="p-6">
+              <div className="max-h-[88vh] overflow-y-auto p-4 sm:p-6">
                 {detailLoading ? (
-                  <div className="flex justify-center py-8">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                  <div className="flex min-h-[420px] items-center justify-center">
+                    <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600" />
                   </div>
                 ) : detailData ? (
                   (() => {
                     const inspection = detailData?.inspection || detailData || {};
-                    const events = detailData?.events || inspection?.events || [];
+                    const events = getInspectionEvents(detailData);
                     const route = getRoute(inspection);
-                    const inspectionId = inspection.id ?? inspection._id ?? detailData?.inspection?.id ?? detailData?.inspection?._id;
+                    const advisory = getAiAdvisory(inspection);
+                    const spatial = getAiSpatialSummary(inspection);
+                    const inspectionId = getInspectionId(inspection);
+                    const gpsCount = events.filter((event) =>
+                      getEventCoordinates(event)
+                    ).length;
 
                     return (
                       <div className="space-y-6">
                         {/* Summary */}
-                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                          <div>
-                            <p className="text-sm text-gray-500">GPX File</p>
-                            <p className="font-medium text-sm truncate">{getInspectionName(inspection)}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-gray-500">Duration</p>
-                            <p className="font-medium">{formatDuration(getInspectionDuration(inspection))}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-gray-500">Total Defects</p>
-                            <p className="font-medium text-red-600">{getInspectionDefectCount(inspection)}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-gray-500">Defects with GPS</p>
-                            <p className="font-medium">
-                              {events.filter(e => getEventCoordinates(e)).length}
+                        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-xs text-slate-500">Inspection</p>
+                            <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                              {getInspectionName(inspection)}
                             </p>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-xs text-slate-500">Distance</p>
+                            <p className="mt-1 text-sm font-semibold text-slate-900">
+                              {formatDistance(getInspectionDistance(inspection))}
+                            </p>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-xs text-slate-500">Duration</p>
+                            <p className="mt-1 text-sm font-semibold text-slate-900">
+                              {formatDuration(getInspectionDuration(inspection))}
+                            </p>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-xs text-slate-500">Defects</p>
+                            <p className="mt-1 text-sm font-semibold text-red-600">
+                              {events.length}
+                            </p>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-xs text-slate-500">With GPS</p>
+                            <p className="mt-1 text-sm font-semibold text-slate-900">
+                              {gpsCount}
+                            </p>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-xs text-slate-500">AI Priority</p>
+                            <div className="mt-1">
+                              {advisory?.overall_priority ? (
+                                <PriorityBadge
+                                  priority={advisory.overall_priority}
+                                  compact
+                                />
+                              ) : (
+                                <span className="text-sm font-medium text-slate-400">
+                                  N/A
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
 
-                        {/* Route Information */}
+                        {/* Route */}
                         {route && (
-                          <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-                            <div className="flex items-center gap-2 mb-3">
-                              <MapPin className="w-4 h-4 text-blue-600" />
-                              <h4 className="font-semibold text-gray-900 text-sm">Route Information</h4>
+                          <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                            <div className="flex items-center gap-2">
+                              <MapPin className="h-4 w-4 text-blue-600" />
+                              <h4 className="text-sm font-semibold text-slate-900">
+                                Route Information
+                              </h4>
                             </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-sm">
+
+                            <div className="mt-3 grid grid-cols-2 gap-4 text-sm lg:grid-cols-5">
                               <div>
-                                <p className="text-gray-500">Distance</p>
-                                <p className="font-medium">{route.distance_m != null ? `${route.distance_m.toFixed(2)} m` : 'N/A'}</p>
-                              </div>
-                              <div>
-                                <p className="text-gray-500">Points</p>
-                                <p className="font-medium">{route.point_count ?? 'N/A'}</p>
-                              </div>
-                              <div>
-                                <p className="text-gray-500">Start</p>
-                                <p className="font-medium text-xs">
-                                  {route.start?.latitude?.toFixed(6)}, {route.start?.longitude?.toFixed(6)}
+                                <p className="text-xs text-slate-500">Distance</p>
+                                <p className="mt-1 font-medium text-slate-800">
+                                  {formatDistance(route?.distance_m)}
                                 </p>
                               </div>
+
                               <div>
-                                <p className="text-gray-500">End</p>
-                                <p className="font-medium text-xs">
-                                  {route.end?.latitude?.toFixed(6)}, {route.end?.longitude?.toFixed(6)}
+                                <p className="text-xs text-slate-500">Points</p>
+                                <p className="mt-1 font-medium text-slate-800">
+                                  {route?.point_count ?? getInspectionPointCount(inspection) ?? 'N/A'}
+                                </p>
+                              </div>
+
+                              <div>
+                                <p className="text-xs text-slate-500">Start</p>
+                                <p className="mt-1 text-xs font-medium text-slate-800">
+                                  {route?.start?.latitude != null &&
+                                  route?.start?.longitude != null
+                                    ? `${Number(route.start.latitude).toFixed(
+                                        6
+                                      )}, ${Number(route.start.longitude).toFixed(
+                                        6
+                                      )}`
+                                    : 'N/A'}
+                                </p>
+                              </div>
+
+                              <div>
+                                <p className="text-xs text-slate-500">End</p>
+                                <p className="mt-1 text-xs font-medium text-slate-800">
+                                  {route?.end?.latitude != null &&
+                                  route?.end?.longitude != null
+                                    ? `${Number(route.end.latitude).toFixed(
+                                        6
+                                      )}, ${Number(route.end.longitude).toFixed(
+                                        6
+                                      )}`
+                                    : 'N/A'}
+                                </p>
+                              </div>
+
+                              <div>
+                                <p className="text-xs text-slate-500">
+                                  Inspection ID
+                                </p>
+                                <p className="mt-1 truncate text-xs font-medium text-slate-800">
+                                  {inspectionId || 'N/A'}
                                 </p>
                               </div>
                             </div>
                           </div>
                         )}
 
-                        {/* Map and Events Section */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                          {/* Map */}
-                          <div className="lg:col-span-2 bg-gray-50 rounded-lg overflow-hidden" style={{ height: '450px' }}>
-                            <DefectMap
-                              events={events}
-                              selectedEventId={selectedEventId}
-                              onMarkerClick={handleMarkerClick}
-                              route={route}
-                            />
+                        {/* AI advisory */}
+                        <AiAdvisoryPanel inspection={inspection} />
+
+                        {/* Map + spatial summary */}
+                        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+                          <div className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                            <div className="h-[470px]">
+                              <DefectMap
+                                events={events}
+                                selectedEventId={selectedEventId}
+                                onMarkerClick={handleEventSelect}
+                                route={route}
+                              />
+                            </div>
                           </div>
 
-                          {/* Event List */}
-                          <div className="bg-gray-50 rounded-lg p-4 overflow-y-auto" style={{ maxHeight: '450px' }}>
-                            <div className="flex items-center justify-between mb-3">
-                              <h4 className="font-semibold text-gray-900">Detected Events</h4>
-                              <span className="text-xs text-gray-500">{events.length} total</span>
+                          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h4 className="font-semibold text-slate-900">
+                                  Spatial Summary
+                                </h4>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  Deterministic grouping from route distances
+                                </p>
+                              </div>
+                              <Layers className="h-5 w-5 text-slate-400" />
                             </div>
-                            <div className="space-y-2">
-                              {events.length === 0 ? (
-                                <div className="text-center py-4 text-gray-500 text-sm">
-                                  No events detected
+
+                            {spatial ? (
+                              <div className="mt-4 space-y-4">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div className="rounded-xl bg-slate-50 p-3">
+                                    <p className="text-xs text-slate-500">
+                                      Events / 10 m
+                                    </p>
+                                    <p className="mt-1 text-lg font-bold text-slate-900">
+                                      {spatial?.events_per_10m ?? 'N/A'}
+                                    </p>
+                                  </div>
+
+                                  <div className="rounded-xl bg-slate-50 p-3">
+                                    <p className="text-xs text-slate-500">
+                                      Clusters
+                                    </p>
+                                    <p className="mt-1 text-lg font-bold text-slate-900">
+                                      {spatial?.clusters?.length ?? 0}
+                                    </p>
+                                  </div>
                                 </div>
-                              ) : (
-                                events.map((event) => {
-                                  const eventId = event.id ?? event._id;
-                                  const coords = getEventCoordinates(event);
-                                  const hasGps = Boolean(coords);
 
-                                  return (
-                                    <div
-                                      key={eventId}
-                                      id={`event-${eventId}`}
-                                      className={`bg-white rounded-lg p-3 shadow-sm border-l-4 transition-all cursor-pointer hover:shadow-md ${
-                                        selectedEventId === eventId
-                                          ? 'border-l-4 border-blue-500 bg-blue-50'
-                                          : 'border-l-4 border-transparent'
-                                      } ${hasGps ? 'hover:bg-blue-50' : 'opacity-70'}`}
-                                      onClick={() => {
-                                        if (hasGps) {
-                                          handleMarkerClick(eventId);
-                                        }
-                                      }}
-                                    >
-                                      <div className="flex items-start justify-between">
-                                        <div className="flex-1 min-w-0">
-                                          <div className="flex items-center gap-2">
-                                            <span className="text-lg">{DEFECT_ICONS[event.defect_type] || '🔴'}</span>
-                                            <span className="font-medium text-sm truncate">{event.defect_type}</span>
-                                            {!hasGps && (
-                                              <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                                                No GPS
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                                            <span>Conf: {((event.confidence ?? 0) * 100).toFixed(1)}%</span>
-                                            <span>•</span>
-                                            <span>{Number(event.start_timestamp || 0).toFixed(1)}s</span>
-                                            <span>•</span>
-                                            <span>{event.detection_count ?? 0} detections</span>
-                                          </div>
-                                          {coords && (
-                                            <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
-                                              <MapPin className="w-3 h-3" />
-                                              <span>
-                                                {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
-                                              </span>
-                                            </div>
+                                <div className="space-y-2">
+                                  {(spatial?.clusters || []).map(
+                                    (cluster, index) => (
+                                      <div
+                                        key={`${cluster?.rail_side}-${cluster?.start_distance_m}-${index}`}
+                                        className="rounded-xl border border-slate-200 p-3"
+                                      >
+                                        <p className="text-sm font-semibold text-slate-800">
+                                          {(cluster?.rail_side || 'Unknown').toUpperCase()}{' '}
+                                          rail
+                                        </p>
+                                        <p className="mt-1 text-xs text-slate-500">
+                                          {formatDistance(
+                                            cluster?.start_distance_m
+                                          )}{' '}
+                                          →{' '}
+                                          {formatDistance(
+                                            cluster?.end_distance_m
                                           )}
-                                        </div>
-                                        {hasGps && (
-                                          <div className="flex-shrink-0 ml-2">
-                                            <div
-                                              className="w-3 h-3 rounded-full"
-                                              style={{ backgroundColor: DEFECT_COLORS[event.defect_type] || '#EF4444' }}
-                                            />
-                                          </div>
-                                        )}
+                                        </p>
+                                        <p className="mt-2 text-xs text-slate-600">
+                                          {cluster?.event_count ?? 0} events ·{' '}
+                                          {Object.entries(
+                                            cluster?.defect_counts || {}
+                                          )
+                                            .map(
+                                              ([type, count]) =>
+                                                `${type}: ${count}`
+                                            )
+                                            .join(' · ')}
+                                        </p>
                                       </div>
-                                    </div>
-                                  );
-                                })
-                              )}
-                            </div>
+                                    )
+                                  )}
+                                </div>
+
+                                {spatial?.important_note && (
+                                  <p className="text-xs leading-5 text-slate-400">
+                                    {spatial.important_note}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="mt-4">
+                                <EmptyState
+                                  title="No spatial summary stored"
+                                  description="The inspection detail response does not currently include ai_spatial_summary."
+                                />
+                              </div>
+                            )}
                           </div>
+                        </div>
+
+                        {/* Events */}
+                        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <h4 className="font-semibold text-slate-900">
+                                Detected Defect Events
+                              </h4>
+                              <p className="mt-1 text-sm text-slate-500">
+                                Select an event to highlight its map marker.
+                                Supplementary AI observations appear only when a
+                                positive finding was stored.
+                              </p>
+                            </div>
+
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                              {events.length} events
+                            </span>
+                          </div>
+
+                          {events.length ? (
+                            <div className="grid gap-3 lg:grid-cols-2">
+                              {events.map((event, index) => {
+                                const eventId = getEventId(event, index);
+
+                                return (
+                                  <EventCard
+                                    key={eventId}
+                                    event={event}
+                                    index={index}
+                                    selected={selectedEventId === eventId}
+                                    onSelect={handleEventSelect}
+                                  />
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <EmptyState
+                              title="No defect events detected"
+                              description="This inspection does not contain stored defect events."
+                            />
+                          )}
+                        </section>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <EmptyState
+                    title="Inspection detail unavailable"
+                    description="The inspection detail request did not return data."
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Focused AI Response dialog */}
+      {aiDialogOpen && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto">
+          <div className="flex min-h-screen items-start justify-center px-3 py-6 sm:px-6">
+            <button
+              type="button"
+              aria-label="Close AI response"
+              className="fixed inset-0 cursor-default bg-slate-950/55"
+              onClick={() => setAiDialogOpen(false)}
+            />
+
+            <div className="relative z-10 w-full max-w-5xl overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
+              <div className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100">
+                    <Bot className="h-5 w-5 text-violet-700" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-slate-900">
+                      AI Maintenance Response
+                    </h3>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      Stored Qwen maintenance advisory for this inspection
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setAiDialogOpen(false)}
+                  className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="max-h-[86vh] overflow-y-auto p-4 sm:p-6">
+                {aiDialogLoading ? (
+                  <div className="flex min-h-[340px] items-center justify-center">
+                    <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-violet-600" />
+                  </div>
+                ) : aiDialogData ? (
+                  <AiAdvisoryPanel
+                    inspection={aiDialogData?.inspection || aiDialogData}
+                  />
+                ) : (
+                  <EmptyState
+                    title="AI advisory unavailable"
+                    description="The inspection detail endpoint did not return an advisory."
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inspected output videos dialog */}
+      {videoDialogOpen && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto">
+          <div className="flex min-h-screen items-start justify-center px-3 py-6 sm:px-6">
+            <button
+              type="button"
+              aria-label="Close videos"
+              className="fixed inset-0 cursor-default bg-slate-950/55"
+              onClick={() => setVideoDialogOpen(false)}
+            />
+
+            <div className="relative z-10 w-full max-w-6xl overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
+              <div className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100">
+                    <FileVideo2 className="h-5 w-5 text-blue-700" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-slate-900">
+                      Inspected Output Videos
+                    </h3>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      Annotated left-rail and right-rail inspection outputs
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setVideoDialogOpen(false)}
+                  className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="max-h-[86vh] overflow-y-auto p-4 sm:p-6">
+                {videoDialogLoading ? (
+                  <div className="flex min-h-[340px] items-center justify-center">
+                    <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600" />
+                  </div>
+                ) : videoDialogData ? (
+                  (() => {
+                    const inspection =
+                      videoDialogData?.inspection || videoDialogData || {};
+                    const videos = getInspectionVideoSources(inspection);
+
+                    const videoItems = [
+                      { key: 'left', title: 'LEFT Rail', data: videos.left },
+                      { key: 'right', title: 'RIGHT Rail', data: videos.right },
+                    ];
+
+                    return (
+                      <div className="space-y-5">
+                        <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+                          <p className="text-sm font-semibold text-slate-900">
+                            {getInspectionName(inspection)}
+                          </p>
+                          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                            <span>
+                              Inspection ID: {getInspectionId(inspection) || 'N/A'}
+                            </span>
+                            <span>
+                              Distance: {formatDistance(getInspectionDistance(inspection))}
+                            </span>
+                            <span>
+                              Created: {formatDate(getInspectionCreatedAt(inspection))}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-5 lg:grid-cols-2">
+                          {videoItems.map((item) => (
+                            <div
+                              key={item.key}
+                              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                            >
+                              <div className="border-b border-slate-100 px-4 py-3">
+                                <h4 className="font-semibold text-slate-900">
+                                  {item.title}
+                                </h4>
+                                <p className="mt-0.5 text-xs text-slate-500">
+                                  Annotated inspection output
+                                </p>
+                              </div>
+
+                              <div className="p-4">
+                                {item.data?.url ? (
+                                  <>
+                                    <video
+                                      controls
+                                      preload="metadata"
+                                      className="aspect-video w-full rounded-xl bg-black"
+                                      src={item.data.url}
+                                    >
+                                      Your browser does not support HTML video.
+                                    </video>
+
+                                    <a
+                                      href={item.data.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800"
+                                    >
+                                      Open video source
+                                      <ExternalLink className="h-3.5 w-3.5" />
+                                    </a>
+                                  </>
+                                ) : (
+                                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5">
+                                    <FileVideo2 className="mb-3 h-8 w-8 text-slate-300" />
+                                    <p className="text-sm font-semibold text-slate-700">
+                                      Browser-playable URL not available
+                                    </p>
+                                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                                      The inspection may currently store only a server/Google Drive filesystem path.
+                                      React cannot play that path directly; the backend must expose the video through
+                                      an HTTP media endpoint or a cloud-storage URL.
+                                    </p>
+
+                                    {item.data?.storedPath && (
+                                      <div className="mt-3 rounded-lg bg-white p-3">
+                                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                                          Stored media path
+                                        </p>
+                                        <p className="mt-1 break-all font-mono text-xs text-slate-600">
+                                          {item.data.storedPath}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     );
                   })()
                 ) : (
-                  <div className="text-center py-8 text-red-600">Failed to load inspection details</div>
+                  <EmptyState
+                    title="Video information unavailable"
+                    description="The inspection detail endpoint did not return media information."
+                  />
                 )}
               </div>
             </div>
