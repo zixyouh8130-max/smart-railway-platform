@@ -1,15 +1,35 @@
 # backend/app/api/train.py
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+
 from typing import Optional
-from sqlalchemy import or_, case, func
 import re
 import unicodedata
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+)
+from sqlalchemy import or_, func
+from sqlalchemy.orm import Session, joinedload
 
 from ..core.database import get_db
 from ..models.train import Train
 from ..models.route import Route
-from ..schemas.train import TrainCreate, TrainUpdate, TrainResponse, TrainListResponse
+from ..schemas.train import (
+    TrainCreate,
+    TrainUpdate,
+    TrainResponse,
+    TrainListResponse,
+)
+
+
+router = APIRouter()
+
+
+# ============================================================
+# Myanmar railway search normalization
+# ============================================================
 
 MYANMAR_DIGITS = "၀၁၂၃၄၅၆၇၈၉"
 ASCII_DIGITS = "0123456789"
@@ -19,7 +39,6 @@ MYANMAR_TO_ASCII = str.maketrans(
     ASCII_DIGITS
 )
 
-router = APIRouter()
 
 def normalize_railway_search(text: str) -> str:
     """
@@ -27,11 +46,11 @@ def normalize_railway_search(text: str) -> str:
 
     Examples:
 
-    အမှတ် (၇၂) အဆန်
-    အမှတ်(၇၂)အဆန်
-    အမှတ် (72) အဆန်
+        အမှတ် (၇၂) အဆန်
+        အမှတ်(၇၂)အဆန်
+        အမှတ် (72) အဆန်
 
-    all become a comparable representation.
+    All become comparable representations.
     """
 
     if not text:
@@ -59,7 +78,16 @@ def normalize_railway_search(text: str) -> str:
 
     return text
 
-def _train_to_dict(train: Train):
+
+# ============================================================
+# Helper
+# ============================================================
+
+def _train_to_dict(train: Train) -> dict:
+    """
+    Convert Train ORM object into passenger/AI API response.
+    """
+
     return {
         "id": train.id,
         "train_no": train.train_no,
@@ -70,17 +98,24 @@ def _train_to_dict(train: Train):
         "capacity": train.capacity,
         "speed": train.speed,
         "status": train.status,
+
         "created_at": (
             train.created_at.isoformat()
             if train.created_at
             else None
         ),
+
         "updated_at": (
             train.updated_at.isoformat()
             if train.updated_at
             else None
         ),
     }
+
+
+# ============================================================
+# Passenger / AI train catalog
+# ============================================================
 
 @router.get("/catalog")
 def get_train_catalog(
@@ -126,11 +161,23 @@ def get_train_catalog(
         ]
     }
 
+
+# ============================================================
+# Passenger / AI train search
+# ============================================================
+
 @router.get("/search")
 def search_trains(
-    q: str = Query(..., min_length=1),
+    q: str = Query(
+        ...,
+        min_length=1
+    ),
     status: str = "ACTIVE",
-    limit: int = Query(10, ge=1, le=20),
+    limit: int = Query(
+        10,
+        ge=1,
+        le=20
+    ),
     db: Session = Depends(get_db)
 ):
     raw_query = q.strip()
@@ -146,19 +193,15 @@ def search_trains(
         raw_query
     )
 
-    # PostgreSQL-side equivalent:
-    #
-    # 1. Convert Myanmar digits -> ASCII
-    # 2. Remove spaces, (), -, punctuation
-    #
+    # PostgreSQL-side normalization
     normalized_train_name = func.regexp_replace(
         func.translate(
             func.coalesce(
                 Train.train_name,
                 ""
             ),
-            "၀၁၂၃၄၅၆၇၈၉",
-            "0123456789"
+            MYANMAR_DIGITS,
+            ASCII_DIGITS
         ),
         r"[\s\-\(\)\[\],.]+",
         "",
@@ -171,8 +214,8 @@ def search_trains(
                 Train.train_no,
                 ""
             ),
-            "၀၁၂၃၄၅၆၇၈၉",
-            "0123456789"
+            MYANMAR_DIGITS,
+            ASCII_DIGITS
         ),
         r"[\s\-\(\)\[\],.]+",
         "",
@@ -183,15 +226,16 @@ def search_trains(
 
     if status:
         query = query.filter(
-            Train.status == status.upper()
+            Train.status == status.strip().upper()
         )
 
     query = query.filter(
         or_(
-            # Normal raw searches
+            # Raw searches
             Train.train_no.ilike(
                 f"%{raw_query}%"
             ),
+
             Train.train_name.ilike(
                 f"%{raw_query}%"
             ),
@@ -200,6 +244,7 @@ def search_trains(
             normalized_train_no.ilike(
                 f"%{normalized_query}%"
             ),
+
             normalized_train_name.ilike(
                 f"%{normalized_query}%"
             ),
@@ -222,173 +267,474 @@ def search_trains(
         ]
     }
 
-@router.get("/", response_model=TrainListResponse)
+
+# ============================================================
+# Get all trains
+# ============================================================
+
+@router.get(
+    "/",
+    response_model=TrainListResponse
+)
 async def get_trains(
-        skip: int = Query(0, ge=0),
-        limit: int = Query(100, ge=1, le=100),
-        status: Optional[str] = None,
-        route_id: Optional[int] = None,
-        search: Optional[str] = Query(None, description="Search by train number or name"),
-        db: Session = Depends(get_db)
+    skip: int = Query(
+        0,
+        ge=0
+    ),
+    limit: int = Query(
+        100,
+        ge=1,
+        le=100
+    ),
+    status: Optional[str] = None,
+    route_id: Optional[int] = None,
+    search: Optional[str] = Query(
+        None,
+        description="Search by train number or name"
+    ),
+    db: Session = Depends(get_db)
 ):
-    """Get all trains with optional filters"""
+    """
+    Get all trains with optional filters.
+    """
+
     query = db.query(Train)
 
-    # Apply filters
+    # --------------------------------------------------------
+    # Filters
+    # --------------------------------------------------------
+
     if status:
-        query = query.filter(Train.status == status)
-
-    if route_id:
-        query = query.filter(Train.route_id == route_id)
-
-    if search:
-        search_term = f"%{search}%"
-        from sqlalchemy import or_
         query = query.filter(
-            or_(
-                Train.train_no.ilike(search_term),
-                Train.train_name.ilike(search_term)
-            )
+            Train.status == status.strip().upper()
         )
 
-    # Get total count
+    if route_id is not None:
+        query = query.filter(
+            Train.route_id == route_id
+        )
+
+    if search:
+        search = search.strip()
+
+        if search:
+            search_term = f"%{search}%"
+
+            query = query.filter(
+                or_(
+                    Train.train_no.ilike(
+                        search_term
+                    ),
+                    Train.train_name.ilike(
+                        search_term
+                    )
+                )
+            )
+
+    # Total count before pagination
     total = query.count()
 
-    # Get paginated results with relationships
-    trains = query.options(
-        joinedload(Train.route),
-        joinedload(Train.coaches)
-    ).offset(skip).limit(limit).all()
+    trains = (
+        query
+        .options(
+            joinedload(Train.route),
+            joinedload(Train.coaches)
+        )
+        .order_by(Train.id.asc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
-    return TrainListResponse(trains=trains, total=total)
+    return TrainListResponse(
+        trains=trains,
+        total=total
+    )
 
 
-@router.get("/{train_id}", response_model=TrainResponse)
-async def get_train(train_id: int, db: Session = Depends(get_db)):
-    """Get a single train by ID"""
-    train = db.query(Train).options(
-        joinedload(Train.route),
-        joinedload(Train.coaches)
-    ).filter(Train.id == train_id).first()
+# ============================================================
+# Get trains by route
+#
+# IMPORTANT:
+# This is before /{train_id} to keep the routes clear/readable.
+# ============================================================
+
+@router.get(
+    "/by-route/{route_id}",
+    response_model=TrainListResponse
+)
+async def get_trains_by_route(
+    route_id: int,
+    status: Optional[str] = Query(
+        None,
+        description="Filter by status"
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all trains for a specific route.
+    """
+
+    route = (
+        db.query(Route)
+        .filter(Route.id == route_id)
+        .first()
+    )
+
+    if not route:
+        raise HTTPException(
+            status_code=404,
+            detail="Route not found"
+        )
+
+    query = db.query(Train).filter(
+        Train.route_id == route_id
+    )
+
+    if status:
+        query = query.filter(
+            Train.status == status.strip().upper()
+        )
+
+    trains = (
+        query
+        .options(
+            joinedload(Train.route),
+            joinedload(Train.coaches)
+        )
+        .order_by(Train.id.asc())
+        .all()
+    )
+
+    return TrainListResponse(
+        trains=trains,
+        total=len(trains)
+    )
+
+
+# ============================================================
+# Get single train
+# ============================================================
+
+@router.get(
+    "/{train_id}",
+    response_model=TrainResponse
+)
+async def get_train(
+    train_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get a single train by ID.
+    """
+
+    train = (
+        db.query(Train)
+        .options(
+            joinedload(Train.route),
+            joinedload(Train.coaches)
+        )
+        .filter(
+            Train.id == train_id
+        )
+        .first()
+    )
 
     if not train:
-        raise HTTPException(status_code=404, detail="Train not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Train not found"
+        )
 
     return train
 
 
-@router.post("/", response_model=TrainResponse, status_code=201)
-async def create_train(train_data: TrainCreate, db: Session = Depends(get_db)):
-    """Create a new train"""
+# ============================================================
+# Create train
+# ============================================================
+
+@router.post(
+    "/",
+    response_model=TrainResponse,
+    status_code=201
+)
+async def create_train(
+    train_data: TrainCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new train.
+    """
+
     try:
-        # Check if train_no already exists
-        existing = db.query(Train).filter(Train.train_no == train_data.train_no).first()
+        # ----------------------------------------------------
+        # Check train number uniqueness
+        # ----------------------------------------------------
+
+        existing = (
+            db.query(Train)
+            .filter(
+                Train.train_no
+                == train_data.train_no
+            )
+            .first()
+        )
+
         if existing:
-            raise HTTPException(status_code=400, detail="Train number already exists")
+            raise HTTPException(
+                status_code=400,
+                detail="Train number already exists"
+            )
 
-        # Validate route exists
-        route = db.query(Route).filter(Route.id == train_data.route_id).first()
-        if not route:
-            raise HTTPException(status_code=400, detail="Route not found")
+        # ----------------------------------------------------
+        # Validate route
+        # Keep existing route relationship behavior
+        # ----------------------------------------------------
 
-        # Create train
-        train = Train(**train_data.model_dump())
+        if train_data.route_id is not None:
+            route = (
+                db.query(Route)
+                .filter(
+                    Route.id
+                    == train_data.route_id
+                )
+                .first()
+            )
+
+            if not route:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Route not found"
+                )
+
+        # ----------------------------------------------------
+        # Create Train
+        #
+        # created_at and updated_at are NOT supplied here.
+        # PostgreSQL/SQLAlchemy generates them automatically.
+        # ----------------------------------------------------
+
+        train = Train(
+            **train_data.model_dump()
+        )
+
         db.add(train)
         db.commit()
         db.refresh(train)
 
-        # Reload with relationships
-        train = db.query(Train).options(
-            joinedload(Train.route),
-            joinedload(Train.coaches)
-        ).filter(Train.id == train.id).first()
+        # Reload relationships
+        train = (
+            db.query(Train)
+            .options(
+                joinedload(Train.route),
+                joinedload(Train.coaches)
+            )
+            .filter(
+                Train.id == train.id
+            )
+            .first()
+        )
 
         return train
+
     except HTTPException:
+        db.rollback()
         raise
+
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 
-@router.put("/{train_id}", response_model=TrainResponse)
-async def update_train(train_id: int, train_data: TrainUpdate, db: Session = Depends(get_db)):
-    """Update a train"""
-    train = db.query(Train).filter(Train.id == train_id).first()
+# ============================================================
+# Update train
+# ============================================================
+
+@router.put(
+    "/{train_id}",
+    response_model=TrainResponse
+)
+async def update_train(
+    train_id: int,
+    train_data: TrainUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update an existing train.
+
+    updated_at is automatically changed by SQLAlchemy.
+    """
+
+    train = (
+        db.query(Train)
+        .filter(
+            Train.id == train_id
+        )
+        .first()
+    )
+
     if not train:
-        raise HTTPException(status_code=404, detail="Train not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Train not found"
+        )
 
     try:
-        update_data = train_data.model_dump(exclude_unset=True)
+        update_data = train_data.model_dump(
+            exclude_unset=True
+        )
 
-        # Check train_no uniqueness if being updated
-        if 'train_no' in update_data and update_data['train_no'] != train.train_no:
-            existing = db.query(Train).filter(Train.train_no == update_data['train_no']).first()
+        # ----------------------------------------------------
+        # Train number uniqueness
+        # ----------------------------------------------------
+
+        if (
+            "train_no" in update_data
+            and update_data["train_no"]
+            != train.train_no
+        ):
+            existing = (
+                db.query(Train)
+                .filter(
+                    Train.train_no
+                    == update_data["train_no"]
+                )
+                .first()
+            )
+
             if existing:
-                raise HTTPException(status_code=400, detail="Train number already exists")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Train number already exists"
+                )
 
-        # Validate route if being updated
-        if 'route_id' in update_data:
-            route = db.query(Route).filter(Route.id == update_data['route_id']).first()
-            if not route:
-                raise HTTPException(status_code=400, detail="Route not found")
+        # ----------------------------------------------------
+        # Validate route
+        # Keep current route relationship behavior
+        # ----------------------------------------------------
 
+        if "route_id" in update_data:
+            route_id = update_data["route_id"]
+
+            if route_id is not None:
+                route = (
+                    db.query(Route)
+                    .filter(
+                        Route.id == route_id
+                    )
+                    .first()
+                )
+
+                if not route:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Route not found"
+                    )
+
+        # ----------------------------------------------------
+        # Normalize status
+        # ----------------------------------------------------
+
+        if (
+            "status" in update_data
+            and update_data["status"]
+        ):
+            update_data["status"] = (
+                update_data["status"]
+                .strip()
+                .upper()
+            )
+
+        # ----------------------------------------------------
         # Apply updates
+        #
+        # updated_at will automatically be updated because:
+        #
+        # onupdate=func.now()
+        # ----------------------------------------------------
+
         for key, value in update_data.items():
-            setattr(train, key, value)
+            setattr(
+                train,
+                key,
+                value
+            )
 
         db.commit()
         db.refresh(train)
 
-        # Reload with relationships
-        train = db.query(Train).options(
-            joinedload(Train.route),
-            joinedload(Train.coaches)
-        ).filter(Train.id == train.id).first()
+        # Reload relationships
+        train = (
+            db.query(Train)
+            .options(
+                joinedload(Train.route),
+                joinedload(Train.coaches)
+            )
+            .filter(
+                Train.id == train.id
+            )
+            .first()
+        )
 
         return train
+
     except HTTPException:
+        db.rollback()
         raise
+
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
 
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ============================================================
+# Delete train
+# ============================================================
 
 @router.delete("/{train_id}")
-async def delete_train(train_id: int, db: Session = Depends(get_db)):
-    """Delete a train"""
-    train = db.query(Train).filter(Train.id == train_id).first()
+async def delete_train(
+    train_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a train.
+    """
+
+    train = (
+        db.query(Train)
+        .filter(
+            Train.id == train_id
+        )
+        .first()
+    )
+
     if not train:
-        raise HTTPException(status_code=404, detail="Train not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Train not found"
+        )
 
     try:
         db.delete(train)
         db.commit()
-        return {"message": "Train deleted successfully", "success": True}
+
+        return {
+            "message": "Train deleted successfully",
+            "success": True
+        }
+
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get("/by-route/{route_id}", response_model=TrainListResponse)
-async def get_trains_by_route(
-        route_id: int,
-        status: Optional[str] = Query(None, description="Filter by status"),
-        db: Session = Depends(get_db)
-):
-    """Get all trains for a specific route"""
-    route = db.query(Route).filter(Route.id == route_id).first()
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")
-
-    query = db.query(Train).filter(Train.route_id == route_id)
-
-    if status:
-        query = query.filter(Train.status == status)
-
-    trains = query.options(
-        joinedload(Train.route),
-        joinedload(Train.coaches)
-    ).all()
-
-    return TrainListResponse(trains=trains, total=len(trains))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )

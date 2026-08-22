@@ -3,7 +3,6 @@ from .chat_messages import ChatMessage
 from .chat_sessions import ChatSession
 from .chatbot_feedback import ChatbotFeedback
 from .coach import Coach
-from .document_chunks import DocumentChunk
 from .location_history import LocationHistory
 from .route import Route
 from .route_station import RouteStation
