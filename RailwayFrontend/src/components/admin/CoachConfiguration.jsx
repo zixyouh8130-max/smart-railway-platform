@@ -51,10 +51,10 @@ const CoachConfiguration = ({ train, onClose, onSave }) => {
           setCoaches(coachesData.map(coach => ({
             ...coach,
             // Map backend field names to frontend field names
-            type: coach.coach_type || coach.type,
-            seatsPerRow: coach.seats_per_row || coach.seatsPerRow,
-            totalSeats: coach.total_seats || coach.totalSeats,
-            orderNumber: coach.order_number || coach.orderNumber,
+            type: coach.coach_type || coach.type || 'ECONOMY',
+            seatsPerRow: coach.seats_per_row || coach.seatsPerRow || 6,
+            totalSeats: coach.total_seats || coach.totalSeats || 0,
+            orderNumber: coach.order_number || coach.orderNumber || 0,
             isNew: false
           })));
         }
@@ -146,7 +146,9 @@ const CoachConfiguration = ({ train, onClose, onSave }) => {
 
         // Auto-update total seats when rows or seatsPerRow change
         if (field === 'rows' || field === 'seatsPerRow') {
-          updatedCoach.totalSeats = (updatedCoach.rows || 0) * (updatedCoach.seatsPerRow || 0);
+          const rows = field === 'rows' ? value : (coach.rows || 0);
+          const seatsPerRow = field === 'seatsPerRow' ? value : (coach.seatsPerRow || 0);
+          updatedCoach.totalSeats = rows * seatsPerRow;
         }
 
         // Update name when type changes
@@ -169,7 +171,6 @@ const CoachConfiguration = ({ train, onClose, onSave }) => {
     }));
   };
 
-  // Updated handleSave function
   const handleSave = async () => {
     // Validate coaches
     if (!coaches || coaches.length === 0) {
@@ -178,30 +179,36 @@ const CoachConfiguration = ({ train, onClose, onSave }) => {
     }
 
     // Validate each coach
-    const invalidCoaches = coaches.filter(coach =>
-      !coach.name || !coach.type || (coach.rows || 0) <= 0 || (coach.totalSeats || 0) <= 0
-    );
+    const invalidCoaches = coaches.filter(coach => {
+      // For BAGGAGE type, rows and seats can be 0
+      if (coach.type === 'BAGGAGE') {
+        return !coach.name || !coach.type;
+      }
+      return !coach.name || !coach.type || (coach.rows || 0) <= 0 || (coach.totalSeats || 0) <= 0;
+    });
 
     if (invalidCoaches.length > 0) {
       setError('တွဲအချက်အလက်များ မပြည့်စုံပါ။ ကျေးဇူးပြု၍ ပြန်လည်ဖြည့်သွင်းပါ');
       return;
     }
 
-    // Prepare coaches data for API - ensure order numbers are sequential
+    // Prepare coaches data for API
+    // Note: Don't include train_id in each coach object as it's sent separately
     const coachesData = coaches.map((coach, index) => ({
-      train_id: train.id,
       coach_type: coach.type,
       name: coach.name,
       rows: coach.rows || 0,
       seats_per_row: coach.seatsPerRow || coach.seats_per_row || 0,
       total_seats: coach.totalSeats || coach.total_seats || 0,
-      order_number: index + 1  // Use array index for consistent ordering
+      order_number: index + 1,
+      is_active: true
     }));
 
     setLoading(true);
     setError(null);
 
     try {
+      // Call bulkUpdate with train_id and coaches array
       const response = await coachesApi.bulkUpdate(train.id, coachesData);
       
       // Show success message with seat count
@@ -331,9 +338,7 @@ const CoachConfiguration = ({ train, onClose, onSave }) => {
                   }`}
                 >
                   {/* Coach Header */}
-                  <div
-                    className="flex items-center justify-between p-4"
-                  >
+                  <div className="flex items-center justify-between p-4">
                     <div className="flex items-center space-x-3 flex-1">
                       {/* Reorder Controls */}
                       {isReorderMode && (
@@ -482,9 +487,10 @@ const CoachConfiguration = ({ train, onClose, onSave }) => {
                             type="number"
                             value={coach.rows || 0}
                             onChange={(e) => updateCoach(coach.id, 'rows', parseInt(e.target.value) || 0)}
-                            min="1"
+                            min="0"
                             max="20"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            disabled={coach.type === 'BAGGAGE'}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm disabled:bg-gray-100"
                           />
                         </div>
 
@@ -497,9 +503,10 @@ const CoachConfiguration = ({ train, onClose, onSave }) => {
                             type="number"
                             value={coach.seatsPerRow || coach.seats_per_row || 0}
                             onChange={(e) => updateCoach(coach.id, 'seatsPerRow', parseInt(e.target.value) || 0)}
-                            min="1"
+                            min="0"
                             max="10"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            disabled={coach.type === 'BAGGAGE'}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm disabled:bg-gray-100"
                           />
                         </div>
 

@@ -28,6 +28,10 @@ const coachesApi = {
       const response = await api.get(`/coaches/train/${trainId}`);
       return response.data;
     } catch (error) {
+      // Return empty data on 404 or any error
+      if (error.response?.status === 404 || error.response?.status === 500) {
+        return { coaches: [], total_coaches: 0, total_seats: 0 };
+      }
       throw error.response?.data || { detail: error.message };
     }
   },
@@ -65,9 +69,27 @@ const coachesApi = {
   // Bulk update coaches for a train
   bulkUpdate: async (trainId, coaches) => {
     try {
-      const response = await api.put(`/coaches/train/${trainId}/bulk`, coaches);
+      // Send data in the exact format expected by the backend
+      const response = await api.post('/coaches/bulk-update', {
+        train_id: trainId,
+        coaches: coaches.map(coach => ({
+          train_id: trainId,
+          coach_type: coach.coach_type,
+          name: coach.name,
+          rows: coach.rows,
+          seats_per_row: coach.seats_per_row,
+          total_seats: coach.total_seats,
+          order_number: coach.order_number,
+          is_active: coach.is_active !== undefined ? coach.is_active : true
+        }))
+      });
       return response.data;
     } catch (error) {
+      // Handle validation errors
+      if (error.response?.status === 422) {
+        console.error('Validation error:', error.response.data);
+        throw { detail: 'အချက်အလက် မှားယွင်းနေပါသည်' };
+      }
       throw error.response?.data || { detail: error.message };
     }
   }

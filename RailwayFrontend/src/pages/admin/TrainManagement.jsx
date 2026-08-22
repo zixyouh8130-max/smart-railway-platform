@@ -304,7 +304,6 @@ const TrainManagement = () => {
                   {train.total_coaches > 0 && (
                     <>
                       <span>🚃 {train.total_coaches} တွဲ</span>
-                      <span>💺 {train.total_seats || 0} ခုံ</span>
                     </>
                   )}
                   {/* {train.route_id && !train.total_coaches && (

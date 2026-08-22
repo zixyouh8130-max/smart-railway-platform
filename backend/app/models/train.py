@@ -1,7 +1,5 @@
-# models/train.py
 from typing import Optional, List
-from datetime import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, Float, Boolean, DateTime
+from sqlalchemy import String, ForeignKey, Float, Integer
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from ..core.database import Base
 
@@ -15,7 +13,7 @@ class Train(Base):
     train_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Foreign key to route
-    route_id: Mapped[int] = mapped_column(
+    route_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("routes.id", ondelete="SET NULL"),
         nullable=True
     )
@@ -24,20 +22,16 @@ class Train(Base):
     total_coaches: Mapped[int] = mapped_column(Integer, default=0)
     capacity: Mapped[int] = mapped_column(Integer, default=0)
 
-    # 🆕 Train speed in km/h
+    # Train speed in km/h
     speed: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
 
     # Status
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
 
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
     # Relationships
     route = relationship("Route", back_populates="trains")
     schedules = relationship("Schedule", back_populates="train")
-    coaches = relationship("Coach", back_populates="train")
+    coaches = relationship("Coach", back_populates="train", cascade="all, delete-orphan")
     train_stops = relationship("TrainStop", back_populates="train")
     fee_rules = relationship("StationFeeRule", back_populates="train")
     bookings = relationship("Booking", back_populates="train")
