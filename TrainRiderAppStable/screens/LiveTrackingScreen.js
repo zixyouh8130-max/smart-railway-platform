@@ -16,8 +16,9 @@ import schedulesApi from '../api/schedules';
 import locationTrackingApi from '../api/locationTracking';
 import TrainTrackerMap from '../components/TrainTrackerMap';
 import { requestLocationPermission } from '../utils/locationPermission';
+import { formatRailwayTime } from '../utils/railwayDateTime';
 
-const LOCATION_UPLOAD_INTERVAL = 30000; // 15 seconds
+const LOCATION_UPLOAD_INTERVAL = 30000; // 30 seconds
 
 const LiveTrackingScreen = () => {
   const navigation = useNavigation();
@@ -284,13 +285,23 @@ const LiveTrackingScreen = () => {
       showNotification('Error', 'Missing station ID', 'error');
       return;
     }
+
+    if (gpsData.latitude == null || gpsData.longitude == null) {
+      showNotification(
+        'GPS Required',
+        'Wait for a valid GPS position before recording manual arrival.',
+        'warning',
+      );
+      return;
+    }
+
     setIsUpdating(true);
     try {
       const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
       const payload = {
         device_id: deviceId,
-        latitude: gpsData.latitude || 0,
-        longitude: gpsData.longitude || 0,
+        latitude: gpsData.latitude,
+        longitude: gpsData.longitude,
         speed: gpsData.speed,
         accuracy: gpsData.accuracy,
         manual_arrival: true,
@@ -299,10 +310,12 @@ const LiveTrackingScreen = () => {
       };
       const response = await locationTrackingApi.updateLocation(payload);
       if (response.is_last_station) {
+        journeyCompletedRef.current = true;
         setJourneyCompleted(true);
         setArrivalAlert(null);
         setCurrentStation(null);
         setNextStation(null);
+        stopGPSTracking();
         showNotification('🎉 Journey Complete!', 'Final destination reached.');
       } else {
         showNotification('Station Arrived!', 'Arrival logged successfully.');
@@ -464,11 +477,11 @@ const LiveTrackingScreen = () => {
       accuracy,
     } = position.coords;
 
-    const speedKmh =
+    const speedMph =
       speed != null
         ? Math.max(
             0,
-            Math.round(speed * 3.6),
+            Math.round(speed * 2.2369362920544),
           )
         : null;
 
@@ -480,7 +493,7 @@ const LiveTrackingScreen = () => {
     const location = {
       latitude,
       longitude,
-      speed: speedKmh,
+      speed: speedMph,
       accuracy: accuracyRounded,
     };
 
@@ -553,15 +566,7 @@ const LiveTrackingScreen = () => {
     }
   };
 
-  const formatTime = (timeString) => {
-    if (!timeString) return null;
-    try {
-      const date = new Date(timeString.includes('Z') || timeString.includes('+') ? timeString : timeString + 'Z');
-      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Yangon' });
-    } catch {
-      return timeString;
-    }
-  };
+  const formatTime = (timeString) => formatRailwayTime(timeString);
 
   const completedCount = routeStops.filter(s => s.status === 'DEPARTED').length;
   const progressPercent = routeStops.length > 0 ? (completedCount / routeStops.length) * 100 : 0;
@@ -607,7 +612,7 @@ const LiveTrackingScreen = () => {
           <View style={styles.statCard}>
             <Icon name="speedometer" size={18} color="#dc2626" />
             <Text style={styles.statLabel}>Speed</Text>
-            <Text style={styles.statValue}>{journeyCompleted ? '0' : gpsData.speed || 0} km/h</Text>
+            <Text style={styles.statValue}>{journeyCompleted ? '0' : gpsData.speed || 0} mph</Text>
           </View>
           <View style={styles.statCard}>
             <Icon name="map-marker" size={18} color="#10b981" />

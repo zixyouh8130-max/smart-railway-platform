@@ -49,35 +49,8 @@ const schedulesApi = {
     }
   },
 
-  // Create schedule
-  create: async (scheduleData) => {
-    try {
-      const response = await api.post('/schedules/', scheduleData);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { detail: error.message };
-    }
-  },
 
-  // Update schedule
-  update: async (id, scheduleData) => {
-    try {
-      const response = await api.put(`/schedules/${id}`, scheduleData);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { detail: error.message };
-    }
-  },
 
-  // Delete schedule
-  delete: async (id) => {
-    try {
-      const response = await api.delete(`/schedules/${id}`);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { detail: error.message };
-    }
-  },
 
   // Get trains
   getTrains: async () => {
@@ -89,25 +62,7 @@ const schedulesApi = {
     }
   },
 
-  // Update schedule status
-  updateStatus: async (id, status) => {
-    try {
-      const response = await api.patch(`/schedules/${id}/status`, { status });
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { detail: error.message };
-    }
-  },
 
-  // Bulk create schedules
-  bulkCreate: async (schedulesData) => {
-    try {
-      const response = await api.post('/schedules/bulk', schedulesData);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { detail: error.message };
-    }
-  },
 
   // Get staff weekly schedules
   getStaffWeeklySchedules: async (staffId) => {

@@ -1,346 +1,655 @@
 import React, { useState, useEffect } from 'react';
-import { X, Loader, AlertCircle, Calculator, Train } from 'lucide-react';
-import feesApi from '@/api/fees';
+import { Search, ArrowRight, Shield, Clock, Train, Calendar, AlertCircle, ChevronDown, MapPin } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import Button from '@/components/ui/button';
+import StationSearchInput from '@/components/home/StationSearchInput';
+import PassengerCounter from '@/components/home/PassengerCounter';
+import demuTrainImage from '@/assets/images/demu-train.jpg';
 import trainsApi from '@/api/trains';
+import schedulesApi from '@/api/schedules';
+import { addMonthsToISODate, formatRailwayDate, formatRailwayTime, getRailwayTodayISO } from '@/utils/railwayDateTime';
+import stationsApi from '@/api/stations';
 
-const PriceMatrixModal = ({ isOpen, onClose, routeId }) => {
-  const [loading, setLoading] = useState(true);
+const HeroSection = () => {
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState('booking');
+  const [scrollY, setScrollY] = useState(0);
+
+  // Form state
+  const [formData, setFormData] = useState({
+    fromStation: null,
+    toStation: null,
+    dateFrom: '',
+    dateTo: '',
+    adults: 1,
+    children: 0
+  });
+
+  // Loading states
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchResultsLoading, setSearchResultsLoading] = useState(false);
+
+  // Error state
   const [error, setError] = useState(null);
-  const [priceMatrix, setPriceMatrix] = useState(null);
-  const [selectedClassCode, setSelectedClassCode] = useState('ORDINARY');
-  const [selectedTrainId, setSelectedTrainId] = useState(null);
-  const [trains, setTrains] = useState([]);
-  const [trainClasses, setTrainClasses] = useState([
-    { code: 'ORDINARY', name: 'Ordinary', multiplier: 1.0 },
-    { code: 'FIRST_CLASS', name: 'First Class', multiplier: 1.5 },
-    { code: 'SLEEPER', name: 'Sleeper', multiplier: 2.0 },
-    { code: 'AC_CHAIR', name: 'AC Chair', multiplier: 1.0 },
-    { code: 'AC_SLEEPER', name: 'AC Sleeper', multiplier: 1.0 }
-  ]);
 
+  // Search results
+  const [searchResults, setSearchResults] = useState(null);
+  const [showResults, setShowResults] = useState(false);
+  const [fromStationName, setFromStationName] = useState('');
+  const [toStationName, setToStationName] = useState('');
+
+  // Live stats
+  const [activeTrainsCount, setActiveTrainsCount] = useState(null);
+
+  // Fetch live trains count
   useEffect(() => {
-    if (isOpen && routeId) {
-      fetchTrains();
-      fetchTrainClasses();
-    }
-  }, [isOpen, routeId]);
+    fetchActiveTrainsCount();
+  }, []);
 
+  // Scroll handler for parallax
   useEffect(() => {
-    if (selectedTrainId) {
-      fetchPriceMatrix();
-    }
-  }, [selectedTrainId, selectedClassCode]);
+    const handleScroll = () => setScrollY(window.scrollY);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
-  const fetchTrains = async () => {
+  // Get active trains count
+  const fetchActiveTrainsCount = async () => {
     try {
-      const response = await trainsApi.getByRoute(routeId);
-      const trainsList = response.trains || response.data?.trains || [];
-      setTrains(trainsList);
-      
-      // Auto-select first train if available
-      if (trainsList.length > 0 && !selectedTrainId) {
-        setSelectedTrainId(trainsList[0].id);
-      }
+      const response = await trainsApi.getAll({
+        status: 'active',
+        limit: 1
+      });
+      setActiveTrainsCount(response.total || 0);
     } catch (err) {
-      console.error('Error fetching trains:', err);
+      console.error('Failed to get active trains count:', err);
     }
   };
 
-  const fetchPriceMatrix = async () => {
-    if (!selectedTrainId) return;
-    
-    setLoading(true);
+  // Handle form input changes
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value,
+      ...(field === 'fromStation' ? { toStation: null } : {})
+    }));
     setError(null);
+    // Clear results when form changes
+    if (field === 'fromStation' || field === 'toStation') {
+      setSearchResults(null);
+      setShowResults(false);
+    }
+  };
+
+  // Validate form
+  const validateForm = () => {
+    if (!formData.fromStation || !formData.fromStation.stationId) {
+      throw new Error('ကျေးဇူးပြု၍ ထွက်ခွာမည့်ဘူတာကို ရွေးချယ်ပါ');
+    }
+    if (!formData.toStation || !formData.toStation.stationId) {
+      throw new Error('ကျေးဇူးပြု၍ ဆိုက်ရောက်မည့်ဘူတာကို ရွေးချယ်ပါ');
+    }
+    if (formData.fromStation.stationId === formData.toStation.stationId) {
+      throw new Error('ထွက်ခွာမည့်ဘူတာနှင့် ဆိုက်ရောက်မည့်ဘူတာ မတူညီရပါ');
+    }
+    if (!formData.dateFrom) {
+      throw new Error('ကျေးဇူးပြု၍ စတင်မည့်ရက်စွဲကို ရွေးချယ်ပါ');
+    }
+    if (!formData.dateTo) {
+      throw new Error('ကျေးဇူးပြု၍ ပြီးဆုံးမည့်ရက်စွဲကို ရွေးချယ်ပါ');
+    }
+
+    const fromDate = new Date(formData.dateFrom);
+    const toDate = new Date(formData.dateTo);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (fromDate < today) {
+      throw new Error('အတိတ်ရက်စွဲကို ရွေးချယ်၍ မရပါ');
+    }
+    if (toDate < fromDate) {
+      throw new Error('ပြီးဆုံးမည့်ရက်သည် စတင်မည့်ရက်ထက် စော၍မရပါ');
+    }
+
+    const daysDiff = Math.ceil((toDate - fromDate) / (1000 * 60 * 60 * 24));
+    if (daysDiff > 30) {
+      throw new Error('ရက်ပေါင်း ၃၀ ထက် ပို၍ မရှာဖွေနိုင်ပါ');
+    }
+
+    if (formData.adults < 1) {
+      throw new Error('အနည်းဆုံး လူကြီး ၁ ဦး လိုအပ်ပါသည်');
+    }
+  };
+
+  // Handle train search - now fetches and displays results on the same page
+  const handleSearch = async () => {
     try {
-      const response = await feesApi.getPriceMatrix(selectedTrainId, selectedClassCode);
-      setPriceMatrix(response);
+      setSearchLoading(true);
+      setError(null);
+      setSearchResults(null);
+      setShowResults(false);
+
+      console.log('Starting search with formData:', formData);
+      validateForm();
+
+      // Find common route IDs between from and to stations
+      const fromRouteIds = formData.fromStation.routeIds || [];
+      const toRouteIds = formData.toStation.routeIds || [];
+      const commonRouteIds = fromRouteIds.filter(id => toRouteIds.includes(id));
+
+      console.log('From route IDs:', fromRouteIds);
+      console.log('To route IDs:', toRouteIds);
+      console.log('Common route IDs:', commonRouteIds);
+
+      // Get route IDs to use
+      let routeIdsToUse;
+      if (commonRouteIds.length > 0) {
+        routeIdsToUse = commonRouteIds;
+      } else {
+        // Use all available route IDs
+        routeIdsToUse = [...new Set([...fromRouteIds, ...toRouteIds])];
+      }
+
+      if (routeIdsToUse.length === 0) {
+        throw new Error('ဤဘူတာနှစ်ခုကြား တိုက်ရိုက်ရထားလမ်းကြောင်း မရှိပါ');
+      }
+
+      // Get station names for display
+      try {
+        const fromStation = await stationsApi.getById(formData.fromStation.stationId);
+        const toStation = await stationsApi.getById(formData.toStation.stationId);
+        setFromStationName(fromStation.name || '');
+        setToStationName(toStation.name || '');
+      } catch (err) {
+        console.error('Failed to fetch station names:', err);
+      }
+
+      // Search schedules
+      setSearchResultsLoading(true);
+      const params = {
+        from_station_id: formData.fromStation.stationId,
+        to_station_id: formData.toStation.stationId,
+        route_ids: routeIdsToUse.join(','),
+        date_from: formData.dateFrom,
+        date_to: formData.dateTo
+      };
+
+      console.log('Searching schedules with params:', params);
+      const results = await schedulesApi.search(params);
+      console.log('Search results:', results);
+
+      setSearchResults(results || []);
+      setShowResults(true);
+
+      // Scroll to results
+      setTimeout(() => {
+        document.getElementById('search-results')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start'
+        });
+      }, 100);
+
     } catch (err) {
-      setError(err.detail || 'Failed to fetch price matrix');
-      console.error('Error fetching price matrix:', err);
+      console.error('Search error:', err);
+      setError(err.message || err.detail || 'ရှာဖွေမှု မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ');
+      setShowResults(false);
     } finally {
-      setLoading(false);
+      setSearchLoading(false);
+      setSearchResultsLoading(false);
     }
   };
 
-  const fetchTrainClasses = async () => {
-    try {
-      const response = await feesApi.getTrainClasses();
-      let classes = [];
-      if (response.classes) {
-        classes = response.classes;
-      } else if (response.data?.classes) {
-        classes = response.data.classes;
-      } else if (Array.isArray(response)) {
-        classes = response;
-      } else if (response.data && Array.isArray(response.data)) {
-        classes = response.data;
+  // Handle booking a specific schedule
+  const handleBookNow = (schedule) => {
+    navigate(`/booking/${schedule.schedule_id}`, {
+      state: {
+        schedule,
+        fromStation: {
+          id: formData.fromStation.stationId,
+          name: fromStationName
+        },
+        toStation: {
+          id: formData.toStation.stationId,
+          name: toStationName
+        },
+        dateFrom: formData.dateFrom,
+        dateTo: formData.dateTo,
+        adults: formData.adults,
+        children: formData.children
       }
-      if (classes.length > 0) {
-        setTrainClasses(classes);
-      }
-    } catch (err) {
-      console.error('Failed to fetch train classes:', err);
-    }
+    });
   };
 
-  const formatCurrency = (amount) => {
-    if (!amount && amount !== 0) return '-';
-    return Number(amount).toLocaleString() + ' MMK';
+  // Handle schedule view
+  const handleViewSchedule = () => {
+    navigate('/schedules');
   };
 
-  const selectedTrain = trains.find(t => t.id === selectedTrainId);
+  // Handle PNR status check
+  const handlePNRCheck = () => {
+    navigate('/pnr-status');
+  };
 
-  if (!isOpen) return null;
+  // Railway timetable values are Myanmar-local clock values.
+  const formatDate = (value) =>
+    value ? formatRailwayDate(value, 'my-MM', { weekday: 'long' }) : 'N/A';
+
+  const formatTime = (value) =>
+    value ? formatRailwayTime(value, 'my-MM', { hour12: true }) : 'N/A';
+
+  const getTodayDate = () => getRailwayTodayISO();
+
+  const getMaxDate = () => addMonthsToISODate(getRailwayTodayISO(), 3);
+
+  // When dateFrom changes, update dateTo min value
+  const getMinDateTo = () => {
+    return formData.dateFrom || getTodayDate();
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="sticky top-0 bg-white flex items-center justify-between p-6 border-b border-gray-200 rounded-t-2xl z-10">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Price Matrix</h2>
-            <p className="text-sm text-gray-600 mt-1">
-              {priceMatrix?.route_name || `Route #${routeId}`} - Fare overview
-            </p>
-          </div>
-          <div className="flex items-center gap-4">
-            {/* Train Selection */}
-            {trains.length > 0 && (
-              <select
-                value={selectedTrainId || ''}
-                onChange={(e) => setSelectedTrainId(parseInt(e.target.value))}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {trains.map(train => (
-                  <option key={train.id} value={train.id}>
-                    {train.train_no} - {train.train_name}
-                  </option>
-                ))}
-              </select>
-            )}
-            
-            {/* Class Selection */}
-            <select
-              value={selectedClassCode}
-              onChange={(e) => setSelectedClassCode(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {trainClasses.map(tc => (
-                <option key={tc.code} value={tc.code}>
-                  {tc.name} (x{tc.multiplier})
-                </option>
-              ))}
-            </select>
-            
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-gray-500" />
-            </button>
-          </div>
-        </div>
+    <div className="relative min-h-screen w-full overflow-hidden">
+      {/* Background Image with Parallax */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{
+          backgroundImage: `url(${demuTrainImage})`,
+          transform: `translateY(${scrollY * 0.5}px)`,
+        }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-r from-sky-900/90 via-blue-900/70 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/40 to-sky-900/60" />
+      </div>
 
-        <div className="p-6">
-          {/* Error Message */}
-          {error && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-center space-x-3 mb-6">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-              <p className="text-red-700 text-sm flex-1">{error}</p>
-              <button onClick={() => setError(null)} className="text-red-600">✕</button>
+      {/* Animated Pattern Overlay */}
+      <div className="absolute inset-0 opacity-5">
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `radial-gradient(circle at 1px 1px, white 1px, transparent 0)`,
+            backgroundSize: '40px 40px',
+          }}
+        />
+      </div>
+
+      {/* Live Stats Widgets */}
+      <div className="absolute top-20 right-10 hidden lg:block">
+        <div className="bg-white/15 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-white/20" style={{ animation: 'float 3s ease-in-out infinite' }}>
+          <div className="flex items-center space-x-3">
+            <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center">
+              <Train className="w-6 h-6 text-white" />
             </div>
-          )}
-
-          {/* No Trains Message */}
-          {!loading && trains.length === 0 && (
-            <div className="text-center py-12">
-              <Train className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No Trains Available</h3>
-              <p className="text-gray-600">
-                Add trains to this route first to view the price matrix.
-                Fare rules are configured per train.
+            <div>
+              <p className="text-white text-sm font-medium">ပြေးဆွဲနေသော ရထားများ</p>
+              <p className="text-sky-400 text-2xl font-bold">
+                {activeTrainsCount !== null ? activeTrainsCount.toLocaleString() : '...'}
               </p>
             </div>
-          )}
-
-          {/* Loading State */}
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <Loader className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-4" />
-                <p className="text-gray-600">Loading price matrix...</p>
-              </div>
-            </div>
-          )}
-
-          {/* Price Matrix Display */}
-          {!loading && priceMatrix && priceMatrix.stations ? (
-            <>
-              {/* Train Info */}
-              {selectedTrain && (
-                <div className="mb-4 p-3 bg-indigo-50 rounded-lg flex items-center gap-2">
-                  <Train className="w-4 h-4 text-indigo-600" />
-                  <span className="text-sm text-indigo-700">
-                    Showing fares for: <strong>{selectedTrain.train_no}</strong> - {selectedTrain.train_name}
-                  </span>
-                </div>
-              )}
-
-              {/* Legend */}
-              <div className="flex items-center gap-4 mb-4 p-3 bg-blue-50 rounded-lg">
-                <div className="flex items-center gap-1 text-xs text-gray-600">
-                  <div className="w-3 h-3 bg-green-100 border border-green-300 rounded"></div>
-                  <span>Available Fare</span>
-                </div>
-                <div className="flex items-center gap-1 text-xs text-gray-600">
-                  <div className="w-3 h-3 bg-gray-100 border border-gray-300 rounded"></div>
-                  <span>Same Station</span>
-                </div>
-                <div className="flex items-center gap-1 text-xs text-gray-600">
-                  <span className="text-gray-400">←</span>
-                  <span>Reverse Direction</span>
-                </div>
-              </div>
-
-              {/* Price Matrix Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr>
-                      <th className="sticky left-0 bg-gray-100 text-left py-3 px-4 text-sm font-medium text-gray-600 rounded-tl-lg border-b z-10">
-                        From ↓ / To →
-                      </th>
-                      {priceMatrix.stations.map((station, idx) => (
-                        <th key={station.id || idx} className="bg-gray-100 text-center py-3 px-3 text-sm font-medium text-gray-600 border-b min-w-[100px]">
-                          <div className="truncate max-w-[120px]" title={station.name}>
-                            {station.name}
-                          </div>
-                          {station.code && (
-                            <div className="text-xs text-gray-400 font-normal font-mono">
-                              {station.code}
-                            </div>
-                          )}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {priceMatrix.stations.map((fromStation, i) => (
-                      <tr key={fromStation.id || i}>
-                        <td className="sticky left-0 bg-white py-3 px-4 text-sm font-medium text-gray-900 border-b z-10">
-                          <div className="truncate max-w-[120px]" title={fromStation.name}>
-                            {fromStation.name}
-                          </div>
-                          {fromStation.code && (
-                            <div className="text-xs text-gray-400 font-mono">
-                              {fromStation.code}
-                            </div>
-                          )}
-                        </td>
-                        {priceMatrix.stations.map((toStation, j) => {
-                          // Find price for this pair
-                          const price = priceMatrix.prices?.find(
-                            p => (p.from === fromStation.name || p.from_id === fromStation.id) && 
-                                 (p.to === toStation.name || p.to_id === toStation.id)
-                          );
-
-                          // Only show forward direction prices
-                          if (i >= j) {
-                            return (
-                              <td key={toStation.id || j} className="text-center py-3 px-3 border-b bg-gray-50">
-                                {i === j ? (
-                                  <span className="text-sm text-gray-400">-</span>
-                                ) : (
-                                  <span className="text-sm text-gray-300">←</span>
-                                )}
-                              </td>
-                            );
-                          }
-
-                          return (
-                            <td key={toStation.id || j} className="text-center py-3 px-3 border-b bg-green-50/30">
-                              {price ? (
-                                <div>
-                                  <div className="text-sm font-semibold text-green-700">
-                                    {formatCurrency(price.fare)}
-                                  </div>
-                                  {price.distance && (
-                                    <div className="text-xs text-gray-500 mt-0.5">
-                                      {price.distance} km
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-sm text-gray-400">N/A</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Summary Statistics */}
-              {priceMatrix.prices && priceMatrix.prices.length > 0 && (
-                <div className="mt-6 p-4 bg-gray-50 rounded-xl">
-                  <h4 className="text-sm font-semibold text-gray-900 mb-3">Fare Summary</h4>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <span className="text-gray-600">Total Pairs:</span>
-                      <span className="font-medium ml-2">{priceMatrix.prices.length}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Minimum Fare:</span>
-                      <span className="font-medium ml-2 text-green-600">
-                        {formatCurrency(Math.min(...priceMatrix.prices.map(p => p.fare || 0)))}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Maximum Fare:</span>
-                      <span className="font-medium ml-2 text-blue-600">
-                        {formatCurrency(Math.max(...priceMatrix.prices.map(p => p.fare || 0)))}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Average Fare:</span>
-                      <span className="font-medium ml-2 text-purple-600">
-                        {formatCurrency(
-                          Math.round(
-                            priceMatrix.prices.reduce((sum, p) => sum + (p.fare || 0), 0) /
-                            (priceMatrix.prices.length || 1)
-                          )
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
-          ) : !loading && trains.length > 0 ? (
-            <div className="text-center py-12">
-              <Calculator className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No Price Data Available</h3>
-              <p className="text-gray-600">
-                Generate fee rules first to see the price matrix for this train.
-              </p>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Footer */}
-        <div className="border-t border-gray-200 p-4 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
-          >
-            Close
-          </button>
+          </div>
         </div>
       </div>
+
+      <div className="absolute top-32 left-10 hidden lg:block">
+        <div className="bg-white/15 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-white/20" style={{ animation: 'float 3s ease-in-out infinite' }}>
+          <div className="flex items-center space-x-3">
+            <div className="w-3 h-3 bg-green-400 rounded-full" style={{ animation: 'pulseSoft 2s ease-in-out infinite' }} />
+            <p className="text-white text-sm">အချိန်မှန်ပြေးဆွဲမှု ၉၈.၅%</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="absolute top-40 right-1/4 hidden lg:block">
+        <div className="bg-white/15 backdrop-blur-md rounded-2xl p-3 shadow-2xl border border-white/20" style={{ animation: 'float 3s ease-in-out infinite' }}>
+          <div className="flex items-center space-x-2">
+            <Shield className="w-4 h-4 text-yellow-400" />
+            <p className="text-white text-xs">256-bit SSL လုံခြုံရေး</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="relative w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-32 pb-20">
+        {/* Trust Badge */}
+        <div className="text-center mb-6">
+          <div className="inline-flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2 border border-white/20 mb-8" style={{ animation: 'float 3s ease-in-out infinite' }}>
+            <div className="w-2 h-2 bg-green-400 rounded-full" style={{ animation: 'pulseSoft 2s ease-in-out infinite' }} />
+            <span className="text-sm text-white font-medium">
+              မြန်မာ့ရထားလမ်းပိုင်း ဝန်ဆောင်မှု
+            </span>
+          </div>
+        </div>
+
+        {/* Main Heading */}
+        <div className="text-center mb-12">
+          <h1 className="text-5xl md:text-7xl font-bold mb-6 leading-tight">
+            <span className="text-white" style={{ textShadow: '2px 2px 4px rgba(0,0,0,0.3)' }}>
+              သင့်ခရီးစဉ်
+            </span>
+            <br />
+            <span className="bg-gradient-to-r from-sky-300 via-blue-300 to-cyan-300 bg-clip-text text-transparent" style={{ textShadow: '2px 2px 4px rgba(0,0,0,0.2)' }}>
+              လွယ်ကူစွာသွားလာပါ
+            </span>
+          </h1>
+          <p className="text-lg md:text-xl text-white/95 mx-auto leading-relaxed font-medium" style={{ textShadow: '1px 1px 2px rgba(0,0,0,0.3)' }}>
+            ရထားလက်မှတ်များ အလွယ်တကူ ဝယ်ယူနိုင်ပြီး
+            <span className="text-sky-300 font-bold"> အချိန်နှင့်တပြေးညီ သတင်းအချက်အလက်များ </span>
+            ရယူနိုင်ပါသည်
+          </p>
+        </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="max-w-5xl mx-auto mb-4" style={{ animation: 'fadeIn 0.3s ease-in-out' }}>
+            <div className="bg-red-500/20 backdrop-blur-sm border border-red-500/50 rounded-lg p-4 text-white">
+              <p className="flex items-center">
+                <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0" />
+                <span>{error}</span>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Search/Booking Card */}
+        <div className="max-w-5xl mx-auto relative z-10">
+            <div className="bg-white/15 backdrop-blur-xl rounded-3xl p-6 md:p-8 shadow-2xl border border-white/30">
+            {/* Tabs */}
+            <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 mb-8 bg-white/10 rounded-xl p-1.5 backdrop-blur-sm">
+              {[
+                { id: 'booking', label: 'လက်မှတ်ဝယ်ရန်', icon: <Train className="w-4 h-4" /> },
+                { id: 'schedule', label: 'အချိန်ဇယား', icon: <Clock className="w-4 h-4" /> },
+                { id: 'pnr', label: 'ခရီးစဉ်စစ်ရန်', icon: <Search className="w-4 h-4" /> },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    setError(null);
+                    if (tab.id !== 'booking') {
+                      setShowResults(false);
+                    }
+                  }}
+                  className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-6 rounded-lg text-sm font-medium transition-all duration-300 ${
+                    activeTab === tab.id
+                      ? 'bg-blue-600 text-white shadow-lg transform scale-105'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  {tab.icon}
+                  <span>{tab.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Booking Form */}
+            {activeTab === 'booking' && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+                  {/* From Station */}
+                  <div className="lg:col-span-1">
+                    <StationSearchInput
+                      value={formData.fromStation?.stationId || ''}
+                      onChange={(stationData) => handleInputChange('fromStation', stationData)}
+                      placeholder="ထွက်ခွာမည့်ဘူတာ ရွေးပါ..."
+                      label="ထွက်ခွာမည့်ဘူတာ"
+                    />
+                  </div>
+
+                  {/* To Station */}
+                  <div className="lg:col-span-1">
+                    <StationSearchInput
+                      value={formData.toStation?.stationId || ''}
+                      onChange={(stationData) => handleInputChange('toStation', stationData)}
+                      placeholder="ဆိုက်ရောက်မည့်ဘူတာ ရွေးပါ..."
+                      excludeStation={formData.fromStation?.stationId}
+                      connectedToStation={formData.fromStation?.stationId}
+                      label="ဆိုက်ရောက်မည့်ဘူတာ"
+                    />
+                  </div>
+
+                    {/* Date From */}
+                    <div className="lg:col-span-1">
+                      <label className="block text-sm font-medium text-white/90 mb-1.5">
+                        စတင်မည့်ရက်
+                      </label>
+                      <div className="relative">
+                        <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-sky-300 pointer-events-none" />
+                        <input
+                          type="date"
+                          value={formData.dateFrom}
+                          onChange={(e) => {
+                            handleInputChange('dateFrom', e.target.value);
+                            if (formData.dateTo && e.target.value > formData.dateTo) {
+                              handleInputChange('dateTo', '');
+                            }
+                          }}
+                          min={getTodayDate()}
+                          max={getMaxDate()}
+                          className="w-full bg-white/10 border border-white/20 rounded-lg pl-9 pr-3 py-2.5 text-white text-sm focus:bg-white/20 focus:border-sky-400 focus:outline-none transition-all [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [color-scheme:dark]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Date To */}
+                    <div className="lg:col-span-1">
+                      <label className="block text-sm font-medium text-white/90 mb-1.5">
+                        ပြီးဆုံးမည့်ရက်
+                      </label>
+                      <div className="relative">
+                        <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-sky-300 pointer-events-none" />
+                        <input
+                          type="date"
+                          value={formData.dateTo}
+                          onChange={(e) => handleInputChange('dateTo', e.target.value)}
+                          min={getMinDateTo()}
+                          max={getMaxDate()}
+                          disabled={!formData.dateFrom}
+                          className="w-full bg-white/10 border border-white/20 rounded-lg pl-9 pr-3 py-2.5 text-white text-sm focus:bg-white/20 focus:border-sky-400 focus:outline-none transition-all disabled:opacity-40 disabled:cursor-not-allowed [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [color-scheme:dark]"
+                        />
+                      </div>
+                    </div>
+
+                  {/* Passenger Counter */}
+                  <div className="lg:col-span-1">
+                    <PassengerCounter
+                      adults={formData.adults}
+                      children={formData.children}
+                      onAdultsChange={(value) => handleInputChange('adults', value)}
+                      onChildrenChange={(value) => handleInputChange('children', value)}
+                      childAgeLimit={12}
+                    />
+                  </div>
+                </div>
+
+                {/* Search Button */}
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Button
+                      variant="highlight"
+                      size="lg"
+                      className="w-fit mx-auto px-6 bg-sky-500 hover:bg-sky-600 text-white font-bold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={handleSearch}
+                      disabled={searchLoading || searchResultsLoading}
+                    >
+                      {searchLoading ? (
+                        <div className="flex items-center justify-center">
+                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                          ရှာဖွေနေသည်...
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center">
+                          <Search className="w-5 h-5 mr-2" />
+                          ရထားရှာဖွေမည်
+                          <ArrowRight className="w-5 h-5 ml-2" />
+                        </div>
+                      )}
+                    </Button>
+
+                </div>
+              </>
+            )}
+
+            {/* Schedule Tab */}
+            {activeTab === 'schedule' && (
+              <div className="text-center text-white py-8">
+                <Clock className="w-16 h-16 mx-auto mb-4 text-sky-300" />
+                <h3 className="text-2xl font-bold mb-2">ရထားခရီးစဉ် အချိန်ဇယားများ</h3>
+                <p className="text-white/80 mb-6">
+                  ရထားခရီးစဉ်အားလုံး၏ အချိန်ဇယားများကို ကြည့်ရှုနိုင်ပါသည်
+                </p>
+                <Button
+                  variant="secondary"
+                  onClick={handleViewSchedule}
+                  className="bg-sky-500 hover:bg-sky-600 text-white"
+                >
+                  <Clock className="w-5 h-5 mr-2" />
+                  အချိန်ဇယားများ ကြည့်မည်
+                </Button>
+              </div>
+            )}
+
+            {/* PNR Status Tab */}
+            {activeTab === 'pnr' && (
+              <div className="text-center text-white py-8">
+                <Search className="w-16 h-16 mx-auto mb-4 text-sky-300" />
+                <h3 className="text-2xl font-bold mb-2">ခရီးစဉ် စစ်ဆေးရန်</h3>
+                <p className="text-white/80 mb-6">
+                  သင့် PNR နံပါတ်ဖြင့် ခရီးစဉ်အခြေအနေကို စစ်ဆေးနိုင်ပါသည်
+                </p>
+                <Button
+                  variant="secondary"
+                  onClick={handlePNRCheck}
+                  className="bg-sky-500 hover:bg-sky-600 text-white"
+                >
+                  <Search className="w-5 h-5 mr-2" />
+                  PNR စစ်ဆေးမည်
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Search Results Section */}
+          {showResults && (
+            <div id="search-results" className="mt-8">
+              {searchResultsLoading ? (
+                <div className="bg-white/15 backdrop-blur-xl rounded-3xl p-8 shadow-2xl border border-white/30 text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-300 mx-auto mb-4"></div>
+                  <p className="text-white/80">ရထားခရီးစဉ်များ ရှာဖွေနေသည်...</p>
+                </div>
+              ) : searchResults && searchResults.length > 0 ? (
+                <div className="bg-white/15 backdrop-blur-xl rounded-3xl p-6 md:p-8 shadow-2xl border border-white/30">
+                  {/* Results Header */}
+                  <div className="mb-6 pb-4 border-b border-white/10">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                      <div>
+                        <div className="flex items-center space-x-3 text-white mb-1">
+                          <MapPin className="w-5 h-5 text-sky-300" />
+                          <span className="font-medium">{fromStationName}</span>
+                          <ArrowRight className="w-4 h-4 text-sky-300" />
+                          <MapPin className="w-5 h-5 text-green-400" />
+                          <span className="font-medium">{toStationName}</span>
+                        </div>
+                        <p className="text-white/60 text-sm">
+                          {formData.dateFrom} မှ {formData.dateTo} အတွင်း •
+                          ရှာဖွေတွေ့ရှိမှု {searchResults.length} ခု
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Results List */}
+                  <div className="space-y-4">
+                    {searchResults.map((schedule) => (
+                      <div
+                        key={schedule.schedule_id}
+                        className="bg-white/10 hover:bg-white/15 border border-white/20 rounded-xl p-5 transition-all"
+                      >
+                        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                          {/* Train Info */}
+                          <div className="flex items-start space-x-4">
+                            <div className="w-12 h-12 bg-sky-500/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                              <Train className="w-6 h-6 text-sky-300" />
+                            </div>
+                            <div>
+                              <h3 className="text-white font-bold text-lg">
+                                {schedule.train_name || `ရထားအမှတ် ${schedule.train_id || schedule.schedule_id}`}
+                              </h3>
+                              <p className="text-white/60 text-sm">
+                                {schedule.route_name}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Time Info */}
+                          <div className="flex items-center space-x-4">
+                            <div className="text-center">
+                              <p className="text-white/60 text-xs mb-1">ထွက်ခွာချိန်</p>
+                              <p className="text-white font-bold text-lg">
+                                {formatTime(schedule.departure_time)}
+                              </p>
+                              <p className="text-white/60 text-xs">
+                                {formatDate(schedule.departure_time)}
+                              </p>
+                            </div>
+
+                            <div className="flex flex-col items-center">
+                              <ArrowRight className="w-5 h-5 text-sky-300" />
+                            </div>
+
+                            <div className="text-center">
+                              <p className="text-white/60 text-xs mb-1">ရောက်ရှိချိန်</p>
+                              <p className="text-white font-bold text-lg">
+                                {formatTime(schedule.arrival_time)}
+                              </p>
+                              <p className="text-white/60 text-xs">
+                                {formatDate(schedule.arrival_time)}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Action */}
+                          <div className="flex items-center space-x-3">
+                            <Button
+                              onClick={() => handleBookNow(schedule)}
+                              disabled={schedule.status !== 'SCHEDULED'}
+                              className="bg-sky-500 hover:bg-sky-600 text-white whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {schedule.status === 'SCHEDULED' ? 'လက်မှတ်ဝယ်မည်' : schedule.status}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white/15 backdrop-blur-xl rounded-3xl p-8 shadow-2xl border border-white/30 text-center">
+                  <Search className="w-16 h-16 mx-auto mb-4 text-white/40" />
+                  <h3 className="text-xl font-bold text-white mb-2">ရထားခရီးစဉ် မတွေ့ရှိပါ</h3>
+                  <p className="text-white/60">
+                    ဤရက်အတွင်း ရထားခရီးစဉ်များ မရှိသေးပါ။ အခြားရက်များကို ပြန်လည်ရှာဖွေကြည့်ပါ။
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Scroll Indicator - Only show when no results */}
+        {!showResults && (
+          <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 hidden md:block" style={{ animation: 'float 3s ease-in-out infinite' }}>
+            <div className="flex flex-col items-center space-y-2">
+              <span className="text-white/70 text-xs">အောက်သို့ဆွဲပါ</span>
+              <div className="w-6 h-10 border-2 border-white/40 rounded-full flex justify-center">
+                <div className="w-1.5 h-3 bg-white/60 rounded-full mt-2" style={{ animation: 'bounce 1s infinite' }} />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Animated Track Lines at Bottom */}
+      <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-sky-500 to-cyan-500" />
+      <div className="absolute bottom-1 left-0 right-0 h-0.5 bg-white/30" />
     </div>
   );
 };
 
-export default PriceMatrixModal;
+export default HeroSection;

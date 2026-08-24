@@ -11,6 +11,7 @@ import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import schedulesApi from '../api/schedules';
+import { formatRailwayTime } from '../utils/railwayDateTime';
 
 const ScheduleScreen = () => {
   const navigation = useNavigation();
@@ -100,11 +101,7 @@ const ScheduleScreen = () => {
     return `${hour12}:${m.toString().padStart(2, '0')} ${period}`;
   };
 
-  const formatActualTime = (timeStr) => {
-    if (!timeStr) return null;
-    const date = new Date(timeStr.includes('Z') || timeStr.includes('+') ? timeStr : timeStr + 'Z');
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Yangon' });
-  };
+  const formatActualTime = (timeStr) => formatRailwayTime(timeStr);
 
   const getStatusColor = (status) => {
     switch (status) {
