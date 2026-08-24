@@ -97,8 +97,7 @@ const UsersManagement = () => {
         full_name: userForm.full_name,
         email: userForm.email,
         phone: userForm.phone,
-        password: userForm.password,
-        role: userForm.role
+        password: userForm.password
       });
 
       setSuccess('အသုံးပြုသူအသစ် ဖန်တီးပြီးပါပြီ');
@@ -245,7 +244,6 @@ const UsersManagement = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">အသုံးပြုသူများ စီမံခန့်ခွဲခြင်း</h1>
           <p className="text-gray-600 mt-1">စနစ်အသုံးပြုသူများနှင့် ဝန်ထမ်းများအား စီမံခန့်ခွဲပါ</p>
         </div>
         <Button 

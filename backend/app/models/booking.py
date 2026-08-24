@@ -1,3 +1,5 @@
+# backend/models/booking.py
+
 from datetime import datetime, date
 import enum
 from typing import Optional
@@ -19,8 +21,6 @@ from ..core.database import Base
 
 
 class BookingStatus(str, enum.Enum):
-    """Booking status enum"""
-
     RESERVED = "RESERVED"
     CONFIRMED = "CONFIRMED"
     CANCELLED = "CANCELLED"
@@ -29,8 +29,6 @@ class BookingStatus(str, enum.Enum):
 
 
 class PaymentStatus(str, enum.Enum):
-    """Payment status enum"""
-
     PENDING = "PENDING"
     PAID = "PAID"
     REFUNDED = "REFUNDED"
@@ -39,212 +37,252 @@ class PaymentStatus(str, enum.Enum):
 
 
 class Booking(Base):
+    """
+    Passenger booking for ONE exact Schedule and ONE journey segment.
+
+    schedule_id is the authoritative dated run.
+    train_id/travel_date are retained as denormalized snapshots for
+    compatibility/reporting and are derived from Schedule when creating.
+    """
+
     __tablename__ = "bookings"
 
     id: Mapped[int] = mapped_column(
         Integer,
         primary_key=True,
-        index=True
+        index=True,
     )
 
-    # ============================================================
-    # Customer Information
-    # ============================================================
+    # ------------------------------------------------------------
+    # Customer
+    # ------------------------------------------------------------
 
     customer_name: Mapped[str] = mapped_column(
         String(100),
-        nullable=False
+        nullable=False,
     )
 
     nrc: Mapped[str] = mapped_column(
         String(50),
-        nullable=False
+        nullable=False,
     )
 
     phone: Mapped[Optional[str]] = mapped_column(
         String(20),
-        nullable=True
+        nullable=True,
     )
 
     email: Mapped[Optional[str]] = mapped_column(
         String(100),
-        nullable=True
+        nullable=True,
     )
 
-    # ============================================================
-    # Booking Details
-    # ============================================================
+    # ------------------------------------------------------------
+    # Booking identity
+    # ------------------------------------------------------------
 
     ticket_no: Mapped[str] = mapped_column(
         String(50),
         unique=True,
         nullable=False,
-        index=True
+        index=True,
     )
 
     booking_no: Mapped[Optional[str]] = mapped_column(
         String(50),
         unique=True,
         nullable=True,
-        index=True
+        index=True,
     )
 
-    # ============================================================
-    # Foreign Keys
-    # ============================================================
+    # Exact dated run.
+    schedule_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "schedules.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,  # Make non-null after legacy backfill.
+        index=True,
+    )
 
-    # Keep train_id because a booking is associated with a
-    # particular train/journey.
+    # Denormalized from schedule.train_id.
     train_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("trains.id"),
         nullable=False,
-        index=True
+        index=True,
     )
 
-    # Booking is directly attached to the selected seat.
+    # Exact physical seat.
     seat_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("seats.id"),
         nullable=False,
-        index=True
+        index=True,
     )
 
-    # coach_id REMOVED.
-    #
-    # Coach can be obtained through:
-    # booking.seat.coach
+    # Passenger segment. These deliberately point to route_stations.id.
+    from_route_station_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "route_stations.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,  # Make non-null after legacy backfill.
+        index=True,
+    )
 
-    # ============================================================
-    # Dates
-    # ============================================================
+    to_route_station_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "route_stations.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,  # Make non-null after legacy backfill.
+        index=True,
+    )
 
+    # Denormalized from schedule.departure_date.
     travel_date: Mapped[date] = mapped_column(
         Date,
-        nullable=False
+        nullable=False,
+        index=True,
     )
+
+    # ------------------------------------------------------------
+    # Booking dates
+    # ------------------------------------------------------------
 
     booking_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        nullable=False
+        nullable=False,
     )
 
     reservation_expiry: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
-        nullable=True
+        nullable=True,
     )
 
     cancellation_date: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
-        nullable=True
+        nullable=True,
     )
 
-    # ============================================================
-    # Financial
-    # ============================================================
+    # ------------------------------------------------------------
+    # Financial snapshot
+    #
+    # base_fare stores the FINAL railway fare returned by FeeCalculator
+    # (including any configured base/mile/surcharge rule).
+    # tax/service_fee remain separate future platform charges.
+    # ------------------------------------------------------------
 
     base_fare: Mapped[float] = mapped_column(
         Float,
         default=0.0,
-        nullable=False
+        nullable=False,
     )
 
     tax: Mapped[float] = mapped_column(
         Float,
         default=0.0,
-        nullable=False
+        nullable=False,
     )
 
     service_fee: Mapped[float] = mapped_column(
         Float,
         default=0.0,
-        nullable=False
+        nullable=False,
     )
 
     total_cost: Mapped[float] = mapped_column(
         Float,
-        nullable=False
+        nullable=False,
     )
 
     refund_amount: Mapped[Optional[float]] = mapped_column(
         Float,
-        nullable=True
+        nullable=True,
     )
 
-    # ============================================================
+    # ------------------------------------------------------------
     # Status
-    # ============================================================
+    # ------------------------------------------------------------
 
     booking_status: Mapped[BookingStatus] = mapped_column(
         Enum(BookingStatus),
         default=BookingStatus.RESERVED,
-        nullable=False
+        nullable=False,
     )
 
     payment_status: Mapped[PaymentStatus] = mapped_column(
         Enum(PaymentStatus),
         default=PaymentStatus.PENDING,
-        nullable=False
+        nullable=False,
     )
 
-    # ============================================================
-    # Passenger Details
-    # ============================================================
+    # ------------------------------------------------------------
+    # Passenger details
+    # ------------------------------------------------------------
 
     passenger_count: Mapped[int] = mapped_column(
         Integer,
         default=1,
-        nullable=False
+        nullable=False,
     )
 
     passenger_names: Mapped[Optional[str]] = mapped_column(
         String(500),
-        nullable=True
+        nullable=True,
     )
-
-    # ============================================================
-    # Additional Information
-    # ============================================================
 
     notes: Mapped[Optional[str]] = mapped_column(
         String(500),
-        nullable=True
+        nullable=True,
     )
 
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        nullable=False
+        nullable=False,
     )
-
-    # ============================================================
-    # Timestamps
-    # ============================================================
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        nullable=False
+        nullable=False,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
-        nullable=False
+        nullable=False,
     )
 
-    # ============================================================
+    # ------------------------------------------------------------
     # Relationships
-    # ============================================================
+    # ------------------------------------------------------------
+
+    schedule = relationship(
+        "Schedule",
+        back_populates="bookings",
+    )
 
     seat = relationship(
         "Seat",
-        back_populates="bookings"
+        back_populates="bookings",
     )
 
     train = relationship(
         "Train",
-        back_populates="bookings"
+        back_populates="bookings",
+    )
+
+    from_route_station = relationship(
+        "RouteStation",
+        foreign_keys=[from_route_station_id],
+    )
+
+    to_route_station = relationship(
+        "RouteStation",
+        foreign_keys=[to_route_station_id],
     )

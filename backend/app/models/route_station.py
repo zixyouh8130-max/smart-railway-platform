@@ -25,7 +25,13 @@ class RouteStation(Base):
 
     # Route-specific station configuration
     order_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    distance_from_origin: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=0.0)
+    # Distance from route origin in miles
+    distance_from_origin: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        default=0.0,
+        comment="Distance in miles from route origin",
+    )
     is_major_stop: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Time from origin (route-level, not train-specific)

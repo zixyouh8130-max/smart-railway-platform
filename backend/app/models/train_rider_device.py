@@ -61,7 +61,7 @@ class TrainRiderDevice(Base):
     )
 
     # Speed tracking
-    current_speed: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # km/h
+    current_speed: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # mph
 
     # Battery status
     battery_level: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

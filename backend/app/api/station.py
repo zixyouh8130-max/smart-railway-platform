@@ -6,6 +6,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from ..core.database import get_db
+from ..core.dependencies import get_current_admin_user
 from ..models.station import Station
 from ..models.route_station import RouteStation
 from ..models.route import Route
@@ -359,7 +360,7 @@ async def get_station_by_code(
     return station
 
 
-@router.post("/", response_model=StationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StationResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_admin_user)])
 async def create_station(
         station: StationCreate,
         db: Session = Depends(get_db)
@@ -403,7 +404,7 @@ async def create_station(
     return db_station
 
 
-@router.post("/bulk", response_model=List[StationResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/bulk", response_model=List[StationResponse], status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_admin_user)])
 async def create_stations_bulk(
         stations: List[StationCreate],
         db: Session = Depends(get_db)
@@ -449,7 +450,7 @@ async def create_stations_bulk(
     return db_stations
 
 
-@router.put("/{station_id}", response_model=StationResponse)
+@router.put("/{station_id}", response_model=StationResponse, dependencies=[Depends(get_current_admin_user)])
 async def update_station(
         station_id: int,
         station_update: StationUpdate,
@@ -487,7 +488,7 @@ async def update_station(
     return db_station
 
 
-@router.delete("/{station_id}", status_code=status.HTTP_200_OK)
+@router.delete("/{station_id}", status_code=status.HTTP_200_OK, dependencies=[Depends(get_current_admin_user)])
 async def delete_station(
         station_id: int,
         force: bool = Query(False, description="Force delete even if station is in use"),
@@ -533,13 +534,27 @@ async def delete_station(
 async def find_nearby_stations(
         latitude: float = Query(..., ge=-90, le=90),
         longitude: float = Query(..., ge=-180, le=180),
-        radius_km: float = Query(50, ge=1, le=500, description="Search radius in kilometers"),
+        radius_miles: float = Query(
+            31,
+            ge=1,
+            le=311,
+            description="Search radius in miles",
+        ),
         limit: int = Query(10, ge=1, le=50),
         db: Session = Depends(get_db)
 ):
-    """Find stations near given coordinates using bounding box."""
-    lat_delta = radius_km / 111.0
-    lon_delta = radius_km / (111.0 * math.cos(math.radians(latitude)))
+    """Find stations near given coordinates using a miles-based bounding box."""
+    # One degree of latitude is approximately 69 statute miles.
+    miles_per_degree_latitude = 69.0
+    lat_delta = radius_miles / miles_per_degree_latitude
+
+    cos_latitude = math.cos(math.radians(latitude))
+    # Avoid division by zero very near the poles.
+    lon_denominator = max(
+        miles_per_degree_latitude * abs(cos_latitude),
+        0.000001,
+    )
+    lon_delta = radius_miles / lon_denominator
 
     min_lat = latitude - lat_delta
     max_lat = latitude + lat_delta

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Edit, Trash2, Clock, Calendar, AlertCircle, Loader, Search, ChevronLeft, ChevronRight, Moon, Lock } from 'lucide-react';
+import { Plus, Edit, Trash2, Clock, Calendar, AlertCircle, Loader, Search, ChevronLeft, ChevronRight, Moon, Lock, Train, Route } from 'lucide-react';
 import Button from '@/components/ui/button';
 import ScheduleFormModal from '@/components/ScheduleManage/ScheduleFormModal';
 import ConfirmDialog from '@/components/ScheduleManage/ConfirmDialog';
@@ -13,21 +13,16 @@ const SchedulesManagement = () => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Toast notification state
   const [toast, setToast] = useState(null);
 
-  // Modal states
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
-  // Selected items
   const [selectedSchedule, setSelectedSchedule] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
 
-  // Action loading state
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Calendar state
   const [currentWeekStart, setCurrentWeekStart] = useState(() => {
     const today = new Date();
     const day = today.getDay();
@@ -38,6 +33,9 @@ const SchedulesManagement = () => {
   });
 
   const gridRef = useRef(null);
+
+  // Tooltip state
+  const [tooltip, setTooltip] = useState({ visible: false, html: '', x: 0, y: 0 });
 
   useEffect(() => {
     fetchData();
@@ -103,17 +101,14 @@ const SchedulesManagement = () => {
     }
   };
 
-  // 🆕 Check if schedule is editable
   const isScheduleEditable = (status) => {
     return ['SCHEDULED', 'DELAYED', 'CANCELLED'].includes(status);
   };
 
-  // 🆕 Check if schedule is deletable
   const isScheduleDeletable = (status) => {
     return ['SCHEDULED', 'DELAYED', 'CANCELLED'].includes(status);
   };
 
-  // 🆕 Get lock reason
   const getLockReason = (status) => {
     if (status === 'ACTIVE') return 'ရထားပြေးဆွဲနေစဉ် ပြင်ဆင်၍မရပါ';
     if (status === 'COMPLETED') return 'ပြီးဆုံးသွားသော အချိန်ဇယားကို ပြင်ဆင်၍မရပါ';
@@ -148,6 +143,22 @@ const SchedulesManagement = () => {
     const isOvernight = schedule.is_overnight || false;
     const isArrivalPart = schedule._isArrivalPart || false;
 
+    if (isOvernight && isArrivalPart) {
+      const arrivalMinutes = timeToMinutes(arrivalTime);
+      const endMinutes = arrivalMinutes || 0;
+      const topPosition = 0;
+      const height = (endMinutes / 30) * 40;
+      return {
+        top: topPosition,
+        height: Math.max(height, 30),
+        duration: endMinutes,
+        startMinutes: 0,
+        endMinutes,
+        isOvernight: true,
+        isArrivalPart: true
+      };
+    }
+
     const startMinutes = timeToMinutes(departureTime);
     let endMinutes = timeToMinutes(arrivalTime);
 
@@ -155,19 +166,31 @@ const SchedulesManagement = () => {
       endMinutes = startMinutes + 60;
     }
 
-    if (isOvernight && isArrivalPart) {
-      const topPosition = 0;
-      const height = (endMinutes / 30) * 40;
-      return { top: topPosition, height: Math.max(height, 30), duration: endMinutes, startMinutes: 0, endMinutes, isOvernight: true, isArrivalPart: true };
-    } else if (isOvernight) {
+    if (isOvernight) {
       endMinutes = 1440;
       const topPosition = (startMinutes / 30) * 40;
       const height = ((1440 - startMinutes) / 30) * 40;
-      return { top: topPosition, height: Math.max(height, 30), duration: 1440 - startMinutes, startMinutes, endMinutes: 1440, isOvernight: true, isArrivalPart: false };
+      return {
+        top: topPosition,
+        height: Math.max(height, 30),
+        duration: 1440 - startMinutes,
+        startMinutes,
+        endMinutes: 1440,
+        isOvernight: true,
+        isArrivalPart: false
+      };
     } else {
       const topPosition = (startMinutes / 30) * 40;
       const height = ((endMinutes - startMinutes) / 30) * 40;
-      return { top: topPosition, height: Math.max(height, 30), duration: endMinutes - startMinutes, startMinutes, endMinutes, isOvernight: false, isArrivalPart: false };
+      return {
+        top: topPosition,
+        height: Math.max(height, 30),
+        duration: endMinutes - startMinutes,
+        startMinutes,
+        endMinutes,
+        isOvernight: false,
+        isArrivalPart: false
+      };
     }
   };
 
@@ -306,7 +329,6 @@ const SchedulesManagement = () => {
   const handleUpdate = async (formData) => {
     if (!selectedSchedule) return;
 
-    // 🆕 Check if schedule is editable
     if (!isScheduleEditable(selectedSchedule.status)) {
       const reason = getLockReason(selectedSchedule.status);
       setToast({ type: 'error', message: reason });
@@ -368,7 +390,6 @@ const SchedulesManagement = () => {
   const handleDelete = async () => {
     if (!deleteId) return;
 
-    // 🆕 Check if schedule is deletable
     const schedule = schedules.find(s => s.id === deleteId);
     if (schedule && !isScheduleDeletable(schedule.status)) {
       const reason = getLockReason(schedule.status);
@@ -398,7 +419,6 @@ const SchedulesManagement = () => {
   };
 
   const handleDeleteFromForm = async (id) => {
-    // 🆕 Check if schedule is deletable
     const schedule = schedules.find(s => s.id === id);
     if (schedule && !isScheduleDeletable(schedule.status)) {
       const reason = getLockReason(schedule.status);
@@ -425,7 +445,6 @@ const SchedulesManagement = () => {
   };
 
   const handleEditClick = (schedule) => {
-    // 🆕 Check if schedule is editable
     if (!isScheduleEditable(schedule.status)) {
       const reason = getLockReason(schedule.status);
       setToast({ type: 'warning', message: reason });
@@ -440,7 +459,6 @@ const SchedulesManagement = () => {
   const handleDeleteClick = (id, e) => {
     if (e) e.stopPropagation();
 
-    // 🆕 Check if schedule is deletable
     const schedule = schedules.find(s => s.id === id);
     if (schedule && !isScheduleDeletable(schedule.status)) {
       const reason = getLockReason(schedule.status);
@@ -478,10 +496,10 @@ const SchedulesManagement = () => {
   const getStatusStyles = (status) => {
     const styles = {
       SCHEDULED: { bg: 'bg-blue-500', border: 'border-blue-600', bgLight: 'bg-blue-50', bgHover: 'hover:bg-blue-600', text: 'text-white', dot: 'bg-blue-400' },
-      ACTIVE: { bg: 'bg-green-500', border: 'border-green-600', bgLight: 'bg-green-50', bgHover: 'hover:bg-green-600', text: 'text-white', dot: 'bg-green-400' },
+      ACTIVE: { bg: 'bg-emerald-500', border: 'border-emerald-600', bgLight: 'bg-emerald-50', bgHover: 'hover:bg-emerald-600', text: 'text-white', dot: 'bg-emerald-400' },
       COMPLETED: { bg: 'bg-gray-400', border: 'border-gray-500', bgLight: 'bg-gray-50', bgHover: 'hover:bg-gray-500', text: 'text-white', dot: 'bg-gray-300' },
-      CANCELLED: { bg: 'bg-red-500', border: 'border-red-600', bgLight: 'bg-red-50', bgHover: 'hover:bg-red-600', text: 'text-white', dot: 'bg-red-400' },
-      DELAYED: { bg: 'bg-yellow-500', border: 'border-yellow-600', bgLight: 'bg-yellow-50', bgHover: 'hover:bg-yellow-600', text: 'text-white', dot: 'bg-yellow-400' }
+      CANCELLED: { bg: 'bg-rose-500', border: 'border-rose-600', bgLight: 'bg-rose-50', bgHover: 'hover:bg-rose-600', text: 'text-white', dot: 'bg-rose-400' },
+      DELAYED: { bg: 'bg-amber-500', border: 'border-amber-600', bgLight: 'bg-amber-50', bgHover: 'hover:bg-amber-600', text: 'text-white', dot: 'bg-amber-400' }
     };
     return styles[status] || styles.SCHEDULED;
   };
@@ -502,6 +520,122 @@ const SchedulesManagement = () => {
     return `${hours}နာရီ ${mins}မိနစ်`;
   };
 
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('my-MM', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  // Custom tooltip handler for ScheduleBlock
+  const handleScheduleHover = (e, schedule) => {
+    const train = schedule.train || {};
+    const statusText = getStatusText(schedule.status);
+    const position = calculateSchedulePosition(schedule);
+    const isOvernight = schedule.is_overnight || false;
+    const isArrivalPart = schedule._isArrivalPart || false;
+    const isLocked = !isScheduleEditable(schedule.status);
+
+    const statusColor = {
+      'စီစဉ်ထားသည်': '#3b82f6',
+      'လက်ရှိပြေးဆွဲနေသည်': '#10b981',
+      'ပြီးစီးသည်': '#9ca3af',
+      'ဖျက်သိမ်းသည်': '#ef4444',
+      'နှောင့်နှေးသည်': '#f59e0b'
+    }[statusText] || '#6b7280';
+
+    let html = `
+      <div style="font-family: system-ui, -apple-system, sans-serif; min-width: 200px; max-width: 320px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #e5e7eb;">
+          <span style="font-size: 18px; font-weight: 700; color: #111827;">${train.train_no || `#${schedule.train_id}`}</span>
+          <span style="font-size: 13px; color: #6b7280;">${train.train_name || 'အမည်မသိ'}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${statusColor};"></span>
+          <span style="font-size: 13px; font-weight: 500; color: #1f2937;">${statusText}</span>
+        </div>
+    `;
+
+    if (train.route) {
+      html += `
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 13px; color: #4b5563;">
+          <span>📍</span>
+          <span>${train.route.origin || ''} → ${train.route.destination || ''}</span>
+        </div>
+      `;
+    }
+
+    if (!isArrivalPart) {
+      html += `
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px; font-size: 13px; color: #4b5563;">
+          <span>🟢</span>
+          <span>ထွက်ခွာ: <strong style="color: #1f2937;">${schedule.departure_time ? minutesTo12Hour(timeToMinutes(schedule.departure_time)) : '--:--'}</strong></span>
+        </div>
+      `;
+      if (schedule.departure_date) {
+        html += `
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px; font-size: 12px; color: #6b7280; padding-left: 22px;">
+            <span>📅 ${formatDate(schedule.departure_date)}</span>
+          </div>
+        `;
+      }
+    }
+
+    if (schedule.arrival_time) {
+      const arrivalLabel = isArrivalPart ? '🟠' : '🔴';
+      html += `
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px; font-size: 13px; color: #4b5563;">
+          <span>${arrivalLabel}</span>
+          <span>${isArrivalPart ? 'ဆိုက်ရောက်' : 'ဆိုက်ရောက်'}: <strong style="color: #1f2937;">${minutesTo12Hour(timeToMinutes(schedule.arrival_time))}</strong></span>
+        </div>
+      `;
+      if (schedule.arrival_date && isArrivalPart) {
+        html += `
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px; font-size: 12px; color: #6b7280; padding-left: 22px;">
+            <span>📅 ${formatDate(schedule.arrival_date)}</span>
+          </div>
+        `;
+      }
+    }
+
+    html += `
+      <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px; padding-top: 4px; border-top: 1px solid #f3f4f6; font-size: 12px; color: #6b7280;">
+        <span>⏱️</span>
+        <span>${formatDuration(position.duration)}</span>
+      </div>
+    `;
+
+    if (isOvernight) {
+      html += `
+        <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6366f1;">
+          <span>🌙</span>
+          <span>ညဖြတ်သန်း</span>
+        </div>
+      `;
+    }
+
+    if (isLocked) {
+      html += `
+        <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ef4444; margin-top: 2px;">
+          <span>🔒</span>
+          <span>${getLockReason(schedule.status)}</span>
+        </div>
+      `;
+    }
+
+    html += `</div>`;
+
+    setTooltip({
+      visible: true,
+      html: html,
+      x: e.clientX + 15,
+      y: e.clientY - 10
+    });
+  };
+
+  const handleScheduleLeave = () => {
+    setTooltip({ visible: false, html: '', x: 0, y: 0 });
+  };
+
   const ScheduleBlock = ({ schedule, lane, totalLanes }) => {
     const styles = getStatusStyles(schedule.status);
     const position = calculateSchedulePosition(schedule);
@@ -519,11 +653,11 @@ const SchedulesManagement = () => {
       <div
         className={`
           absolute ${styles.bg} ${styles.text}
-          rounded-md cursor-pointer
+          rounded-lg cursor-pointer
           transition-all duration-200
-          hover:shadow-lg hover:z-10
-          ${isActive ? 'animate-pulse ring-2 ring-green-300' : ''}
-          ${isDelayed ? 'animate-pulse ring-2 ring-yellow-300' : ''}
+          hover:shadow-xl hover:z-10 hover:scale-[1.02]
+          ${isActive ? 'animate-pulse ring-2 ring-emerald-300' : ''}
+          ${isDelayed ? 'animate-pulse ring-2 ring-amber-300' : ''}
           ${isOvernight && !isArrivalPart ? 'border-r-4 border-r-indigo-300' : ''}
           ${isArrivalPart ? 'border-l-4 border-l-indigo-300 opacity-90' : ''}
           ${isLocked ? 'opacity-75' : ''}
@@ -537,7 +671,18 @@ const SchedulesManagement = () => {
           minHeight: '30px'
         }}
         onClick={() => handleEditClick(schedule)}
-        title={`${schedule.train?.train_no || ''} - ${getStatusText(schedule.status)}${isOvernight ? ' (Overnight)' : ''}${isArrivalPart ? ' (Arrival)' : ''}${isLocked ? ' - ပြင်ဆင်၍မရပါ' : ''}\n${formatDuration(position.duration)}`}
+        onMouseEnter={(e) => handleScheduleHover(e, schedule)}
+        onMouseLeave={handleScheduleLeave}
+        onMouseMove={(e) => {
+          // Update tooltip position as mouse moves
+          if (tooltip.visible) {
+            setTooltip(prev => ({
+              ...prev,
+              x: e.clientX + 15,
+              y: e.clientY - 10
+            }));
+          }
+        }}
       >
         <div className="p-1.5 h-full flex flex-col justify-center relative">
           {isLocked && (
@@ -580,16 +725,16 @@ const SchedulesManagement = () => {
   const ToastComponent = ({ toast }) => {
     if (!toast) return null;
     const bgColors = {
-      success: 'bg-green-50 border-green-200 text-green-700',
-      error: 'bg-red-50 border-red-200 text-red-700',
-      warning: 'bg-yellow-50 border-yellow-200 text-yellow-700'
+      success: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+      error: 'bg-rose-50 border-rose-200 text-rose-700',
+      warning: 'bg-amber-50 border-amber-200 text-amber-700'
     };
     const message = typeof toast.message === 'string' ? toast.message : JSON.stringify(toast.message);
     return (
-      <div className={`fixed bottom-4 right-4 p-4 rounded-xl border shadow-lg z-50 max-w-md ${bgColors[toast.type]}`}>
+      <div className={`fixed bottom-4 right-4 p-4 rounded-2xl border shadow-2xl z-50 max-w-md ${bgColors[toast.type]} backdrop-blur-sm`}>
         <div className="flex items-start gap-3">
           <div className="flex-1"><p className="text-sm font-medium">{message}</p></div>
-          <button onClick={() => setToast(null)} className="text-gray-500 hover:text-gray-700">✕</button>
+          <button onClick={() => setToast(null)} className="text-gray-500 hover:text-gray-700 transition-colors">✕</button>
         </div>
       </div>
     );
@@ -599,7 +744,7 @@ const SchedulesManagement = () => {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <Loader className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-4" />
+          <Loader className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
           <p className="text-gray-600">ဒေတာများ ရယူနေသည်...</p>
         </div>
       </div>
@@ -615,110 +760,211 @@ const SchedulesManagement = () => {
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const currentTimePosition = (currentMinutes / 30) * 40;
 
+  const totalSchedules = schedules.length;
+  const activeSchedules = schedules.filter(s => s.status === 'ACTIVE').length;
+  const delayedSchedules = schedules.filter(s => s.status === 'DELAYED').length;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6 p-4 md:p-6  min-h-screen">
       <ToastComponent toast={toast} />
 
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">အချိန်ဇယားများ စီမံခန့်ခွဲခြင်း</h1>
-          <p className="text-gray-600 mt-1">ရထားခရီးစဉ်အချိန်ဇယားများအား အပတ်စဉ်ကြည့်ရှုရန်</p>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={goToCurrentWeek} className="bg-gray-100 hover:bg-gray-200 text-gray-700">ယနေ့</Button>
-          <Button onClick={handleAddClick} className="bg-blue-600 hover:bg-blue-700 text-white">
-            <Plus className="w-4 h-4" />အချိန်ဇယားအသစ်
-          </Button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-center space-x-3">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-          <p className="text-red-700 text-sm flex-1">{error}</p>
-          <button onClick={() => setError(null)} className="text-red-600 hover:text-red-800 transition-colors">✕</button>
-        </div>
+      {/* Custom Tooltip */}
+      {tooltip.visible && (
+        <div
+          className="fixed z-[100] pointer-events-none"
+          style={{
+            left: tooltip.x,
+            top: tooltip.y,
+            transform: 'translateY(-50%)',
+            maxWidth: '360px'
+          }}
+          dangerouslySetInnerHTML={{ __html: `
+            <div style="
+              background: white;
+              border-radius: 12px;
+              padding: 14px 18px;
+              box-shadow: 0 10px 40px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.06);
+              border: 1px solid rgba(0,0,0,0.06);
+              backdrop-filter: blur(4px);
+              font-size: 14px;
+              line-height: 1.5;
+              color: #1f2937;
+              min-width: 200px;
+            ">
+              ${tooltip.html}
+            </div>
+          `}}
+        />
       )}
 
-      <div className="flex flex-col sm:flex-row gap-4 items-center">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input type="text" placeholder="ရှာဖွေပါ..." className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-            value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-        </div>
-        <div className="flex items-center gap-3 bg-white rounded-xl border border-gray-200 px-4 py-2">
-          <button onClick={() => navigateWeek(-1)} className="p-1 hover:bg-gray-100 rounded-lg"><ChevronLeft className="w-5 h-5 text-gray-600" /></button>
-          <span className="text-sm font-medium text-gray-700 min-w-[200px] text-center">{weekStartStr} - {weekEndStr}</span>
-          <button onClick={() => navigateWeek(1)} className="p-1 hover:bg-gray-100 rounded-lg"><ChevronRight className="w-5 h-5 text-gray-600" /></button>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-3 p-3 bg-white rounded-xl border border-gray-200">
-        {['ACTIVE', 'SCHEDULED', 'DELAYED', 'COMPLETED', 'CANCELLED'].map(status => {
-          const styles = getStatusStyles(status);
-          return <div key={status} className="flex items-center gap-2"><div className={`w-4 h-4 rounded ${styles.bg}`}></div><span className="text-xs text-gray-600">{getStatusText(status)}</span></div>;
-        })}
-        <div className="flex items-center gap-2">
-          <div className="flex"><div className="w-2 h-4 rounded-l bg-gray-400 border-r-2 border-indigo-300"></div><div className="w-2 h-4 rounded-r bg-gray-400 border-l-2 border-indigo-300"></div></div>
-          <span className="text-xs text-gray-600">ညဖြတ်သန်း</span>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="grid grid-cols-[80px_repeat(7,1fr)] border-b border-gray-200 bg-gray-50 sticky top-0 z-20">
-          <div className="p-3 border-r border-gray-200 text-center"><Clock className="w-4 h-4 text-gray-400 mx-auto" /></div>
-          {weekDays.map((day, index) => {
-            const isToday = day.date.toDateString() === new Date().toDateString();
-            return (
-              <div key={index} className={`p-3 border-r border-gray-200 last:border-r-0 text-center ${isToday ? 'bg-blue-50' : ''}`}>
-                <div className={`text-xs font-medium ${isToday ? 'text-blue-600' : 'text-gray-500'}`}>{day.dayName}</div>
-                <div className={`text-lg font-bold ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>{day.date.getDate()}</div>
-                <div className={`text-xs ${isToday ? 'text-blue-500' : 'text-gray-400'}`}>{day.date.toLocaleDateString('my-MM', { month: 'short' })}</div>
-              </div>
-            );
-          })}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <p className="text-gray-500 mt-1 flex items-center gap-2">
+              <Route className="w-4 h-4" />
+              ရထားခရီးစဉ်အချိန်ဇယားများအား အပတ်စဉ်ကြည့်ရှုရန်
+            </p>
+          </div>
+          <div className="flex gap-3 w-full md:w-auto">
+            <Button onClick={goToCurrentWeek} variant="outline" className="border-gray-300 hover:bg-gray-50 text-gray-700 flex-1 md:flex-none">
+              ယနေ့
+            </Button>
+            <Button onClick={handleAddClick} className="bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg transition-all flex-1 md:flex-none">
+              <Plus className="w-4 h-4 mr-1" />
+              အချိန်ဇယားအသစ်
+            </Button>
+          </div>
         </div>
 
-        <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 300px)' }} ref={gridRef}>
-          <div className="grid grid-cols-[80px_repeat(7,1fr)] relative">
-            <div className="border-r border-gray-200">
-              {timeSlots.map((minutes, index) => (
-                <div key={minutes} className="h-[40px] flex items-center justify-end pr-3 border-b border-gray-100">
-                  <span className="text-xs font-medium text-gray-500">{index % 2 === 0 ? minutesTo12Hour(minutes) : ''}</span>
-                </div>
-              ))}
-            </div>
-
-            {weekDays.map((day, dayIndex) => {
-              const dateStr = day.dateStr;
-              const daySchedules = schedulesByDate[dateStr] || [];
-              const isToday = day.date.toDateString() === new Date().toDateString();
-              const { lanes, totalLanes } = assignLanes(daySchedules);
-
-              return (
-                <div key={dayIndex} className={`relative border-r border-gray-200 last:border-r-0 ${isToday ? 'bg-blue-50/20' : ''}`}
-                  style={{ height: `${timeSlots.length * 40}px` }}>
-                  {timeSlots.map((minutes, index) => (
-                    <div key={minutes} className={`h-[40px] border-b ${index % 2 === 0 ? 'border-gray-200' : 'border-gray-100'}`} />
-                  ))}
-                  {isToday && currentMinutes >= 0 && currentMinutes <= 1440 && (
-                    <div className="absolute left-0 right-0 z-20 pointer-events-none" style={{ top: `${currentTimePosition}px` }}>
-                      <div className="flex items-center"><div className="w-2 h-2 rounded-full bg-red-500 -ml-1"></div><div className="flex-1 border-t-2 border-red-500"></div></div>
-                    </div>
-                  )}
-                  {daySchedules.map((schedule) => {
-                    const isArrivalPart = schedule._isArrivalPart || false;
-                    const laneKey = `${schedule.id}_${isArrivalPart ? 'arrival' : 'departure'}`;
-                    return <ScheduleBlock key={laneKey} schedule={schedule} lane={lanes.get(laneKey) || 0} totalLanes={totalLanes} />;
-                  })}
-                </div>
-              );
-            })}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t border-gray-100">
+          <div className="bg-blue-50 rounded-xl p-3 text-center">
+            <p className="text-2xl font-bold text-blue-700">{totalSchedules}</p>
+            <p className="text-xs text-blue-600">စုစုပေါင်း</p>
+          </div>
+          <div className="bg-emerald-50 rounded-xl p-3 text-center">
+            <p className="text-2xl font-bold text-emerald-700">{activeSchedules}</p>
+            <p className="text-xs text-emerald-600">ပြေးဆွဲနေသည်</p>
+          </div>
+          <div className="bg-amber-50 rounded-xl p-3 text-center">
+            <p className="text-2xl font-bold text-amber-700">{delayedSchedules}</p>
+            <p className="text-xs text-amber-600">နှောင့်နှေးနေသည်</p>
+          </div>
+          <div className="bg-gray-50 rounded-xl p-3 text-center">
+            <p className="text-2xl font-bold text-gray-700">{schedules.filter(s => s.status === 'COMPLETED').length}</p>
+            <p className="text-xs text-gray-600">ပြီးစီးသည်</p>
           </div>
         </div>
       </div>
 
-      <div className="text-sm text-gray-600 text-center">
+      {error && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center space-x-3">
+          <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
+          <p className="text-rose-700 text-sm flex-1">{error}</p>
+          <button onClick={() => setError(null)} className="text-rose-600 hover:text-rose-800 transition-colors">✕</button>
+        </div>
+      )}
+
+      <div className="flex flex-col md:flex-row gap-4 items-center">
+        <div className="relative flex-1 w-full">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="ရှာဖွေပါ (ရထားနံပါတ်၊ အမည်၊ အခြေအနေ)..."
+            className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-shadow bg-white"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <div className="flex items-center gap-2 bg-white rounded-xl border border-gray-200 px-3 py-2 shadow-sm">
+          <button onClick={() => navigateWeek(-1)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+            <ChevronLeft className="w-5 h-5 text-gray-600" />
+          </button>
+          <span className="text-sm font-medium text-gray-700 min-w-[180px] text-center">{weekStartStr} - {weekEndStr}</span>
+          <button onClick={() => navigateWeek(1)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+            <ChevronRight className="w-5 h-5 text-gray-600" />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-3 p-4 bg-white rounded-2xl border border-gray-100 shadow-sm">
+        {['ACTIVE', 'SCHEDULED', 'DELAYED', 'COMPLETED', 'CANCELLED'].map(status => {
+          const styles = getStatusStyles(status);
+          return (
+            <div key={status} className="flex items-center gap-2">
+              <div className={`w-4 h-4 rounded ${styles.bg}`}></div>
+              <span className="text-xs text-gray-600">{getStatusText(status)}</span>
+            </div>
+          );
+        })}
+        <div className="flex items-center gap-2">
+          <div className="flex">
+            <div className="w-2 h-4 rounded-l bg-gray-400 border-r-2 border-indigo-300"></div>
+            <div className="w-2 h-4 rounded-r bg-gray-400 border-l-2 border-indigo-300"></div>
+          </div>
+          <span className="text-xs text-gray-600">ညဖြတ်သန်း</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Lock className="w-3 h-3 text-gray-500" />
+          <span className="text-xs text-gray-600">ပြင်ဆင်၍မရ</span>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <div className="min-w-[800px]">
+            <div className="grid grid-cols-[80px_repeat(7,1fr)] border-b border-gray-200 bg-gray-50/80 sticky top-0 z-20">
+              <div className="p-3 border-r border-gray-200 text-center">
+                <Clock className="w-4 h-4 text-gray-400 mx-auto" />
+              </div>
+              {weekDays.map((day, index) => {
+                const isToday = day.date.toDateString() === new Date().toDateString();
+                return (
+                  <div key={index} className={`p-3 border-r border-gray-200 last:border-r-0 text-center ${isToday ? 'bg-blue-50/60' : ''}`}>
+                    <div className={`text-xs font-medium ${isToday ? 'text-blue-600' : 'text-gray-500'}`}>{day.dayName}</div>
+                    <div className={`text-lg font-bold ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>{day.date.getDate()}</div>
+                    <div className={`text-xs ${isToday ? 'text-blue-500' : 'text-gray-400'}`}>{day.date.toLocaleDateString('my-MM', { month: 'short' })}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 340px)' }} ref={gridRef}>
+              <div className="grid grid-cols-[80px_repeat(7,1fr)] relative">
+                <div className="border-r border-gray-200 bg-gray-50/50">
+                  {timeSlots.map((minutes, index) => (
+                    <div key={minutes} className="h-[40px] flex items-center justify-end pr-3 border-b border-gray-100">
+                      <span className="text-xs font-medium text-gray-500">{index % 2 === 0 ? minutesTo12Hour(minutes) : ''}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {weekDays.map((day, dayIndex) => {
+                  const dateStr = day.dateStr;
+                  const daySchedules = schedulesByDate[dateStr] || [];
+                  const isToday = day.date.toDateString() === new Date().toDateString();
+                  const { lanes, totalLanes } = assignLanes(daySchedules);
+
+                  return (
+                    <div
+                      key={dayIndex}
+                      className={`relative border-r border-gray-200 last:border-r-0 ${isToday ? 'bg-blue-50/10' : ''}`}
+                      style={{ height: `${timeSlots.length * 40}px` }}
+                    >
+                      {timeSlots.map((minutes, index) => (
+                        <div key={minutes} className={`h-[40px] border-b ${index % 2 === 0 ? 'border-gray-200' : 'border-gray-100'}`} />
+                      ))}
+
+                      {isToday && currentMinutes >= 0 && currentMinutes <= 1440 && (
+                        <div className="absolute left-0 right-0 z-20 pointer-events-none" style={{ top: `${currentTimePosition}px` }}>
+                          <div className="flex items-center">
+                            <div className="w-2 h-2 rounded-full bg-rose-500 -ml-1"></div>
+                            <div className="flex-1 border-t-2 border-rose-500"></div>
+                          </div>
+                        </div>
+                      )}
+
+                      {daySchedules.map((schedule) => {
+                        const isArrivalPart = schedule._isArrivalPart || false;
+                        const laneKey = `${schedule.id}_${isArrivalPart ? 'arrival' : 'departure'}`;
+                        return (
+                          <ScheduleBlock
+                            key={laneKey}
+                            schedule={schedule}
+                            lane={lanes.get(laneKey) || 0}
+                            totalLanes={totalLanes}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-sm text-gray-500 text-center bg-white rounded-xl py-3 border border-gray-100 shadow-sm">
         စုစုပေါင်း {filteredSchedules.length} ခု တွေ့ရှိပါသည်{searchTerm && ` (ရှာဖွေမှု: "${searchTerm}")`}
       </div>
 
@@ -740,10 +986,10 @@ const SchedulesManagement = () => {
       />
 
       {actionLoading && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-[60]">
-          <div className="bg-white rounded-xl p-6 shadow-xl">
-            <Loader className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-3" />
-            <p className="text-gray-700">လုပ်ဆောင်နေသည်...</p>
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[60]">
+          <div className="bg-white rounded-2xl p-8 shadow-2xl text-center">
+            <Loader className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+            <p className="text-gray-700 font-medium">လုပ်ဆောင်နေသည်...</p>
           </div>
         </div>
       )}

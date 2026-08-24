@@ -167,7 +167,7 @@ const SortableStation = ({
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Distance from Origin (km)</label>
+            <label className="block text-xs text-gray-500 mb-1">Distance from Origin (mi)</label>
             <input
               type="number"
               placeholder="0.0"
@@ -498,7 +498,7 @@ const RouteFormModal = ({ isOpen, onClose, onSubmit, route }) => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Distance (km)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Distance (mi)</label>
               <input type="number" name="distance" value={formData.distance} onChange={handleChange}
                 placeholder="620" step="0.1" min="0"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />

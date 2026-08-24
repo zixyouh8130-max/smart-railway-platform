@@ -1,8 +1,9 @@
-// components/TrainRider/TrainTrackerMap.jsx
+// pages/TrainRider/TrainTrackerMap.jsx
 import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { formatRailwayTime } from '@/utils/railwayDateTime';
 
 // 🚂 Train icon (current location)
 const trainIcon = L.divIcon({
@@ -177,18 +178,8 @@ const TrainTrackerMap = ({
     return 'Upcoming';
   };
 
-  const formatTime = (timeString) => {
-    if (!timeString) return null;
-    try {
-      return new Date(timeString).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Asia/Yangon'
-      });
-    } catch {
-      return timeString;
-    }
-  };
+  const formatTime = (timeString) =>
+    timeString ? formatRailwayTime(timeString, 'en-US') : null;
 
   if (!mapReady) {
     return (

@@ -6,11 +6,41 @@ import coachesApi from '@/api/coaches';
 import SeatLayout from './SeatLayout';
 
 const COACH_TYPES = {
-  FIRST_CLASS: { name: 'ပထမတန်း', color: 'bg-amber-100 border-amber-500', defaultRows: 5, defaultSeatsPerRow: 4 },
-  ECONOMY: { name: 'သာမန်တန်း', color: 'bg-blue-100 border-blue-500', defaultRows: 10, defaultSeatsPerRow: 6 },
-  SLEEPER: { name: 'အိပ်စင်တွဲ', color: 'bg-purple-100 border-purple-500', defaultRows: 8, defaultSeatsPerRow: 4 },
-  DINING: { name: 'စားသောက်တွဲ', color: 'bg-green-100 border-green-500', defaultRows: 5, defaultSeatsPerRow: 4 },
-  BAGGAGE: { name: 'ပစ္စည်းတွဲ', color: 'bg-gray-100 border-gray-500', defaultRows: 1, defaultSeatsPerRow: 0 }
+  UPPER_CLASS: {
+    name: 'အထက်တန်း',
+    subtitle: 'Premium / Highest Class',
+    color: 'bg-amber-100 border-amber-500',
+    defaultRows: 5,
+    defaultSeatsPerRow: 4
+  },
+  ECONOMY_CLASS: {
+    name: 'သာမန်တန်း',
+    subtitle: 'Economy Class',
+    color: 'bg-blue-100 border-blue-500',
+    defaultRows: 10,
+    defaultSeatsPerRow: 6
+  },
+  SLEEPER: {
+    name: 'အိပ်စင်တွဲ',
+    subtitle: 'Sleeper / Bed',
+    color: 'bg-purple-100 border-purple-500',
+    defaultRows: 8,
+    defaultSeatsPerRow: 4
+  },
+  DINING: {
+    name: 'စားသောက်တွဲ',
+    subtitle: 'Dining Coach',
+    color: 'bg-green-100 border-green-500',
+    defaultRows: 5,
+    defaultSeatsPerRow: 4
+  },
+  BAGGAGE: {
+    name: 'ပစ္စည်း/ကုန်တွဲ',
+    subtitle: 'Baggage / Goods',
+    color: 'bg-gray-100 border-gray-500',
+    defaultRows: 1,
+    defaultSeatsPerRow: 0
+  }
 };
 
 const CoachConfiguration = ({ train, onClose, onSave }) => {
@@ -51,7 +81,7 @@ const CoachConfiguration = ({ train, onClose, onSave }) => {
           setCoaches(coachesData.map(coach => ({
             ...coach,
             // Map backend field names to frontend field names
-            type: coach.coach_type || coach.type || 'ECONOMY',
+            type: coach.coach_type || coach.type || 'ECONOMY_CLASS',
             seatsPerRow: coach.seats_per_row || coach.seatsPerRow || 6,
             totalSeats: coach.total_seats || coach.totalSeats || 0,
             orderNumber: coach.order_number || coach.orderNumber || 0,
@@ -75,7 +105,7 @@ const CoachConfiguration = ({ train, onClose, onSave }) => {
   const addCoach = () => {
     const newCoach = {
       id: Date.now(),
-      type: 'ECONOMY',
+      type: 'ECONOMY_CLASS',
       name: 'သာမန်တန်း',
       rows: 10,
       seatsPerRow: 6,
@@ -453,7 +483,7 @@ const CoachConfiguration = ({ train, onClose, onSave }) => {
                             တွဲအမျိုးအစား
                           </label>
                           <select
-                            value={coach.type || 'ECONOMY'}
+                            value={coach.type || 'ECONOMY_CLASS'}
                             onChange={(e) => updateCoach(coach.id, 'type', e.target.value)}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                           >

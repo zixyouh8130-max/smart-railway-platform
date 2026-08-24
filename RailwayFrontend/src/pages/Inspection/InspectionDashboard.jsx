@@ -18,6 +18,11 @@ import {
   PlayCircle,
   FileVideo2,
   ExternalLink,
+  Calendar,
+  Train,
+  Route,
+  ChevronRight,
+  Shield
 } from 'lucide-react';
 import {
   LineChart,
@@ -68,56 +73,56 @@ const DEFECT_META = {
   Corrosion: {
     color: '#B45309',
     icon: '🟤',
-    label: 'Corrosion',
+    label: 'သံချေးတက်',
   },
   'Fishplate Damage': {
     color: '#E11D48',
     icon: '🔧',
-    label: 'Fishplate Damage',
+    label: 'သံလမ်းဆစ်ပျက်စီး',
   },
   'Missing Fastener': {
     color: '#F59E0B',
     icon: '🔶',
-    label: 'Missing Fastener',
+    label: 'ချိတ်ဆက်ကိရိယာပျက်',
   },
   'Missing Fishplate Bolt': {
     color: '#7C3AED',
     icon: '🔩',
-    label: 'Missing Fishplate Bolt',
+    label: 'သံလမ်းဆစ်ကျောက်ဆွဲပျက်',
   },
   'Rail Break': {
     color: '#DC2626',
     icon: '💥',
-    label: 'Rail Break',
+    label: 'သံလမ်းကျိုး',
   },
   'Railway Joint Defect': {
     color: '#4F46E5',
     icon: '⚠️',
-    label: 'Railway Joint Defect',
+    label: 'သံလမ်းဆစ်ချို့ယွင်း',
   },
 };
 
 const FALLBACK_DEFECT_META = {
   color: '#64748B',
   icon: '⚠️',
-  label: 'Defect',
+  label: 'ချို့ယွင်းချက်',
 };
 
 const PRIORITY_META = {
   routine: {
-    label: 'Routine',
+    label: 'ပုံမှန်',
     classes: 'bg-slate-100 text-slate-700 border-slate-200',
   },
   monitor: {
-    label: 'Monitor',
+    label: 'စောင့်ကြည့်ရန်',
     classes: 'bg-blue-50 text-blue-700 border-blue-200',
   },
   priority_inspection: {
-    label: 'Priority Inspection',
+    label: 'ဦးစားပေးစစ်ဆေး',
     classes: 'bg-amber-50 text-amber-800 border-amber-200',
   },
   urgent_manual_review: {
-    label: 'Urgent Manual Review',
+    label: 'အရေးပေါ်ပြန်လည်စစ်ဆေး',
     classes: 'bg-red-50 text-red-700 border-red-200',
   },
 };
@@ -126,7 +131,7 @@ const getDefectMeta = (type) => DEFECT_META[type] || FALLBACK_DEFECT_META;
 
 const getPriorityMeta = (priority) =>
   PRIORITY_META[priority] || {
-    label: priority ? String(priority).replaceAll('_', ' ') : 'Not assessed',
+    label: priority ? String(priority).replaceAll('_', ' ') : 'သတ်မှတ်မထား',
     classes: 'bg-gray-50 text-gray-600 border-gray-200',
   };
 
@@ -142,17 +147,14 @@ const asNumber = (value, fallback = null) => {
 
 const toIdString = (value) => {
   if (value === null || value === undefined) return '';
-
   if (typeof value === 'string' || typeof value === 'number') {
     return String(value);
   }
-
   if (typeof value === 'object') {
     if (value.$oid) return String(value.$oid);
     if (value.id) return toIdString(value.id);
     if (value._id) return toIdString(value._id);
   }
-
   return String(value);
 };
 
@@ -167,7 +169,6 @@ const getInspectionId = (inspection) =>
 const getEventId = (event, index = 0) => {
   const direct = toIdString(event?.id ?? event?._id);
   if (direct) return direct;
-
   return [
     event?.rail_side || 'rail',
     event?.defect_type || 'defect',
@@ -179,19 +180,19 @@ const getEventId = (event, index = 0) => {
 const formatDate = (dateString) => {
   if (!dateString) return 'N/A';
   const date = new Date(dateString);
-  return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleString('my-MM');
 };
 
 const formatDuration = (seconds) => {
   const totalSeconds = asNumber(seconds, 0);
   const mins = Math.floor(totalSeconds / 60);
   const secs = Math.floor(totalSeconds % 60);
-  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  return mins > 0 ? `${mins}မိနစ် ${secs}စက္ကန့်` : `${secs}စက္ကန့်`;
 };
 
 const formatDistance = (value, digits = 2) => {
   const n = asNumber(value);
-  return n === null ? 'N/A' : `${n.toFixed(digits)} m`;
+  return n === null ? 'N/A' : `${n.toFixed(digits)} မီတာ`;
 };
 
 const formatConfidence = (value) => {
@@ -207,7 +208,7 @@ const getInspectionName = (inspection) =>
   inspection?.run_id ||
   inspection?.inspection?.run_id ||
   inspection?.name ||
-  'Inspection';
+  'စစ်ဆေးမှု';
 
 const getInspectionDuration = (inspection) =>
   inspection?.duration_seconds ??
@@ -284,10 +285,8 @@ const getAiSpatialSummary = (inspection) =>
   inspection?.inspection?.ai_spatial_summary ??
   null;
 
-
 const isBrowserAccessibleMedia = (value) => {
   if (!value || typeof value !== 'string') return false;
-
   return (
     value.startsWith('http://') ||
     value.startsWith('https://') ||
@@ -298,15 +297,8 @@ const isBrowserAccessibleMedia = (value) => {
 };
 
 const getInspectionVideoSources = (inspection) => {
-  const media =
-    inspection?.media ??
-    inspection?.inspection?.media ??
-    {};
-
-  const mediaUrls =
-    inspection?.media_urls ??
-    inspection?.inspection?.media_urls ??
-    {};
+  const media = inspection?.media ?? inspection?.inspection?.media ?? {};
+  const mediaUrls = inspection?.media_urls ?? inspection?.inspection?.media_urls ?? {};
 
   const leftUrl =
     mediaUrls?.left ??
@@ -350,19 +342,11 @@ const getInspectionVideoSources = (inspection) => {
 
   return {
     left: {
-      url: isBrowserAccessibleMedia(leftUrl)
-        ? leftUrl
-        : isBrowserAccessibleMedia(leftPath)
-        ? leftPath
-        : null,
+      url: isBrowserAccessibleMedia(leftUrl) ? leftUrl : isBrowserAccessibleMedia(leftPath) ? leftPath : null,
       storedPath: leftPath || leftUrl || null,
     },
     right: {
-      url: isBrowserAccessibleMedia(rightUrl)
-        ? rightUrl
-        : isBrowserAccessibleMedia(rightPath)
-        ? rightPath
-        : null,
+      url: isBrowserAccessibleMedia(rightUrl) ? rightUrl : isBrowserAccessibleMedia(rightPath) ? rightPath : null,
       storedPath: rightPath || rightUrl || null,
     },
   };
@@ -373,35 +357,20 @@ const getInspectionVideoSources = (inspection) => {
 // -----------------------------------------------------------------------------
 
 const getEventCoordinates = (event) => {
-  const lat =
-    event?.gps?.latitude ??
-    event?.gps?.lat ??
-    event?.latitude ??
-    event?.lat;
-
-  const lng =
-    event?.gps?.longitude ??
-    event?.gps?.lng ??
-    event?.longitude ??
-    event?.lng;
+  const lat = event?.gps?.latitude ?? event?.gps?.lat ?? event?.latitude ?? event?.lat;
+  const lng = event?.gps?.longitude ?? event?.gps?.lng ?? event?.longitude ?? event?.lng;
 
   if (lat != null && lng != null) {
     const latitude = Number(lat);
     const longitude = Number(lng);
-
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
       return { latitude, longitude };
     }
   }
 
-  // GeoJSON-style [longitude, latitude]
-  if (
-    Array.isArray(event?.gps?.coordinates) &&
-    event.gps.coordinates.length >= 2
-  ) {
+  if (Array.isArray(event?.gps?.coordinates) && event.gps.coordinates.length >= 2) {
     const longitude = Number(event.gps.coordinates[0]);
     const latitude = Number(event.gps.coordinates[1]);
-
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
       return { latitude, longitude };
     }
@@ -410,7 +379,6 @@ const getEventCoordinates = (event) => {
   if (Array.isArray(event?.coordinates) && event.coordinates.length >= 2) {
     const longitude = Number(event.coordinates[0]);
     const latitude = Number(event.coordinates[1]);
-
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
       return { latitude, longitude };
     }
@@ -420,9 +388,7 @@ const getEventCoordinates = (event) => {
 };
 
 const getEventRouteDistance = (event) =>
-  event?.gps?.distance_from_start_m ??
-  event?.distance_from_start_m ??
-  null;
+  event?.gps?.distance_from_start_m ?? event?.distance_from_start_m ?? null;
 
 const getRoutePolyline = (route) => {
   if (!route) return [];
@@ -432,12 +398,10 @@ const getRoutePolyline = (route) => {
       .map((point) => {
         const latitude = asNumber(point?.latitude ?? point?.lat);
         const longitude = asNumber(point?.longitude ?? point?.lng);
-
         if (latitude === null || longitude === null) return null;
         return [latitude, longitude];
       })
       .filter(Boolean);
-
     if (points.length >= 2) return points;
   }
 
@@ -446,12 +410,7 @@ const getRoutePolyline = (route) => {
   const endLat = asNumber(route?.end?.latitude);
   const endLng = asNumber(route?.end?.longitude);
 
-  if (
-    startLat !== null &&
-    startLng !== null &&
-    endLat !== null &&
-    endLng !== null
-  ) {
+  if (startLat !== null && startLng !== null && endLat !== null && endLng !== null) {
     return [
       [startLat, startLng],
       [endLat, endLng],
@@ -460,11 +419,6 @@ const getRoutePolyline = (route) => {
 
   return [];
 };
-
-// -----------------------------------------------------------------------------
-// Supplementary visual findings
-// Only positive findings are surfaced in UI.
-// -----------------------------------------------------------------------------
 
 const getSupplementaryFindings = (event) => {
   const review = event?.supplementary_visual_review;
@@ -475,7 +429,6 @@ const getSupplementaryFindings = (event) => {
   if (Array.isArray(review.findings)) {
     review.findings.forEach((finding) => {
       if (!finding?.description) return;
-
       results.push({
         type: finding.type || 'supplementary_finding',
         confidence: finding.confidence || null,
@@ -485,7 +438,6 @@ const getSupplementaryFindings = (event) => {
   }
 
   const severity = review?.rail_break_visual_severity;
-
   if (severity?.description && severity?.confidence === 'high') {
     results.push({
       type: 'rail_break_visual_severity',
@@ -507,9 +459,7 @@ function FitBounds({ positions }) {
 
   useEffect(() => {
     if (!positions?.length) return;
-
     const bounds = L.latLngBounds(positions);
-
     if (bounds.isValid()) {
       map.fitBounds(bounds, {
         padding: [40, 40],
@@ -565,23 +515,14 @@ function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
         return coords ? [coords.latitude, coords.longitude] : null;
       })
       .filter(Boolean);
-
     routePolyline.forEach((point) => positions.push(point));
-
     return positions;
   }, [validEvents, routePolyline]);
 
   const center = useMemo(() => {
     if (!allPositions.length) return [16.8409, 96.1735];
-
-    const latitude =
-      allPositions.reduce((sum, point) => sum + point[0], 0) /
-      allPositions.length;
-
-    const longitude =
-      allPositions.reduce((sum, point) => sum + point[1], 0) /
-      allPositions.length;
-
+    const latitude = allPositions.reduce((sum, point) => sum + point[0], 0) / allPositions.length;
+    const longitude = allPositions.reduce((sum, point) => sum + point[1], 0) / allPositions.length;
     return [latitude, longitude];
   }, [allPositions]);
 
@@ -597,9 +538,9 @@ function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
     return (
       <div className="flex h-full min-h-[360px] flex-col items-center justify-center rounded-xl bg-slate-50">
         <MapPin className="mb-3 h-10 w-10 text-slate-300" />
-        <p className="font-medium text-slate-600">No GPS data available</p>
+        <p className="font-medium text-slate-600">GPS ဒေတာ မရှိပါ</p>
         <p className="mt-1 text-sm text-slate-400">
-          Defect markers require valid inspection coordinates.
+          ချို့ယွင်းချက်များကို မြေပုံပေါ်တွင် ပြသရန် တည်နေရာ လိုအပ်ပါသည်။
         </p>
       </div>
     );
@@ -641,7 +582,7 @@ function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
             }}
           >
             <Popup>
-              <strong>Route Start</strong>
+              <strong>စတင်ရာ</strong>
             </Popup>
           </CircleMarker>
         )}
@@ -658,7 +599,7 @@ function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
             }}
           >
             <Popup>
-              <strong>Route End</strong>
+              <strong>အဆုံးသတ်</strong>
             </Popup>
           </CircleMarker>
         )}
@@ -680,33 +621,30 @@ function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
               <Popup>
                 <div className="min-w-[220px] p-1">
                   <div className="mb-2 flex items-center gap-2">
-                    <span className="text-lg">
-                      {getDefectMeta(event.defect_type).icon}
-                    </span>
+                    <span className="text-lg">{getDefectMeta(event.defect_type).icon}</span>
                     <strong>{event.defect_type}</strong>
                   </div>
-
                   <div className="space-y-1 text-sm">
                     <div>
-                      <span className="text-gray-500">Rail: </span>
+                      <span className="text-gray-500">သံလမ်း: </span>
                       <span className="font-medium">
                         {event?.rail_side?.toUpperCase?.() || 'N/A'}
                       </span>
                     </div>
                     <div>
-                      <span className="text-gray-500">Confidence: </span>
+                      <span className="text-gray-500">အတည်ပြုနှုန်း: </span>
                       <span className="font-medium">
                         {formatConfidence(event?.confidence)}
                       </span>
                     </div>
                     <div>
-                      <span className="text-gray-500">Route distance: </span>
+                      <span className="text-gray-500">အကွာအဝေး: </span>
                       <span className="font-medium">
                         {formatDistance(getEventRouteDistance(event))}
                       </span>
                     </div>
                     <div>
-                      <span className="text-gray-500">Timestamp: </span>
+                      <span className="text-gray-500">အချိန်: </span>
                       <span className="font-medium">
                         {asNumber(event?.start_timestamp, 0).toFixed(1)}s
                       </span>
@@ -723,12 +661,11 @@ function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
 
       <div className="absolute bottom-4 right-4 z-[1000] max-w-[220px] rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Defects on map
+          ချို့ယွင်းချက်များ
         </p>
         <div className="space-y-1.5">
           {Object.entries(defectTypes).map(([type, count]) => {
             const meta = getDefectMeta(type);
-
             return (
               <div key={type} className="flex items-center gap-2 text-xs">
                 <span
@@ -757,23 +694,19 @@ function StatCard({ label, value, helper, icon: Icon, tone = 'blue' }) {
     green: 'bg-emerald-50 text-emerald-600',
     amber: 'bg-amber-50 text-amber-600',
     violet: 'bg-violet-50 text-violet-600',
+    slate: 'bg-slate-50 text-slate-600',
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md transition-shadow duration-200">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm font-medium text-slate-500">{label}</p>
           <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
-          {helper && (
-            <p className="mt-1 truncate text-xs text-slate-400">{helper}</p>
-          )}
+          {helper && <p className="mt-1 truncate text-xs text-slate-400">{helper}</p>}
         </div>
-
         <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-            tones[tone] || tones.blue
-          }`}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tones[tone] || tones.blue}`}
         >
           <Icon className="h-5 w-5" />
         </div>
@@ -802,9 +735,7 @@ function EmptyState({ title, description }) {
       <Info className="mx-auto mb-3 h-8 w-8 text-slate-300" />
       <p className="font-medium text-slate-700">{title}</p>
       {description && (
-        <p className="mx-auto mt-1 max-w-lg text-sm text-slate-500">
-          {description}
-        </p>
+        <p className="mx-auto mt-1 max-w-lg text-sm text-slate-500">{description}</p>
       )}
     </div>
   );
@@ -829,21 +760,19 @@ function AiAdvisoryPanel({ inspection }) {
             <Bot className="h-5 w-5 text-violet-600" />
           </div>
           <div>
-            <h4 className="font-semibold text-slate-900">
-              AI Maintenance Advisory
-            </h4>
+            <h4 className="font-semibold text-slate-900">AI ထိန်းသိမ်းမှု အကြံပြုချက်</h4>
             <p className="text-sm text-slate-500">
-              Railway-maintenance interpretation of inspection results
+              စစ်ဆေးမှုရလဒ်များအတွက် ဉာဏ်ရည်တုအခြေပြု ပြုပြင်ထိန်းသိမ်းမှု အကြံပြုချက်
             </p>
           </div>
         </div>
 
         <EmptyState
-          title={status === 'failed' ? 'AI advisory failed' : 'No AI advisory stored'}
+          title={status === 'failed' ? 'AI အကြံပြုချက် မအောင်မြင်ပါ' : 'AI အကြံပြုချက် မရှိသေးပါ'}
           description={
             status === 'failed'
-              ? 'The inspection data is still available, but the advisory generation did not complete.'
-              : 'This inspection does not currently contain an ai_advisory result.'
+              ? 'စစ်ဆေးမှုဒေတာ ရှိနေသော်လည်း AI အကြံပြုချက် ထုတ်ပေးခြင်း မပြီးမြောက်ပါ။'
+              : 'ဤစစ်ဆေးမှုတွင် AI အကြံပြုချက် မပါဝင်သေးပါ။'
           }
         />
       </section>
@@ -866,31 +795,27 @@ function AiAdvisoryPanel({ inspection }) {
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100">
               <Bot className="h-6 w-6 text-violet-700" />
             </div>
-
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h4 className="text-lg font-semibold text-slate-900">
-                  AI Railway Maintenance Advisory
+                  AI ရထားလမ်း ထိန်းသိမ်းမှု အကြံပြုချက်
                 </h4>
                 <PriorityBadge priority={advisory?.overall_priority} />
               </div>
-
               <p className="mt-1 text-sm text-slate-500">
-                Analysis of defect types, locations, concentrations, maintenance
-                significance and recommended follow-up.
+                ချို့ယွင်းချက်အမျိုးအစား၊ တည်နေရာ၊ ပြုပြင်ထိန်းသိမ်းမှု အရေးပါမှုတို့ကို ခွဲခြမ်းစိတ်ဖြာထားသည်။
               </p>
-
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-                {model && <span>Model: {model}</span>}
-                {generatedAt && <span>Generated: {formatDate(generatedAt)}</span>}
-                {status && <span>Status: {status}</span>}
+                {model && <span>မော်ဒယ်: {model}</span>}
+                {generatedAt && <span>ထုတ်ပေးချိန်: {formatDate(generatedAt)}</span>}
+                {status && <span>အခြေအနေ: {status}</span>}
               </div>
             </div>
           </div>
 
           {spatial?.reviewed_event_count != null && (
             <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
-              <p className="text-slate-500">Analyzed events</p>
+              <p className="text-slate-500">ခွဲခြမ်းစိတ်ဖြာထားသော အဖြစ်အပျက်များ</p>
               <p className="mt-1 text-xl font-bold text-slate-900">
                 {spatial.reviewed_event_count}
               </p>
@@ -900,9 +825,7 @@ function AiAdvisoryPanel({ inspection }) {
 
         {advisory?.executive_summary && (
           <div className="mt-5 rounded-xl border border-violet-100 bg-white/80 p-4">
-            <p className="text-sm leading-6 text-slate-700">
-              {advisory.executive_summary}
-            </p>
+            <p className="text-sm leading-6 text-slate-700">{advisory.executive_summary}</p>
           </div>
         )}
       </div>
@@ -912,7 +835,7 @@ function AiAdvisoryPanel({ inspection }) {
           <div>
             <h5 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
               <Activity className="h-4 w-4 text-blue-600" />
-              Key Findings
+              အဓိက တွေ့ရှိချက်များ
             </h5>
             <div className="grid gap-2 md:grid-cols-2">
               {keyFindings.map((finding, index) => (
@@ -932,10 +855,10 @@ function AiAdvisoryPanel({ inspection }) {
             <div className="mb-3 flex items-center justify-between gap-4">
               <h5 className="flex items-center gap-2 font-semibold text-slate-900">
                 <Layers className="h-4 w-4 text-amber-600" />
-                Localized Areas of Attention
+                အာရုံစိုက်ရန် နေရာများ
               </h5>
               <span className="text-xs text-slate-400">
-                {areas.length} area{areas.length === 1 ? '' : 's'}
+                {areas.length} နေရာ
               </span>
             </div>
 
@@ -948,33 +871,30 @@ function AiAdvisoryPanel({ inspection }) {
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="font-semibold text-slate-900">
-                        {(area?.rail_side || 'Unknown').toUpperCase()} rail ·{' '}
+                        {(area?.rail_side || 'Unknown').toUpperCase()} သံလမ်း ·{' '}
                         {formatDistance(area?.start_distance_m)} →{' '}
                         {formatDistance(area?.end_distance_m)}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
-                        {area?.event_count ?? 0} event
-                        {(area?.event_count ?? 0) === 1 ? '' : 's'} ·{' '}
+                        {area?.event_count ?? 0} အဖြစ်အပျက်
+                        {(area?.event_count ?? 0) === 1 ? '' : 'များ'} ·{' '}
                         {Object.entries(area?.defect_counts || {})
                           .map(([type, count]) => `${type}: ${count}`)
-                          .join(' · ') || 'No defect breakdown'}
+                          .join(' · ') || 'ချို့ယွင်းချက် အမျိုးအစား မရှိပါ'}
                       </p>
                     </div>
-
                     <PriorityBadge priority={area?.priority} />
                   </div>
 
                   {area?.assessment && (
-                    <p className="mt-3 text-sm leading-6 text-slate-700">
-                      {area.assessment}
-                    </p>
+                    <p className="mt-3 text-sm leading-6 text-slate-700">{area.assessment}</p>
                   )}
 
                   {Array.isArray(area?.recommended_checks) &&
                     area.recommended_checks.length > 0 && (
                       <div className="mt-3 rounded-lg bg-slate-50 p-3">
                         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          Recommended checks
+                          စစ်ဆေးရန် အကြံပြုချက်များ
                         </p>
                         <ul className="space-y-1.5 text-sm text-slate-700">
                           {area.recommended_checks.map((check, checkIndex) => (
@@ -999,7 +919,7 @@ function AiAdvisoryPanel({ inspection }) {
           <div>
             <h5 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
               <AlertTriangle className="h-4 w-4 text-red-600" />
-              Individual High-Priority Events
+              အရေးပေါ် စစ်ဆေးရန် အဖြစ်အပျက်များ
             </h5>
 
             <div className="space-y-3">
@@ -1010,19 +930,17 @@ function AiAdvisoryPanel({ inspection }) {
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-slate-900">
-                      {event?.defect_type || 'Defect'}
+                      {event?.defect_type || 'ချို့ယွင်းချက်'}
                     </span>
                     <span className="text-sm text-slate-500">
-                      {(event?.rail_side || 'Unknown').toUpperCase()} rail ·{' '}
+                      {(event?.rail_side || 'Unknown').toUpperCase()} သံလမ်း ·{' '}
                       {formatDistance(event?.route_distance_m)}
                     </span>
                     <PriorityBadge priority={event?.priority} compact />
                   </div>
 
                   {event?.assessment && (
-                    <p className="mt-2 text-sm leading-6 text-slate-700">
-                      {event.assessment}
-                    </p>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">{event.assessment}</p>
                   )}
                 </div>
               ))}
@@ -1034,13 +952,12 @@ function AiAdvisoryPanel({ inspection }) {
           <div>
             <h5 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
               <BarChart3 className="h-4 w-4 text-indigo-600" />
-              Defect-Type Assessment
+              ချို့ယွင်းချက်အမျိုးအစား အကဲဖြတ်ချက်
             </h5>
 
             <div className="grid gap-3 lg:grid-cols-2">
               {typeAssessments.map((item, index) => {
                 const meta = getDefectMeta(item?.defect_type);
-
                 return (
                   <div
                     key={`${item?.defect_type}-${index}`}
@@ -1049,10 +966,10 @@ function AiAdvisoryPanel({ inspection }) {
                     <div className="flex items-center gap-2">
                       <span>{meta.icon}</span>
                       <p className="font-semibold text-slate-900">
-                        {item?.defect_type || 'Defect'}
+                        {item?.defect_type || 'ချို့ယွင်းချက်'}
                       </p>
                       <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                        {item?.event_count ?? 0} events
+                        {item?.event_count ?? 0} အဖြစ်အပျက်
                       </span>
                     </div>
 
@@ -1064,7 +981,7 @@ function AiAdvisoryPanel({ inspection }) {
 
                     {item?.recommended_response && (
                       <div className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">
-                        <span className="font-semibold">Recommended response: </span>
+                        <span className="font-semibold">အကြံပြုဆောင်ရွက်ချက်: </span>
                         {item.recommended_response}
                       </div>
                     )}
@@ -1079,12 +996,11 @@ function AiAdvisoryPanel({ inspection }) {
           <div>
             <h5 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
               <Info className="h-4 w-4 text-slate-500" />
-              Possible Contributing Factors
+              ဖြစ်နိုင်ခြေရှိသော အထောက်အကူပြုအချက်များ
             </h5>
 
             <p className="mb-3 text-xs text-slate-400">
-              These are possible contributors from the advisory, not diagnosed
-              causes.
+              ၎င်းတို့သည် အတည်ပြုထားသော အကြောင်းရင်းများ မဟုတ်ဘဲ ဖြစ်နိုင်ခြေရှိသော အထောက်အကူပြုအချက်များဖြစ်သည်။
             </p>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -1094,7 +1010,7 @@ function AiAdvisoryPanel({ inspection }) {
                   className="rounded-xl border border-slate-200 bg-slate-50 p-4"
                 >
                   <p className="font-semibold text-slate-900">
-                    {item?.defect_type || 'Defect'}
+                    {item?.defect_type || 'ချို့ယွင်းချက်'}
                   </p>
 
                   {Array.isArray(item?.factors) && item.factors.length > 0 && (
@@ -1111,9 +1027,7 @@ function AiAdvisoryPanel({ inspection }) {
                   )}
 
                   {item?.context && (
-                    <p className="mt-3 text-sm leading-5 text-slate-600">
-                      {item.context}
-                    </p>
+                    <p className="mt-3 text-sm leading-5 text-slate-600">{item.context}</p>
                   )}
                 </div>
               ))}
@@ -1125,7 +1039,7 @@ function AiAdvisoryPanel({ inspection }) {
           <div>
             <h5 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
               <Wrench className="h-4 w-4 text-emerald-600" />
-              Recommended Actions
+              အကြံပြုဆောင်ရွက်ချက်များ
             </h5>
 
             <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
@@ -1146,18 +1060,16 @@ function AiAdvisoryPanel({ inspection }) {
         {advisory?.trend_assessment && (
           <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-              Trend Assessment
+              လမ်းကြောင်းသဘောထား အကဲဖြတ်ချက်
             </p>
-            <p className="mt-2 text-sm leading-6 text-slate-700">
-              {advisory.trend_assessment}
-            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">{advisory.trend_assessment}</p>
           </div>
         )}
 
         {limitations.length > 0 && (
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Limitations
+              ကန့်သတ်ချက်များ
             </p>
             <ul className="mt-2 space-y-1.5 text-sm text-slate-600">
               {limitations.map((limitation, index) => (
@@ -1168,9 +1080,9 @@ function AiAdvisoryPanel({ inspection }) {
         )}
 
         <div className="border-t border-slate-100 pt-4 text-xs leading-5 text-slate-400">
-          AI-generated maintenance advisory. Final maintenance decisions should
-          be confirmed by qualified railway personnel and the applicable
-          railway maintenance standard.
+          AI မှ ထုတ်ပေးသော ထိန်းသိမ်းမှုအကြံပြုချက်။ နောက်ဆုံးပြုပြင်ထိန်းသိမ်းမှု ဆုံးဖြတ်ချက်များကို
+          အရည်အချင်းပြည့်မီသော ရထားလမ်းဝန်ထမ်းများနှင့် သက်ဆိုင်ရာ ရထားလမ်းထိန်းသိမ်းမှုစံနှုန်းများဖြင့်
+          အတည်ပြုသင့်သည်။
         </div>
       </div>
     </section>
@@ -1192,7 +1104,7 @@ function EventCard({ event, index, selected, onSelect }) {
       id={`event-${eventId}`}
       type="button"
       onClick={() => onSelect(eventId)}
-      className={`w-full rounded-xl border p-4 text-left transition ${
+      className={`w-full rounded-xl border p-4 text-left transition-all duration-200 hover:shadow-md ${
         selected
           ? 'border-blue-300 bg-blue-50 shadow-sm'
           : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
@@ -1210,22 +1122,18 @@ function EventCard({ event, index, selected, onSelect }) {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-semibold text-slate-900">
-                {event?.defect_type || 'Unknown defect'}
+                {event?.defect_type || 'အမျိုးအစားမသိ'}
               </p>
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium uppercase text-slate-600">
-                {event?.rail_side || 'rail'} rail
+                {event?.rail_side || 'rail'} သံလမ်း
               </span>
             </div>
 
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-              <span>Confidence {formatConfidence(event?.confidence)}</span>
-              <span>
-                Distance {formatDistance(getEventRouteDistance(event))}
-              </span>
-              <span>
-                Time {asNumber(event?.start_timestamp, 0).toFixed(1)}s
-              </span>
-              <span>{event?.detection_count ?? 0} detections</span>
+              <span>အတည်ပြုနှုန်း {formatConfidence(event?.confidence)}</span>
+              <span>အကွာအဝေး {formatDistance(getEventRouteDistance(event))}</span>
+              <span>အချိန် {asNumber(event?.start_timestamp, 0).toFixed(1)}s</span>
+              <span>{event?.detection_count ?? 0} တွေ့ရှိချက်</span>
             </div>
           </div>
         </div>
@@ -1246,7 +1154,7 @@ function EventCard({ event, index, selected, onSelect }) {
       {findings.length > 0 && (
         <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50 p-3">
           <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
-            Supplementary AI observation
+            AI မှ ထပ်ဆောင်း လေ့လာတွေ့ရှိချက်
           </p>
 
           {findings.map((finding, findingIndex) => (
@@ -1255,9 +1163,7 @@ function EventCard({ event, index, selected, onSelect }) {
               className="text-sm leading-5 text-violet-900"
             >
               {finding.level && (
-                <span className="mr-1 font-semibold capitalize">
-                  {finding.level}:
-                </span>
+                <span className="mr-1 font-semibold capitalize">{finding.level}:</span>
               )}
               {finding.description}
             </div>
@@ -1316,7 +1222,7 @@ const InspectionDashboard = () => {
       setInspections(Array.isArray(inspectionsData) ? inspectionsData : []);
     } catch (err) {
       console.error(err);
-      setError('Failed to load inspection data.');
+      setError('စစ်ဆေးမှုဒေတာများ ရယူရာတွင် မအောင်မြင်ပါ။');
     } finally {
       setLoading(false);
     }
@@ -1336,7 +1242,7 @@ const InspectionDashboard = () => {
       setInspections(Array.isArray(results) ? results : []);
     } catch (err) {
       console.error(err);
-      setError('Inspection search failed.');
+      setError('စစ်ဆေးမှုရှာဖွေမှု မအောင်မြင်ပါ။');
     } finally {
       setLoading(false);
     }
@@ -1356,7 +1262,7 @@ const InspectionDashboard = () => {
       setDetailData(data);
     } catch (err) {
       console.error(err);
-      setError('Failed to load inspection details.');
+      setError('စစ်ဆေးမှုအသေးစိတ် ရယူရာတွင် မအောင်မြင်ပါ။');
     } finally {
       setDetailLoading(false);
     }
@@ -1375,7 +1281,7 @@ const InspectionDashboard = () => {
       setAiDialogData(data);
     } catch (err) {
       console.error(err);
-      setError('Failed to load AI advisory.');
+      setError('AI အကြံပြုချက် ရယူရာတွင် မအောင်မြင်ပါ။');
     } finally {
       setAiDialogLoading(false);
     }
@@ -1394,7 +1300,7 @@ const InspectionDashboard = () => {
       setVideoDialogData(data);
     } catch (err) {
       console.error(err);
-      setError('Failed to load inspection video information.');
+      setError('ဗီဒီယိုအချက်အလက် ရယူရာတွင် မအောင်မြင်ပါ။');
     } finally {
       setVideoDialogLoading(false);
     }
@@ -1402,9 +1308,7 @@ const InspectionDashboard = () => {
 
   const handleEventSelect = (eventId) => {
     if (!eventId) return;
-
     setSelectedEventId(eventId);
-
     window.setTimeout(() => {
       document.getElementById(`event-${eventId}`)?.scrollIntoView({
         behavior: 'smooth',
@@ -1436,9 +1340,7 @@ const InspectionDashboard = () => {
   );
 
   const completedAiCount = useMemo(
-    () =>
-      inspections.filter((inspection) => getAiStatus(inspection) === 'completed')
-        .length,
+    () => inspections.filter((inspection) => getAiStatus(inspection) === 'completed').length,
     [inspections]
   );
 
@@ -1451,91 +1353,98 @@ const InspectionDashboard = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4 md:p-6 bg-gray-50 min-h-screen">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
-            Smart Railway Intelligence Platform
-          </p>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">
-            Track Inspection Dashboard
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Defect detections, route locations and AI maintenance advisories.
-          </p>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+              စမတ်ရထားလမ်း ဉာဏ်ရည်တုစနစ်
+            </p>
+            <h1 className="mt-1 text-2xl md:text-3xl font-bold text-slate-900 flex items-center gap-3">
+              <Shield className="w-8 h-8 text-blue-600" />
+              ရထားလမ်း စစ်ဆေးမှု ဒတ်ရှ်ဘုတ်
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              ချို့ယွင်းချက်ရှာဖွေတွေ့ရှိမှုများ၊ လမ်းကြောင်းတည်နေရာများနှင့် AI ထိန်းသိမ်းမှု အကြံပြုချက်များ
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={fetchDashboardData}
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-60 shadow-md hover:shadow-lg"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            ဒေတာအသစ်ပြန်လည်ရယူရန်
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={fetchDashboardData}
-          disabled={loading}
-          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-60"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 mt-6 pt-6 border-t border-gray-100">
+          <StatCard
+            label="စုစုပေါင်း စစ်ဆေးမှုများ"
+            value={overviewStats?.total_inspections ?? inspections.length}
+            helper="သိမ်းဆည်းထားသော စစ်ဆေးမှုများ"
+            icon={Video}
+            tone="blue"
+          />
+
+          <StatCard
+            label="စုစုပေါင်း ချို့ယွင်းချက်များ"
+            value={overviewStats?.total_defects ?? overviewStats?.total_events ?? 0}
+            helper="စုစည်းထားသော ချို့ယွင်းချက်များ"
+            icon={AlertTriangle}
+            tone="red"
+          />
+
+          <StatCard
+            label="ပျမ်းမျှ အတည်ပြုနှုန်း"
+            value={
+              defectStats.length
+                ? `${(
+                    (defectStats.reduce(
+                      (sum, item) => sum + asNumber(item?.avg_confidence, 0),
+                      0
+                    ) /
+                      defectStats.length) *
+                    100
+                  ).toFixed(1)}%`
+                : 'N/A'
+            }
+            helper="ချို့ယွင်းချက်အမျိုးအစားများအလိုက်"
+            icon={TrendingUp}
+            tone="green"
+          />
+
+          <StatCard
+            label="AI အကြံပြုချက်များ"
+            value={completedAiCount}
+            helper={`ဒေတာ ${inspections.length} ခုအနက်`}
+            icon={Bot}
+            tone="violet"
+          />
+        </div>
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+        <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center space-x-3">
+          <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+          <p className="text-red-700 text-sm flex-1">{error}</p>
+          <button onClick={() => setError(null)} className="text-red-600 hover:text-red-800 transition-colors">
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Statistics */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Total Inspections"
-          value={overviewStats?.total_inspections ?? inspections.length}
-          helper="Saved inspection runs"
-          icon={Video}
-          tone="blue"
-        />
-
-        <StatCard
-          label="Total Defect Events"
-          value={overviewStats?.total_defects ?? overviewStats?.total_events ?? 0}
-          helper="Aggregated defect events"
-          icon={AlertTriangle}
-          tone="red"
-        />
-
-        <StatCard
-          label="Average Confidence"
-          value={
-            defectStats.length
-              ? `${(
-                  (defectStats.reduce(
-                    (sum, item) => sum + asNumber(item?.avg_confidence, 0),
-                    0
-                  ) /
-                    defectStats.length) *
-                  100
-                ).toFixed(1)}%`
-              : 'N/A'
-          }
-          helper="Across defect classes"
-          icon={TrendingUp}
-          tone="green"
-        />
-
-        <StatCard
-          label="AI Advisories"
-          value={completedAiCount}
-          helper={`Among ${inspections.length} loaded inspections`}
-          icon={Bot}
-          tone="violet"
-        />
-      </div>
-
       {/* Tabs */}
-      <div className="border-b border-slate-200">
+      <div className="border-b border-slate-200 bg-white rounded-t-2xl px-6">
         <nav className="flex gap-7">
           {[
-            { id: 'overview', label: 'Overview' },
-            { id: 'inspections', label: 'Inspections' },
-            { id: 'analytics', label: 'Analytics' },
+            { id: 'overview', label: 'ခြုံငုံသုံးသပ်ချက်' },
+            { id: 'inspections', label: 'စစ်ဆေးမှုများ' },
+            { id: 'analytics', label: 'အချက်အလက်ခွဲခြမ်းစိတ်ဖြာချက်' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1558,11 +1467,9 @@ const InspectionDashboard = () => {
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4">
-              <h3 className="font-semibold text-slate-900">
-                Defect Distribution
-              </h3>
+              <h3 className="font-semibold text-slate-900">ချို့ယွင်းချက် ဖြန့်ကျက်မှု</h3>
               <p className="mt-1 text-sm text-slate-500">
-                Aggregated defect-event count by class.
+                ချို့ယွင်းချက်အမျိုးအစားအလိုက် စုစည်းထားသော အရေအတွက်။
               </p>
             </div>
 
@@ -1581,27 +1488,22 @@ const InspectionDashboard = () => {
                     }
                   >
                     {defectChartData.map((entry) => (
-                      <Cell
-                        key={entry.name}
-                        fill={getDefectMeta(entry.name).color}
-                      />
+                      <Cell key={entry.name} fill={getDefectMeta(entry.name).color} />
                     ))}
                   </Pie>
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <EmptyState title="No defect statistics available" />
+              <EmptyState title="ချို့ယွင်းချက်အချက်အလက် မရှိပါ" />
             )}
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4">
-              <h3 className="font-semibold text-slate-900">
-                Average Detection Confidence
-              </h3>
+              <h3 className="font-semibold text-slate-900">ပျမ်းမျှ အတည်ပြုနှုန်း</h3>
               <p className="mt-1 text-sm text-slate-500">
-                Model confidence summarized by defect class.
+                ချို့ယွင်းချက်အမျိုးအစားအလိုက် မော်ဒယ်၏ အတည်ပြုနှုန်း။
               </p>
             </div>
 
@@ -1628,27 +1530,25 @@ const InspectionDashboard = () => {
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <EmptyState title="No confidence statistics available" />
+              <EmptyState title="အတည်ပြုနှုန်းအချက်အလက် မရှိပါ" />
             )}
           </div>
 
           <div className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
-                <h3 className="font-semibold text-slate-900">
-                  Recent Inspections
-                </h3>
+                <h3 className="font-semibold text-slate-900">မကြာသေးမီက စစ်ဆေးမှုများ</h3>
                 <p className="mt-1 text-sm text-slate-500">
-                  Open an inspection to view route events and its AI advisory.
+                  စစ်ဆေးမှုတစ်ခုကို ဖွင့်ရန် ၎င်း၏ အသေးစိတ်နှင့် AI အကြံပြုချက်ကို ကြည့်ရှုပါ။
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={() => setActiveTab('inspections')}
-                className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                className="text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
               >
-                View all
+                အားလုံးကြည့်ရန် <ChevronRight className="h-4 w-4" />
               </button>
             </div>
 
@@ -1662,7 +1562,7 @@ const InspectionDashboard = () => {
                     key={inspectionId}
                     type="button"
                     onClick={() => handleViewDetail(inspectionId)}
-                    className="flex w-full items-center gap-4 py-4 text-left hover:bg-slate-50"
+                    className="flex w-full items-center gap-4 py-4 text-left hover:bg-slate-50 transition-colors rounded-lg px-2"
                   >
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50">
                       <Video className="h-5 w-5 text-blue-600" />
@@ -1679,7 +1579,7 @@ const InspectionDashboard = () => {
 
                     <div className="hidden text-right sm:block">
                       <p className="text-sm font-semibold text-red-600">
-                        {getInspectionDefectCount(inspection)} defects
+                        {getInspectionDefectCount(inspection)} ချို့ယွင်းချက်
                       </p>
                       <p className="text-xs text-slate-400">
                         {formatDistance(getInspectionDistance(inspection))}
@@ -1687,13 +1587,10 @@ const InspectionDashboard = () => {
                     </div>
 
                     {advisory?.overall_priority ? (
-                      <PriorityBadge
-                        priority={advisory.overall_priority}
-                        compact
-                      />
+                      <PriorityBadge priority={advisory.overall_priority} compact />
                     ) : (
                       <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-500">
-                        No advisory
+                        အကြံပြုချက်မရှိ
                       </span>
                     )}
                   </button>
@@ -1701,7 +1598,7 @@ const InspectionDashboard = () => {
               })}
 
               {inspections.length === 0 && (
-                <EmptyState title="No inspections found" />
+                <EmptyState title="စစ်ဆေးမှုများ မတွေ့ရှိပါ" />
               )}
             </div>
           </div>
@@ -1711,27 +1608,27 @@ const InspectionDashboard = () => {
       {/* Inspections */}
       {activeTab === 'inspections' && (
         <div className="space-y-4">
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
                 value={searchQuery}
-                placeholder="Search inspection, GPX file or defect type..."
+                placeholder="စစ်ဆေးမှု၊ GPX ဖိုင် သို့မဟုတ် ချို့ယွင်းချက်အမျိုးအစားဖြင့် ရှာဖွေပါ..."
                 onChange={(event) => setSearchQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') handleSearch();
                 }}
-                className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white"
               />
             </div>
 
             <button
               type="button"
               onClick={handleSearch}
-              className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+              className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm"
             >
-              Search
+              ရှာဖွေရန်
             </button>
           </div>
 
@@ -1741,25 +1638,25 @@ const InspectionDashboard = () => {
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Inspection
+                      စစ်ဆေးမှု
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Distance
+                      အကွာအဝေး
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Duration
+                      ကြာချိန်
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Defects
+                      ချို့ယွင်းချက်များ
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      AI Advisory
+                      AI အကြံပြုချက်
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Created
+                      ဖန်တီးချိန်
                     </th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Action
+                      ဆောင်ရွက်ချက်
                     </th>
                   </tr>
                 </thead>
@@ -1771,7 +1668,7 @@ const InspectionDashboard = () => {
                     const status = getAiStatus(inspection);
 
                     return (
-                      <tr key={inspectionId} className="hover:bg-slate-50">
+                      <tr key={inspectionId} className="hover:bg-slate-50 transition-colors">
                         <td className="px-4 py-4">
                           <p className="max-w-[280px] truncate text-sm font-medium text-slate-900">
                             {getInspectionName(inspection)}
@@ -1797,10 +1694,7 @@ const InspectionDashboard = () => {
 
                         <td className="px-4 py-4 text-center">
                           {advisory?.overall_priority ? (
-                            <PriorityBadge
-                              priority={advisory.overall_priority}
-                              compact
-                            />
+                            <PriorityBadge priority={advisory.overall_priority} compact />
                           ) : (
                             <span
                               className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
@@ -1811,7 +1705,7 @@ const InspectionDashboard = () => {
                                   : 'bg-slate-100 text-slate-500'
                               }`}
                             >
-                              {status || 'Not generated'}
+                              {status || 'မထုတ်ပေးရသေး'}
                             </span>
                           )}
                         </td>
@@ -1821,13 +1715,13 @@ const InspectionDashboard = () => {
                         </td>
 
                         <td className="px-4 py-4">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-2 flex-wrap">
                             <button
                               type="button"
                               onClick={() => handleViewDetail(inspectionId)}
                               className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
                             >
-                              View Details
+                              အသေးစိတ်
                             </button>
 
                             <button
@@ -1836,7 +1730,7 @@ const InspectionDashboard = () => {
                               className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
                             >
                               <Bot className="h-3.5 w-3.5" />
-                              AI Response
+                              AI အကြံပြုချက်
                             </button>
 
                             <button
@@ -1845,7 +1739,7 @@ const InspectionDashboard = () => {
                               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                             >
                               <PlayCircle className="h-3.5 w-3.5" />
-                              Videos
+                              ဗီဒီယိုများ
                             </button>
                           </div>
                         </td>
@@ -1856,7 +1750,7 @@ const InspectionDashboard = () => {
                   {inspections.length === 0 && (
                     <tr>
                       <td colSpan="7" className="px-4 py-10 text-center text-sm text-slate-500">
-                        No inspections found.
+                        စစ်ဆေးမှုများ မတွေ့ရှိပါ။
                       </td>
                     </tr>
                   )}
@@ -1871,11 +1765,9 @@ const InspectionDashboard = () => {
       {activeTab === 'analytics' && (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
           <div className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="font-semibold text-slate-900">
-              Inspection Defect Timeline
-            </h3>
+            <h3 className="font-semibold text-slate-900">စစ်ဆေးမှု ချို့ယွင်းချက် အချိန်ဇယား</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Defect-event counts across recently loaded inspections.
+              မကြာသေးမီက ရယူထားသော စစ်ဆေးမှုများတွင် ချို့ယွင်းချက်အရေအတွက်။
             </p>
 
             <div className="mt-4">
@@ -1896,15 +1788,15 @@ const InspectionDashboard = () => {
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <EmptyState title="No timeline data available" />
+                <EmptyState title="အချိန်ဇယားဒေတာ မရှိပါ" />
               )}
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="font-semibold text-slate-900">Defect Classes</h3>
+            <h3 className="font-semibold text-slate-900">ချို့ယွင်းချက် အမျိုးအစားများ</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Current detector taxonomy.
+              လက်ရှိရှာဖွေတွေ့ရှိမှုစနစ်၏ အမျိုးအစားများ။
             </p>
 
             <div className="mt-5 space-y-3">
@@ -1914,7 +1806,7 @@ const InspectionDashboard = () => {
                 return (
                   <div
                     key={type}
-                    className="flex items-center gap-3 rounded-xl border border-slate-200 p-3"
+                    className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 hover:bg-slate-50 transition-colors"
                   >
                     <div
                       className="flex h-9 w-9 items-center justify-center rounded-lg"
@@ -1928,7 +1820,7 @@ const InspectionDashboard = () => {
                         {type}
                       </p>
                       <p className="text-xs text-slate-400">
-                        {stat?.count ?? 0} events
+                        {stat?.count ?? 0} အဖြစ်အပျက်
                       </p>
                     </div>
 
@@ -1958,11 +1850,9 @@ const InspectionDashboard = () => {
             <div className="relative z-10 w-full max-w-7xl overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
               <div className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
                 <div>
-                  <h3 className="font-semibold text-slate-900">
-                    Inspection Details
-                  </h3>
+                  <h3 className="font-semibold text-slate-900">စစ်ဆေးမှု အသေးစိတ်</h3>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    Detection evidence, route location and maintenance advisory
+                    ချို့ယွင်းချက်အထောက်အထား၊ လမ်းကြောင်းတည်နေရာနှင့် ထိန်းသိမ်းမှု အကြံပြုချက်
                   </p>
                 </div>
 
@@ -1997,52 +1887,47 @@ const InspectionDashboard = () => {
                         {/* Summary */}
                         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
                           <div className="rounded-xl border border-slate-200 bg-white p-4">
-                            <p className="text-xs text-slate-500">Inspection</p>
+                            <p className="text-xs text-slate-500">စစ်ဆေးမှု</p>
                             <p className="mt-1 truncate text-sm font-semibold text-slate-900">
                               {getInspectionName(inspection)}
                             </p>
                           </div>
 
                           <div className="rounded-xl border border-slate-200 bg-white p-4">
-                            <p className="text-xs text-slate-500">Distance</p>
+                            <p className="text-xs text-slate-500">အကွာအဝေး</p>
                             <p className="mt-1 text-sm font-semibold text-slate-900">
                               {formatDistance(getInspectionDistance(inspection))}
                             </p>
                           </div>
 
                           <div className="rounded-xl border border-slate-200 bg-white p-4">
-                            <p className="text-xs text-slate-500">Duration</p>
+                            <p className="text-xs text-slate-500">ကြာချိန်</p>
                             <p className="mt-1 text-sm font-semibold text-slate-900">
                               {formatDuration(getInspectionDuration(inspection))}
                             </p>
                           </div>
 
                           <div className="rounded-xl border border-slate-200 bg-white p-4">
-                            <p className="text-xs text-slate-500">Defects</p>
+                            <p className="text-xs text-slate-500">ချို့ယွင်းချက်များ</p>
                             <p className="mt-1 text-sm font-semibold text-red-600">
                               {events.length}
                             </p>
                           </div>
 
                           <div className="rounded-xl border border-slate-200 bg-white p-4">
-                            <p className="text-xs text-slate-500">With GPS</p>
+                            <p className="text-xs text-slate-500">GPS ပါသော</p>
                             <p className="mt-1 text-sm font-semibold text-slate-900">
                               {gpsCount}
                             </p>
                           </div>
 
                           <div className="rounded-xl border border-slate-200 bg-white p-4">
-                            <p className="text-xs text-slate-500">AI Priority</p>
+                            <p className="text-xs text-slate-500">AI ဦးစားပေး</p>
                             <div className="mt-1">
                               {advisory?.overall_priority ? (
-                                <PriorityBadge
-                                  priority={advisory.overall_priority}
-                                  compact
-                                />
+                                <PriorityBadge priority={advisory.overall_priority} compact />
                               ) : (
-                                <span className="text-sm font-medium text-slate-400">
-                                  N/A
-                                </span>
+                                <span className="text-sm font-medium text-slate-400">N/A</span>
                               )}
                             </div>
                           </div>
@@ -2054,27 +1939,27 @@ const InspectionDashboard = () => {
                             <div className="flex items-center gap-2">
                               <MapPin className="h-4 w-4 text-blue-600" />
                               <h4 className="text-sm font-semibold text-slate-900">
-                                Route Information
+                                လမ်းကြောင်းအချက်အလက်
                               </h4>
                             </div>
 
                             <div className="mt-3 grid grid-cols-2 gap-4 text-sm lg:grid-cols-5">
                               <div>
-                                <p className="text-xs text-slate-500">Distance</p>
+                                <p className="text-xs text-slate-500">အကွာအဝေး</p>
                                 <p className="mt-1 font-medium text-slate-800">
                                   {formatDistance(route?.distance_m)}
                                 </p>
                               </div>
 
                               <div>
-                                <p className="text-xs text-slate-500">Points</p>
+                                <p className="text-xs text-slate-500">အမှတ်များ</p>
                                 <p className="mt-1 font-medium text-slate-800">
                                   {route?.point_count ?? getInspectionPointCount(inspection) ?? 'N/A'}
                                 </p>
                               </div>
 
                               <div>
-                                <p className="text-xs text-slate-500">Start</p>
+                                <p className="text-xs text-slate-500">စတင်ရာ</p>
                                 <p className="mt-1 text-xs font-medium text-slate-800">
                                   {route?.start?.latitude != null &&
                                   route?.start?.longitude != null
@@ -2088,7 +1973,7 @@ const InspectionDashboard = () => {
                               </div>
 
                               <div>
-                                <p className="text-xs text-slate-500">End</p>
+                                <p className="text-xs text-slate-500">အဆုံးသတ်</p>
                                 <p className="mt-1 text-xs font-medium text-slate-800">
                                   {route?.end?.latitude != null &&
                                   route?.end?.longitude != null
@@ -2102,9 +1987,7 @@ const InspectionDashboard = () => {
                               </div>
 
                               <div>
-                                <p className="text-xs text-slate-500">
-                                  Inspection ID
-                                </p>
+                                <p className="text-xs text-slate-500">စစ်ဆေးမှု ID</p>
                                 <p className="mt-1 truncate text-xs font-medium text-slate-800">
                                   {inspectionId || 'N/A'}
                                 </p>
@@ -2133,10 +2016,10 @@ const InspectionDashboard = () => {
                             <div className="flex items-center justify-between">
                               <div>
                                 <h4 className="font-semibold text-slate-900">
-                                  Spatial Summary
+                                  တည်နေရာအလိုက် အကျဉ်းချုပ်
                                 </h4>
                                 <p className="mt-1 text-xs text-slate-500">
-                                  Deterministic grouping from route distances
+                                  လမ်းကြောင်းအကွာအဝေးများအလိုက် စုစည်းထားမှု
                                 </p>
                               </div>
                               <Layers className="h-5 w-5 text-slate-400" />
@@ -2147,7 +2030,7 @@ const InspectionDashboard = () => {
                                 <div className="grid grid-cols-2 gap-3">
                                   <div className="rounded-xl bg-slate-50 p-3">
                                     <p className="text-xs text-slate-500">
-                                      Events / 10 m
+                                      အဖြစ်အပျက် / ၁၀ မီတာ
                                     </p>
                                     <p className="mt-1 text-lg font-bold text-slate-900">
                                       {spatial?.events_per_10m ?? 'N/A'}
@@ -2156,7 +2039,7 @@ const InspectionDashboard = () => {
 
                                   <div className="rounded-xl bg-slate-50 p-3">
                                     <p className="text-xs text-slate-500">
-                                      Clusters
+                                      အစုအဝေးများ
                                     </p>
                                     <p className="mt-1 text-lg font-bold text-slate-900">
                                       {spatial?.clusters?.length ?? 0}
@@ -2173,26 +2056,16 @@ const InspectionDashboard = () => {
                                       >
                                         <p className="text-sm font-semibold text-slate-800">
                                           {(cluster?.rail_side || 'Unknown').toUpperCase()}{' '}
-                                          rail
+                                          သံလမ်း
                                         </p>
                                         <p className="mt-1 text-xs text-slate-500">
-                                          {formatDistance(
-                                            cluster?.start_distance_m
-                                          )}{' '}
-                                          →{' '}
-                                          {formatDistance(
-                                            cluster?.end_distance_m
-                                          )}
+                                          {formatDistance(cluster?.start_distance_m)} →{' '}
+                                          {formatDistance(cluster?.end_distance_m)}
                                         </p>
                                         <p className="mt-2 text-xs text-slate-600">
-                                          {cluster?.event_count ?? 0} events ·{' '}
-                                          {Object.entries(
-                                            cluster?.defect_counts || {}
-                                          )
-                                            .map(
-                                              ([type, count]) =>
-                                                `${type}: ${count}`
-                                            )
+                                          {cluster?.event_count ?? 0} အဖြစ်အပျက် ·{' '}
+                                          {Object.entries(cluster?.defect_counts || {})
+                                            .map(([type, count]) => `${type}: ${count}`)
                                             .join(' · ')}
                                         </p>
                                       </div>
@@ -2209,8 +2082,8 @@ const InspectionDashboard = () => {
                             ) : (
                               <div className="mt-4">
                                 <EmptyState
-                                  title="No spatial summary stored"
-                                  description="The inspection detail response does not currently include ai_spatial_summary."
+                                  title="တည်နေရာအလိုက် အကျဉ်းချုပ် မရှိပါ"
+                                  description="စစ်ဆေးမှုအသေးစိတ်တွင် ai_spatial_summary မပါဝင်ပါ။"
                                 />
                               </div>
                             )}
@@ -2222,17 +2095,16 @@ const InspectionDashboard = () => {
                           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                               <h4 className="font-semibold text-slate-900">
-                                Detected Defect Events
+                                တွေ့ရှိထားသော ချို့ယွင်းချက်များ
                               </h4>
                               <p className="mt-1 text-sm text-slate-500">
-                                Select an event to highlight its map marker.
-                                Supplementary AI observations appear only when a
-                                positive finding was stored.
+                                အဖြစ်အပျက်တစ်ခုကို ရွေးချယ်ရန် ၎င်း၏ မြေပုံပေါ်ရှိ အမှတ်အသားကို
+                                မီးမောင်းထိုးပြသည်။
                               </p>
                             </div>
 
                             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                              {events.length} events
+                              {events.length} အဖြစ်အပျက်
                             </span>
                           </div>
 
@@ -2254,8 +2126,8 @@ const InspectionDashboard = () => {
                             </div>
                           ) : (
                             <EmptyState
-                              title="No defect events detected"
-                              description="This inspection does not contain stored defect events."
+                              title="ချို့ယွင်းချက်များ မတွေ့ရှိပါ"
+                              description="ဤစစ်ဆေးမှုတွင် ချို့ယွင်းချက်အဖြစ်အပျက်များ မပါဝင်ပါ။"
                             />
                           )}
                         </section>
@@ -2264,8 +2136,8 @@ const InspectionDashboard = () => {
                   })()
                 ) : (
                   <EmptyState
-                    title="Inspection detail unavailable"
-                    description="The inspection detail request did not return data."
+                    title="စစ်ဆေးမှုအသေးစိတ် မရှိပါ"
+                    description="စစ်ဆေးမှုအသေးစိတ်တောင်းဆိုမှုမှ ဒေတာမပြန်လာပါ။"
                   />
                 )}
               </div>
@@ -2292,11 +2164,9 @@ const InspectionDashboard = () => {
                     <Bot className="h-5 w-5 text-violet-700" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-slate-900">
-                      AI Maintenance Response
-                    </h3>
+                    <h3 className="font-semibold text-slate-900">AI ထိန်းသိမ်းမှု တုံ့ပြန်ချက်</h3>
                     <p className="mt-0.5 text-xs text-slate-500">
-                      Stored Qwen maintenance advisory for this inspection
+                      ဤစစ်ဆေးမှုအတွက် သိမ်းဆည်းထားသော Qwen ထိန်းသိမ်းမှု အကြံပြုချက်
                     </p>
                   </div>
                 </div>
@@ -2316,13 +2186,11 @@ const InspectionDashboard = () => {
                     <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-violet-600" />
                   </div>
                 ) : aiDialogData ? (
-                  <AiAdvisoryPanel
-                    inspection={aiDialogData?.inspection || aiDialogData}
-                  />
+                  <AiAdvisoryPanel inspection={aiDialogData?.inspection || aiDialogData} />
                 ) : (
                   <EmptyState
-                    title="AI advisory unavailable"
-                    description="The inspection detail endpoint did not return an advisory."
+                    title="AI အကြံပြုချက် မရှိပါ"
+                    description="စစ်ဆေးမှုအသေးစိတ်မှ အကြံပြုချက် မပြန်လာပါ။"
                   />
                 )}
               </div>
@@ -2349,11 +2217,9 @@ const InspectionDashboard = () => {
                     <FileVideo2 className="h-5 w-5 text-blue-700" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-slate-900">
-                      Inspected Output Videos
-                    </h3>
+                    <h3 className="font-semibold text-slate-900">စစ်ဆေးမှု ဗီဒီယိုများ</h3>
                     <p className="mt-0.5 text-xs text-slate-500">
-                      Annotated left-rail and right-rail inspection outputs
+                      ဘယ်ဘက်နှင့် ညာဘက် သံလမ်းစစ်ဆေးမှု ဗီဒီယိုများ
                     </p>
                   </div>
                 </div>
@@ -2374,13 +2240,12 @@ const InspectionDashboard = () => {
                   </div>
                 ) : videoDialogData ? (
                   (() => {
-                    const inspection =
-                      videoDialogData?.inspection || videoDialogData || {};
+                    const inspection = videoDialogData?.inspection || videoDialogData || {};
                     const videos = getInspectionVideoSources(inspection);
 
                     const videoItems = [
-                      { key: 'left', title: 'LEFT Rail', data: videos.left },
-                      { key: 'right', title: 'RIGHT Rail', data: videos.right },
+                      { key: 'left', title: 'ဘယ်ဘက် သံလမ်း', data: videos.left },
+                      { key: 'right', title: 'ညာဘက် သံလမ်း', data: videos.right },
                     ];
 
                     return (
@@ -2391,13 +2256,13 @@ const InspectionDashboard = () => {
                           </p>
                           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                             <span>
-                              Inspection ID: {getInspectionId(inspection) || 'N/A'}
+                              စစ်ဆေးမှု ID: {getInspectionId(inspection) || 'N/A'}
                             </span>
                             <span>
-                              Distance: {formatDistance(getInspectionDistance(inspection))}
+                              အကွာအဝေး: {formatDistance(getInspectionDistance(inspection))}
                             </span>
                             <span>
-                              Created: {formatDate(getInspectionCreatedAt(inspection))}
+                              ဖန်တီးချိန်: {formatDate(getInspectionCreatedAt(inspection))}
                             </span>
                           </div>
                         </div>
@@ -2413,7 +2278,7 @@ const InspectionDashboard = () => {
                                   {item.title}
                                 </h4>
                                 <p className="mt-0.5 text-xs text-slate-500">
-                                  Annotated inspection output
+                                  စစ်ဆေးမှုရလဒ် ဗီဒီယို
                                 </p>
                               </div>
 
@@ -2426,7 +2291,7 @@ const InspectionDashboard = () => {
                                       className="aspect-video w-full rounded-xl bg-black"
                                       src={item.data.url}
                                     >
-                                      Your browser does not support HTML video.
+                                      သင့်ဘရောင်ဇာသည် HTML ဗီဒီယိုကို မပံ့ပိုးပါ။
                                     </video>
 
                                     <a
@@ -2435,7 +2300,7 @@ const InspectionDashboard = () => {
                                       rel="noreferrer"
                                       className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800"
                                     >
-                                      Open video source
+                                      ဗီဒီယိုဖွင့်ရန်
                                       <ExternalLink className="h-3.5 w-3.5" />
                                     </a>
                                   </>
@@ -2443,18 +2308,18 @@ const InspectionDashboard = () => {
                                   <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5">
                                     <FileVideo2 className="mb-3 h-8 w-8 text-slate-300" />
                                     <p className="text-sm font-semibold text-slate-700">
-                                      Browser-playable URL not available
+                                      ကြည့်ရှုနိုင်သော URL မရှိပါ
                                     </p>
                                     <p className="mt-1 text-xs leading-5 text-slate-500">
-                                      The inspection may currently store only a server/Google Drive filesystem path.
-                                      React cannot play that path directly; the backend must expose the video through
-                                      an HTTP media endpoint or a cloud-storage URL.
+                                      ဤစစ်ဆေးမှုသည် ဆာဗာပေါ်တွင် ဖိုင်လမ်းကြောင်းကိုသာ သိမ်းဆည်းထားနိုင်သည်။
+                                      ဗီဒီယိုကိုကြည့်ရန် ဆာဗာမှ HTTP မီဒီယာ endpoint သို့မဟုတ်
+                                      cloud-storage URL မှတစ်ဆင့် ထုတ်ပေးရန် လိုအပ်သည်။
                                     </p>
 
                                     {item.data?.storedPath && (
                                       <div className="mt-3 rounded-lg bg-white p-3">
                                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                                          Stored media path
+                                          သိမ်းဆည်းထားသော မီဒီယာလမ်းကြောင်း
                                         </p>
                                         <p className="mt-1 break-all font-mono text-xs text-slate-600">
                                           {item.data.storedPath}
@@ -2472,8 +2337,8 @@ const InspectionDashboard = () => {
                   })()
                 ) : (
                   <EmptyState
-                    title="Video information unavailable"
-                    description="The inspection detail endpoint did not return media information."
+                    title="ဗီဒီယိုအချက်အလက် မရှိပါ"
+                    description="စစ်ဆေးမှုအသေးစိတ်မှ မီဒီယာအချက်အလက် မပြန်လာပါ။"
                   />
                 )}
               </div>

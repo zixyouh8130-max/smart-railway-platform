@@ -57,7 +57,7 @@ const TrainRiderMobileView = ({ deviceId = 'TRAIN_RIDER_001' }) => {
           setGpsData({
             latitude,
             longitude,
-            speed: speed ? Math.round(speed * 3.6) : null,
+            speed: speed ? Math.round(speed * 2.2369362920544) : null,
             accuracy: Math.round(accuracy),
             lastUpdate: new Date()
           });
@@ -69,7 +69,7 @@ const TrainRiderMobileView = ({ deviceId = 'TRAIN_RIDER_001' }) => {
               device_id: deviceId,
               latitude,
               longitude,
-              speed: speed ? Math.round(speed * 3.6) : null,
+              speed: speed ? Math.round(speed * 2.2369362920544) : null,
               accuracy: Math.round(accuracy)
             });
             
@@ -177,7 +177,7 @@ const TrainRiderMobileView = ({ deviceId = 'TRAIN_RIDER_001' }) => {
             <div>
               <p className="text-xs text-gray-500">Speed</p>
               <p className="font-semibold text-gray-800">
-                {gpsData.speed ? `${gpsData.speed} km/h` : '--'}
+                {gpsData.speed ? `${gpsData.speed} mph` : '--'}
               </p>
             </div>
             <div>

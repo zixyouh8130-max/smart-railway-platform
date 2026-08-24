@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Menu, X, Train, User, Search, Bell, ChevronDown } from 'lucide-react';
 import Button from '@/components/ui/button';
+import { useAuth } from '@/context/AuthContext';
+import { getDefaultPathForUser } from '@/utils/authSession';
 
 const Navbar = () => {
+  const { user, isAuthenticated, logout } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -14,10 +17,10 @@ const Navbar = () => {
   }, []);
 
   const navLinks = [
-    { name: 'လက်မှတ်ဝယ်ရန်', href: '/booking' },
-    { name: 'အချိန်ဇယား', href: '/status' },
-    { name: 'ခရီးစဉ်များ', href: '/schedules' },
-    { name: 'ဝန်ဆောင်မှုများ', href: '/services' },
+    { name: 'လက်မှတ်ဝယ်ရန်', href: '/' },
+    { name: 'လက်မှတ်အခြေအနေ', href: '/pnr-status' },
+    { name: 'အချိန်ဇယားရှာရန်', href: '/' },
+    { name: 'ဝန်ဆောင်မှုများ', href: '/' },
   ];
 
   return (
@@ -108,26 +111,42 @@ const Navbar = () => {
               {isProfileOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-2xl border border-gray-100 py-2 animate-fadeIn">
                   <div className="px-4 py-3 border-b border-gray-100">
-                    <p className="text-sm font-medium text-gray-900">ဧည့်သည်</p>
-                    <p className="text-xs text-gray-500">Guest User</p>
+                    <p className="text-sm font-medium text-gray-900">
+                      {isAuthenticated ? user?.full_name : 'ဧည့်သည်'}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {isAuthenticated ? user?.email : 'Guest User'}
+                    </p>
                   </div>
-                  <a href="/profile" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                    ကိုယ်ရေးအချက်အလက်
-                  </a>
-                  <a href="/bookings" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                    မှာယူမှုများ
-                  </a>
-                  <a href="/settings" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                    ဆက်တင်များ
-                  </a>
-                  <div className="border-t border-gray-100 mt-2 pt-2">
-                    <a href="/login" className="block px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 font-medium">
-                      အကောင့်ဝင်ရန်
-                    </a>
-                    <a href="/register" className="block px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 font-medium">
-                      အကောင့်ဖွင့်ရန်
-                    </a>
-                  </div>
+
+                  {isAuthenticated ? (
+                    <div className="border-t border-gray-100 mt-2 pt-2">
+                      {(user?.staff || ['ADMIN', 'SUPER_ADMIN'].includes(user?.role)) && (
+                        <a
+                          href={getDefaultPathForUser(user)}
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          Portal
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={logout}
+                        className="w-full text-left block px-4 py-2 text-sm text-red-600 hover:bg-red-50 font-medium"
+                      >
+                        အကောင့်ထွက်ရန်
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="border-t border-gray-100 mt-2 pt-2">
+                      <a href="/login" className="block px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 font-medium">
+                        အကောင့်ဝင်ရန်
+                      </a>
+                      <a href="/register" className="block px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 font-medium">
+                        အကောင့်ဖွင့်ရန်
+                      </a>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -171,12 +190,34 @@ const Navbar = () => {
               </a>
             ))}
             <div className="mt-4 pt-4 border-t space-y-2">
-              <a href="/login" className="block px-4 py-3 text-center bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors">
-                အကောင့်ဝင်ရန်
-              </a>
-              <a href="/register" className="block px-4 py-3 text-center border border-blue-600 text-blue-600 rounded-lg font-medium hover:bg-blue-50 transition-colors">
-                အကောင့်ဖွင့်ရန်
-              </a>
+              {isAuthenticated ? (
+                <>
+                  {(user?.staff || ['ADMIN', 'SUPER_ADMIN'].includes(user?.role)) && (
+                    <a
+                      href={getDefaultPathForUser(user)}
+                      className="block px-4 py-3 text-center border border-blue-600 text-blue-600 rounded-lg font-medium hover:bg-blue-50 transition-colors"
+                    >
+                      Portal
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={logout}
+                    className="w-full block px-4 py-3 text-center bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
+                  >
+                    အကောင့်ထွက်ရန်
+                  </button>
+                </>
+              ) : (
+                <>
+                  <a href="/login" className="block px-4 py-3 text-center bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors">
+                    အကောင့်ဝင်ရန်
+                  </a>
+                  <a href="/register" className="block px-4 py-3 text-center border border-blue-600 text-blue-600 rounded-lg font-medium hover:bg-blue-50 transition-colors">
+                    အကောင့်ဖွင့်ရန်
+                  </a>
+                </>
+              )}
             </div>
           </div>
         )}

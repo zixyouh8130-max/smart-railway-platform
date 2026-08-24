@@ -1,154 +1,196 @@
-# core/dependencies.py (updated)
-from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from jose import JWTError
+
 from ..core.database import get_db
 from ..core.security import decode_access_token
 from ..services.auth_service import AuthService
 from ..repositories.user_repository import UserRepository
 from ..repositories.staff_repository import StaffRepository
-from ..models.user import UserRole
-from ..models.staff import StaffRole
+from ..models.user import User, UserRole
+from ..models.staff import Staff, StaffRole, StaffStatus
 
 security = HTTPBearer()
 
 
-def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
-    """Get user repository instance"""
+def get_user_repository(
+    db: Session = Depends(get_db),
+) -> UserRepository:
     return UserRepository(db)
 
 
-def get_staff_repository(db: Session = Depends(get_db)) -> StaffRepository:
-    """Get staff repository instance"""
+def get_staff_repository(
+    db: Session = Depends(get_db),
+) -> StaffRepository:
     return StaffRepository(db)
 
 
 def get_auth_service(
-        user_repo: UserRepository = Depends(get_user_repository),
-        staff_repo: StaffRepository = Depends(get_staff_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    staff_repo: StaffRepository = Depends(get_staff_repository),
 ) -> AuthService:
-    """Get auth service instance"""
     return AuthService(user_repo, staff_repo)
 
 
-def get_current_user_id(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> str:
-    """Get current user ID from token"""
-    token = credentials.credentials
-    payload = decode_access_token(token)
+def _decode_credentials(
+    credentials: HTTPAuthorizationCredentials,
+) -> dict:
+    payload = decode_access_token(
+        credentials.credentials
+    )
 
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token"
+            detail="Invalid authentication token",
         )
 
-    user_id: str = payload.get("sub")
-    if not user_id:
+    if not payload.get("sub"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload"
+            detail="Invalid token payload",
         )
 
-    return user_id
+    return payload
+
+
+def _get_active_user_from_payload(
+    db: Session,
+    payload: dict,
+) -> User:
+    user = (
+        db.query(User)
+        .filter(User.id == payload["sub"])
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User no longer exists",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive",
+        )
+
+    return user
+
+
+def _fresh_staff_payload(staff: Staff) -> dict:
+    return {
+        "staff_id": staff.staff_id,
+        "role": (
+            staff.role.value
+            if hasattr(staff.role, "value")
+            else str(staff.role)
+        ),
+        "department": staff.department,
+        "status": (
+            staff.status.value
+            if hasattr(staff.status, "value")
+            else str(staff.status)
+        ),
+        "is_available": staff.is_available,
+    }
+
+
+def get_current_user_id(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> str:
+    payload = _decode_credentials(credentials)
+    user = _get_active_user_from_payload(db, payload)
+    return str(user.id)
 
 
 def get_current_user_role(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
 ) -> str:
-    """Get current user role from token"""
-    token = credentials.credentials
-    payload = decode_access_token(token)
-
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token"
-        )
-
-    return payload.get("role", "USER")
+    payload = _decode_credentials(credentials)
+    user = _get_active_user_from_payload(db, payload)
+    return (
+        user.role.value
+        if hasattr(user.role, "value")
+        else str(user.role)
+    )
 
 
 def get_current_admin_user(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
 ) -> dict:
-    """Get current admin user - requires ADMIN or SUPER_ADMIN role"""
-    token = credentials.credentials
-    payload = decode_access_token(token)
+    payload = _decode_credentials(credentials)
+    user = _get_active_user_from_payload(db, payload)
 
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token"
-        )
-
-    role = payload.get("role", "USER")
-    if role not in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]:
+    if user.role not in {
+        UserRole.ADMIN,
+        UserRole.SUPER_ADMIN,
+    }:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required"
+            detail="Admin privileges required",
         )
 
-    return payload
+    fresh_payload = dict(payload)
+    fresh_payload["role"] = user.role.value
+    return fresh_payload
 
 
 def get_current_staff_user(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
 ) -> dict:
-    """Get current staff user - requires staff profile"""
-    token = credentials.credentials
-    payload = decode_access_token(token)
+    payload = _decode_credentials(credentials)
+    user = _get_active_user_from_payload(db, payload)
 
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token"
-        )
+    staff = (
+        db.query(Staff)
+        .filter(Staff.user_id == user.id)
+        .first()
+    )
 
-    staff_info = payload.get("staff")
-    if not staff_info:
+    if not staff:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Staff profile required"
+            detail="Staff profile required",
         )
 
-    return payload
+    if staff.status == StaffStatus.INACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Staff profile is inactive",
+        )
+
+    fresh_payload = dict(payload)
+    fresh_payload["role"] = (
+        user.role.value
+        if hasattr(user.role, "value")
+        else str(user.role)
+    )
+    fresh_payload["staff"] = _fresh_staff_payload(staff)
+    return fresh_payload
 
 
 def get_current_train_crew(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+    current_user: dict = Depends(get_current_staff_user),
 ) -> dict:
-    """Get current train crew member"""
-    token = credentials.credentials
-    payload = decode_access_token(token)
+    staff_info = current_user["staff"]
 
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token"
-        )
-
-    staff_info = payload.get("staff")
-    if not staff_info:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Staff profile required"
-        )
-
-    train_crew_roles = [
+    train_crew_roles = {
         StaffRole.TRAIN_DRIVER.value,
         StaffRole.ASSISTANT_DRIVER.value,
         StaffRole.TRAIN_GUARD.value,
-        StaffRole.TICKET_CHECKER.value
-    ]
+        StaffRole.TICKET_CHECKER.value,
+    }
 
     if staff_info.get("role") not in train_crew_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Train crew privileges required"
+            detail="Train crew privileges required",
         )
 
-    return payload
+    return current_user

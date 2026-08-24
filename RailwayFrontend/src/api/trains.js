@@ -114,18 +114,6 @@ const trainsApi = {
     }
   },
 
-  // 🆕 Update actual arrival/departure times
-  updateActualTimes: async (stopId, data) => {
-    try {
-      const response = await api.patch(`/train-stops/${stopId}/actual-times`, null, {
-        params: data
-      });
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { detail: error.message };
-    }
-  },
-
   // 🆕 Calculate train schedule
   calculateSchedule: async (routeId, trainId, departureTime = null) => {
     try {
@@ -175,7 +163,7 @@ const trainsApi = {
   // Update coaches for a train
   updateCoaches: async (trainId, coachesData) => {
     try {
-      const response = await api.put(`/coaches/train/${trainId}/bulk`, coachesData);
+      const response = await api.post('/coaches/bulk-update', { train_id: trainId, coaches: coachesData });
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };

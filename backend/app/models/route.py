@@ -13,7 +13,12 @@ class Route(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     origin: Mapped[str] = mapped_column(String(100), nullable=False)
     destination: Mapped[str] = mapped_column(String(100), nullable=False)
-    distance: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Route distance in miles
+    distance: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Route distance in miles",
+    )
     duration: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     base_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE")

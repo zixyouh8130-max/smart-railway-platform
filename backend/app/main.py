@@ -11,6 +11,8 @@ from .api.train import router as trains_router
 from .api.train_stops import router as train_stops_router
 from .api.schedule import router as schedules_router
 from .api.coach import router as coaches_router
+from .api.booking import router as booking_router
+from .api.seat import router as seats_router
 from .api.station import router as stations_router
 from .api.fees import router as fees_router
 from .api.train_classes import router as train_classes_router
@@ -43,25 +45,25 @@ async def lifespan(app: FastAPI):
 
                 default_classes = [
                     TrainClass(
-                        name="ရိုးရိုးတန်း",
-                        code="ORDINARY",
-                        description="သာမန်ထိုင်ခုံတန်း",
+                        name="သာမန်တန်း",
+                        code="ECONOMY_CLASS",
+                        description="သာမန်ခရီးသည်ထိုင်ခုံတန်း",
                         multiplier=1.0,
-                        amenities="ပန်ကာ၊ သာမန်ထိုင်ခုံ"
-                    ),
-                    TrainClass(
-                        name="အထက်တန်း",
-                        code="UPPER",
-                        description="အထက်တန်းထိုင်ခုံ",
-                        multiplier=1.5,
-                        amenities="အဲကွန်း၊ သက်တောင့်သက်သာထိုင်ခုံ၊ ရေသန့်"
+                        amenities="သာမန်ခရီးသည်ဝန်ဆောင်မှု"
                     ),
                     TrainClass(
                         name="အိပ်စင်တန်း",
                         code="SLEEPER",
-                        description="အိပ်စင်တွဲ",
+                        description="အိပ်စင်/အိပ်ရာပါ ခရီးသည်တွဲ",
+                        multiplier=1.5,
+                        amenities="အိပ်စင်၊ အိပ်ရာဝန်ဆောင်မှု"
+                    ),
+                    TrainClass(
+                        name="အထက်တန်း",
+                        code="UPPER_CLASS",
+                        description="အမြင့်ဆုံးအဆင့် luxury passenger class",
                         multiplier=2.0,
-                        amenities="အဲကွန်း၊ အိပ်စင်၊ အိပ်ယာခင်း၊ ခေါင်းအုံး"
+                        amenities="အဆင့်မြင့်ထိုင်ခုံနှင့် luxury amenities"
                     ),
                 ]
 
@@ -112,6 +114,8 @@ app.include_router(train_stops_router, prefix="/api/train-stops", tags=["Train S
 app.include_router(train_classes_router, prefix="/api/train-classes", tags=["Train Classes"])
 app.include_router(schedules_router, prefix="/api/schedules", tags=["Schedules"])
 app.include_router(coaches_router, prefix="/api/coaches", tags=["Coaches"])
+app.include_router(seats_router, prefix="/api/seats", tags=["Seats"])
+app.include_router(booking_router, prefix="/api/bookings", tags=["Bookings"])
 app.include_router(fees_router, prefix="/api/fees", tags=["Fees & Pricing"])
 app.include_router(location_tracking_router, prefix="/api/tracking", tags=["Location Tracking"])
 app.include_router(staff_router, prefix="/api/staff", tags=["Staff Management"])
@@ -141,10 +145,12 @@ async def root():
             "coaches": "/api/coaches",
             "fees": "/api/fees",
             "tracking": "/api/tracking",
-            "chatbot": "/api/chatbot"
+            "chatbot": "/api/chatbot",
+            "seats": "/api/seats",
+            "bookings": "/api/bookings"
         },
         "features": {
-            "ai_chatbot": "AI-powered chatbot (Colab GPU: Qwen 2.5 7B + BGE-M3)",
+            "ai_chatbot": "AI-powered railway chatbot via configured Colab AI service",
             "location_tracking": "Real-time GPS tracking for trains",
             "fare_calculation": "Flexible train-specific pricing"
         }
@@ -179,6 +185,8 @@ async def api_info():
             {"prefix": "/api/train-classes", "tags": ["Train Classes"]},
             {"prefix": "/api/schedules", "tags": ["Schedules"]},
             {"prefix": "/api/coaches", "tags": ["Coaches"]},
+            {"prefix": "/api/seats", "tags": ["Seats"]},
+            {"prefix": "/api/bookings", "tags": ["Bookings"]},
             {"prefix": "/api/fees", "tags": ["Fees & Pricing"]},
             {"prefix": "/api/tracking", "tags": ["Location Tracking"]},
             {"prefix": "/api/chatbot", "tags": ["AI Chatbot"]},
@@ -190,22 +198,22 @@ async def api_info():
             "train_stop": "Train-specific schedule, timing, and buffer data per station",
             "station_fee_rule": "Train-specific fare rules between station pairs",
             "train_rider_device": "GPS tracking devices assigned to trains",
-            "location_history": "Historical GPS coordinates for devices",
-            "station_arrival_log": "Actual arrival/departure records at stations",
+            "location_history": "Schedule-scoped historical GPS coordinates for devices",
+            "station_arrival_log": "Schedule-scoped actual arrival/departure records at stations",
             "document_chunks": "Vectorized document chunks for RAG",
             "chat_sessions": "Chat conversation sessions",
             "chat_messages": "Individual chat messages with context"
         },
         "fee_calculation_types": [
             "FIXED_PER_STATION - Fixed price per station",
-            "PER_KM - Price based on distance traveled",
+            "PER_MILE - Price based on distance traveled",
             "ZONE_BASED - Price based on distance zones",
-            "HYBRID - Combination of fixed and per-km pricing"
+            "HYBRID - Combination of fixed and per-mile pricing"
         ],
         "train_classes": [
-            "ORDINARY - ရိုးရိုးတန်း",
-            "UPPER - အထက်တန်း",
-            "SLEEPER - အိပ်စင်တန်း"
+            "ECONOMY_CLASS - သာမန်တန်း",
+            "SLEEPER - အိပ်စင်တန်း",
+            "UPPER_CLASS - အထက်တန်း (Premium / Highest)"
         ],
         "key_features_v2": [
             "Real-time GPS tracking for train rider devices",
@@ -214,6 +222,6 @@ async def api_info():
             "Station arrival/departure logging with delays",
             "Next station prediction based on train speed",
             "Mobile-friendly tracking dashboard",
-            "AI-powered chatbot with English reasoning + Myanmar translation pipeline"
+            "AI-powered chatbot with Myanmar/English support"
         ]
     }

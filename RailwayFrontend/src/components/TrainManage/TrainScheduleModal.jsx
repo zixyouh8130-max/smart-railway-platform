@@ -17,7 +17,7 @@ const TrainScheduleModal = ({ train, onClose, onSave }) => {
   const [trainStops, setTrainStops] = useState([]);
   
   // 🆕 Train speed for calculations
-  const [trainSpeed, setTrainSpeed] = useState(80); // Default 80 km/h
+  const [trainSpeed, setTrainSpeed] = useState(50); // Default 50 mph
 
   useEffect(() => {
     if (train) {
@@ -262,7 +262,7 @@ const TrainScheduleModal = ({ train, onClose, onSave }) => {
             <h2 className="text-xl font-bold text-gray-900">Train Schedule Configuration</h2>
             <p className="text-sm text-gray-600 mt-1">
               {train.train_no} - {train.train_name} ({routeStations.length} stations)
-              {trainSpeed > 0 && <span className="ml-2">• Speed: {trainSpeed} km/h</span>}
+              {trainSpeed > 0 && <span className="ml-2">• Speed: {trainSpeed} mph</span>}
             </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
@@ -310,7 +310,7 @@ const TrainScheduleModal = ({ train, onClose, onSave }) => {
                     max="500"
                     className="w-20 px-2 py-1.5 border border-indigo-200 rounded-lg text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
-                  <span className="text-xs text-indigo-600">km/h</span>
+                  <span className="text-xs text-indigo-600">mph</span>
                 </div>
                 <Button
                   onClick={handleAutoCalculate}

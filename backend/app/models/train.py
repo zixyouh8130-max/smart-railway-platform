@@ -60,11 +60,12 @@ class Train(Base):
         default=0
     )
 
-    # Train speed in km/h
+    # Train speed in mph
     speed: Mapped[Optional[float]] = mapped_column(
         Float,
         nullable=True,
-        default=None
+        default=None,
+        comment="Configured train speed in miles per hour (mph)",
     )
 
     # Status

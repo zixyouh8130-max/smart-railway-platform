@@ -79,8 +79,8 @@ const TrainFormModal = ({ isOpen, onClose, onSubmit, train, routes }) => {
     if (formData.speed && (isNaN(formData.speed) || formData.speed <= 0)) {
       newErrors.speed = 'Speed must be a positive number';
     }
-    if (formData.speed && formData.speed > 500) {
-      newErrors.speed = 'Speed cannot exceed 500 km/h';
+    if (formData.speed && formData.speed > 311) {
+      newErrors.speed = 'Speed cannot exceed 311 mph';
     }
 
     setErrors(newErrors);
@@ -213,7 +213,7 @@ const TrainFormModal = ({ isOpen, onClose, onSubmit, train, routes }) => {
               {routes.map(route => (
                 <option key={route.id} value={route.id}>
                   {route.name || `${route.origin} - ${route.destination}`}
-                  {route.distance ? ` (${route.distance} km)` : ''}
+                  {route.distance ? ` (${route.distance} mi)` : ''}
                 </option>
               ))}
             </select>
@@ -225,10 +225,10 @@ const TrainFormModal = ({ isOpen, onClose, onSubmit, train, routes }) => {
           {/* Train Details - 2 Column Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-            {/* 🆕 Speed (km/h) */}
+            {/* 🆕 Speed (mph) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Speed (km/h)
+                Speed (mph)
               </label>
               <input
                 type="number"
@@ -247,7 +247,7 @@ const TrainFormModal = ({ isOpen, onClose, onSubmit, train, routes }) => {
                 <p className="mt-1 text-sm text-red-600">{errors.speed}</p>
               )}
               <p className="mt-1 text-xs text-gray-500">
-                Average speed in km/h (optional)
+                Average speed in mph (optional)
               </p>
             </div>
 
@@ -278,7 +278,7 @@ const TrainFormModal = ({ isOpen, onClose, onSubmit, train, routes }) => {
                 {formData.train_type && <p>Type: {formData.train_type}</p>}
                 {formData.speed && (
                   <p>
-                    Speed: {formData.speed} km/h
+                    Speed: {formData.speed} mph
                     {routes.find(r => r.id === formData.route_id)?.distance && (
                       <span className="text-blue-500 ml-1">
                         (Est. travel time: {Math.round(routes.find(r => r.id === formData.route_id).distance / formData.speed)}h {Math.round((routes.find(r => r.id === formData.route_id).distance / formData.speed * 60) % 60)}m)

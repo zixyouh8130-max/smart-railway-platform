@@ -68,16 +68,24 @@ const routesApi = {
   },
   
 
-  // Search routes
+  // The backend exposes GET /routes but no dedicated /routes/search route.
   search: async (query) => {
-    try {
-      const response = await api.get('/routes/search', {
-        params: { q: query }
-      });
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { detail: error.message };
-    }
+    const response = await routesApi.getAll();
+    const routes = response?.routes || [];
+    const term = String(query || '').trim().toLowerCase();
+
+    if (!term) return response;
+
+    return {
+      ...response,
+      routes: routes.filter((route) =>
+        [route.name, route.origin, route.destination]
+          .filter(Boolean)
+          .some((value) =>
+            String(value).toLowerCase().includes(term)
+          )
+      ),
+    };
   }
 };
 

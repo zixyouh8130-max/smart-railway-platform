@@ -2,7 +2,7 @@
 import React from 'react';
 
 const SEAT_COLORS = {
-  FIRST_CLASS: 'bg-amber-100 border-amber-300 text-amber-800',
+  UPPER_CLASS: 'bg-amber-100 border-amber-300 text-amber-800',
   WINDOW: 'bg-blue-100 border-blue-300 text-blue-800',
   AISLE: 'bg-green-100 border-green-300 text-green-800',
   MIDDLE: 'bg-yellow-100 border-yellow-300 text-yellow-800',
@@ -12,11 +12,11 @@ const SEAT_COLORS = {
 
 const SeatLayout = ({ rows, seatsPerRow, coachType, onSeatClick, bookedSeats = [] }) => {
   const getSeatType = (position) => {
-    if (coachType === 'FIRST_CLASS') return 'FIRST_CLASS';
+    if (coachType === 'UPPER_CLASS') return 'UPPER_CLASS';
     if (coachType === 'SLEEPER') {
       return position === 1 || position === seatsPerRow ? 'WINDOW' : 'REGULAR';
     }
-    if (coachType === 'ECONOMY') {
+    if (coachType === 'ECONOMY_CLASS') {
       if (position === 1 || position === seatsPerRow) return 'WINDOW';
       if (position === 2 || position === seatsPerRow - 1) return 'AISLE';
       return 'MIDDLE';

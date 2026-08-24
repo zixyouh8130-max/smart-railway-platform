@@ -34,7 +34,7 @@ class ScheduleCreate(ScheduleBase):
     driver_id: Optional[str] = Field(None, description="Staff ID of the train driver")
     assistant_driver_id: Optional[str] = Field(None, description="Staff ID of the assistant driver")
     guard_id: Optional[str] = Field(None, description="Staff ID of the train guard")
-    ticket_checker_ids: Optional[List[str]] = Field(default=[], description="List of staff IDs for ticket checkers")
+    ticket_checker_ids: List[str] = Field(default_factory=list, description="List of staff IDs for ticket checkers")
 
     @field_validator('departure_time', 'arrival_time')
     @classmethod
@@ -62,7 +62,6 @@ class ScheduleCreate(ScheduleBase):
 
 class ScheduleUpdate(BaseModel):
     train_id: Optional[int] = None
-    route_id: Optional[int] = None
     departure_date: Optional[date] = None
     departure_time: Optional[str] = None
     arrival_time: Optional[str] = None
@@ -107,7 +106,7 @@ class ScheduleBulkResponse(BaseModel):
     success: bool
     created: int
     failed: int
-    schedules: List[Any] = []
+    schedules: List[Any] = Field(default_factory=list)
     errors: Optional[List[dict]] = None
 
 
@@ -142,6 +141,7 @@ def _time_to_str(v: Any) -> Optional[str]:
 
 class ScheduleResponse(ScheduleBase):
     id: int
+    route_id: int
     departure_time: Optional[str] = None
     arrival_time: Optional[str] = None
     is_overnight: bool = False
@@ -195,18 +195,28 @@ class ScheduleSearchItem(BaseModel):
     schedule_id: int
     route_id: int
     route_name: str
+
     train_id: Optional[int] = None
+    train_no: Optional[str] = None
     train_name: Optional[str] = None
+
     departure_station: str
     arrival_station: str
+
+    # Station-specific expected time derived from TrainStop.
     departure_time: Optional[str] = None
     arrival_time: Optional[str] = None
+
+    timing_available: bool = False
+    timing_source: str = "TRAIN_STOP_EXPECTED"
+
     available_seats: Optional[int] = None
     status: Optional[str] = None
     days_of_week: Optional[str] = None
+
     departure_station_order: Optional[int] = None
     arrival_station_order: Optional[int] = None
+
     estimated_travel_time_minutes: Optional[int] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

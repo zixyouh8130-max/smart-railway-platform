@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 from typing import Optional, List
 
 from ..core.database import get_db
+from ..core.dependencies import get_current_admin_user
 from ..models.route import Route
 from ..models.route_station import RouteStation
 from ..schemas.route import (
@@ -73,7 +74,7 @@ async def get_route_train_schedule(
     }
 
 
-@router.post("/{route_id}/calculate-schedule/{train_id}")
+@router.post("/{route_id}/calculate-schedule/{train_id}", dependencies=[Depends(get_current_admin_user)])
 async def calculate_train_schedule(
         route_id: int,
         train_id: int,
@@ -130,7 +131,7 @@ async def get_next_train_arrival(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/", response_model=RouteResponse, status_code=201)
+@router.post("/", response_model=RouteResponse, status_code=201, dependencies=[Depends(get_current_admin_user)])
 async def create_route(route_data: RouteCreate, db: Session = Depends(get_db)):
     """Create a new route with stations"""
     try:
@@ -178,7 +179,7 @@ async def create_route(route_data: RouteCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error creating route: {str(e)}")
 
 
-@router.put("/{route_id}", response_model=RouteResponse)
+@router.put("/{route_id}", response_model=RouteResponse, dependencies=[Depends(get_current_admin_user)])
 async def update_route(route_id: int, route_data: RouteUpdate, db: Session = Depends(get_db)):
     """Update an existing route"""
     route = db.query(Route).filter(Route.id == route_id).first()
@@ -211,7 +212,7 @@ async def update_route(route_id: int, route_data: RouteUpdate, db: Session = Dep
         raise HTTPException(status_code=500, detail=f"Error updating route: {str(e)}")
 
 
-@router.delete("/{route_id}")
+@router.delete("/{route_id}", dependencies=[Depends(get_current_admin_user)])
 async def delete_route(route_id: int, db: Session = Depends(get_db)):
     """Delete a route"""
     route = db.query(Route).filter(Route.id == route_id).first()
@@ -227,7 +228,7 @@ async def delete_route(route_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error deleting route: {str(e)}")
 
 
-@router.put("/{route_id}/stations", response_model=RouteResponse)
+@router.put("/{route_id}/stations", response_model=RouteResponse, dependencies=[Depends(get_current_admin_user)])
 async def update_route_stations(
         route_id: int,
         stations: List[RouteStationCreate],
@@ -270,7 +271,7 @@ async def update_route_stations(
         raise HTTPException(status_code=500, detail=f"Error updating stations: {str(e)}")
 
 
-@router.patch("/{route_id}/stations/{station_id}")
+@router.patch("/{route_id}/stations/{station_id}", dependencies=[Depends(get_current_admin_user)])
 async def update_route_station_info(
         route_id: int,
         station_id: int,

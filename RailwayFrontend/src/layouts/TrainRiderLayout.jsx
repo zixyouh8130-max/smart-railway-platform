@@ -11,60 +11,33 @@ import Card from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import api from '@/api/axios';
+import { useAuth } from '@/context/AuthContext';
 
 const TrainRiderLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, isStaff, logout } = useAuth();
+  const staffInfo = user?.staff || null;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [user, setUser] = useState(null);
-  const [staffInfo, setStaffInfo] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('checking');
   const [batteryLevel, setBatteryLevel] = useState(null);
   const [currentAssignment, setCurrentAssignment] = useState(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    checkAuth();
     checkConnection();
     startBatteryMonitoring();
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated && staffInfo?.staff_id) {
+    if (isStaff && staffInfo?.staff_id) {
       fetchCurrentAssignment();
-      const interval = setInterval(fetchCurrentAssignment, 30000);
+      const interval = setInterval(
+        fetchCurrentAssignment,
+        30000
+      );
       return () => clearInterval(interval);
     }
-  }, [isAuthenticated, staffInfo]);
-
-  const checkAuth = () => {
-    const token = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-    const storedStaff = localStorage.getItem('staffInfo');
-
-    if (!token || !storedUser || !storedStaff) {
-      navigate('/train-rider/login');
-      return;
-    }
-
-    try {
-      const parsedUser = JSON.parse(storedUser);
-      const parsedStaff = JSON.parse(storedStaff);
-
-      if (!parsedUser.staff && !parsedStaff) {
-        localStorage.clear();
-        navigate('/train-rider/login');
-        return;
-      }
-
-      setUser(parsedUser);
-      setStaffInfo(parsedStaff || parsedUser.staff);
-      setIsAuthenticated(true);
-    } catch (err) {
-      localStorage.clear();
-      navigate('/train-rider/login');
-    }
-  };
+  }, [isStaff, staffInfo?.staff_id]);
 
   const checkConnection = () => {
     if (navigator.onLine) {
@@ -97,11 +70,12 @@ const TrainRiderLayout = () => {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    localStorage.removeItem('staffInfo');
-    navigate('/train-rider/login');
+  const handleLogout = async () => {
+    await logout();
+    navigate(
+      '/train-rider/login',
+      { replace: true }
+    );
   };
 
   const navigationItems = [
@@ -131,7 +105,7 @@ const TrainRiderLayout = () => {
     return roleLabels[role] || role;
   };
 
-  if (!isAuthenticated) {
+  if (!isStaff || !staffInfo) {
     return null;
   }
 

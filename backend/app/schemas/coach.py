@@ -1,31 +1,39 @@
-from pydantic import BaseModel, validator, ConfigDict
 from typing import Optional, List
-from datetime import datetime
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+from .seat import SeatResponse
 
 
-class SeatBase(BaseModel):
-    seat_number: str
-    seat_type: str = "REGULAR"
-    row_number: int
-    position_in_row: int
-    is_active: bool = True
-
-
-class SeatCreate(SeatBase):
-    pass
-
-
-class SeatResponse(SeatBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    coach_id: int
-    created_at: datetime
-    updated_at: datetime
+# Final canonical coach types.
+#
+# Passenger:
+# - UPPER_CLASS: premium / highest class
+# - ECONOMY_CLASS: ordinary/standard passenger class
+# - SLEEPER: sleeper/bed coach
+#
+# Non-passenger:
+# - DINING
+# - BAGGAGE
+#
+# Old FIRST_CLASS / UPPER / ECONOMY values must be migrated in the DB.
+ALLOWED_COACH_TYPES = {
+    "UPPER_CLASS",
+    "ECONOMY_CLASS",
+    "SLEEPER",
+    "DINING",
+    "BAGGAGE",
+}
 
 
 class CoachBase(BaseModel):
-    coach_type: str = "ECONOMY"
+    coach_type: str = "ECONOMY_CLASS"
     name: str
     rows: int = 10
     seats_per_row: int = 6
@@ -33,20 +41,33 @@ class CoachBase(BaseModel):
     order_number: int = 1
     is_active: bool = True
 
-    @validator('coach_type')
-    def validate_coach_type(cls, v):
-        allowed_types = ['FIRST_CLASS', 'ECONOMY', 'SLEEPER', 'DINING', 'BAGGAGE']
-        if v not in allowed_types:
-            raise ValueError(f'Invalid coach type. Must be one of: {allowed_types}')
-        return v
+    @field_validator("coach_type")
+    @classmethod
+    def validate_coach_type(
+        cls,
+        value: str,
+    ) -> str:
+        normalized = value.upper()
 
-    @validator('total_seats')
-    def validate_total_seats(cls, v, values):
-        if 'rows' in values and 'seats_per_row' in values:
-            expected = values['rows'] * values['seats_per_row']
-            if v != expected:
-                return expected
-        return v
+        if normalized not in ALLOWED_COACH_TYPES:
+            raise ValueError(
+                "Invalid coach type. Must be one of: "
+                f"{sorted(ALLOWED_COACH_TYPES)}"
+            )
+
+        return normalized
+
+    @model_validator(mode="after")
+    def normalize_total_seats(self):
+        if self.coach_type == "BAGGAGE":
+            self.total_seats = 0
+        else:
+            self.total_seats = (
+                self.rows
+                * self.seats_per_row
+            )
+
+        return self
 
 
 class CoachCreate(CoachBase):
@@ -62,23 +83,36 @@ class CoachUpdate(BaseModel):
     order_number: Optional[int] = None
     is_active: Optional[bool] = None
 
-    @validator('coach_type')
-    def validate_coach_type(cls, v):
-        if v is not None:
-            allowed_types = ['FIRST_CLASS', 'ECONOMY', 'SLEEPER', 'DINING', 'BAGGAGE']
-            if v not in allowed_types:
-                raise ValueError(f'Invalid coach type. Must be one of: {allowed_types}')
-        return v
+    @field_validator("coach_type")
+    @classmethod
+    def validate_coach_type(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
+        normalized = value.upper()
+
+        if normalized not in ALLOWED_COACH_TYPES:
+            raise ValueError(
+                "Invalid coach type. Must be one of: "
+                f"{sorted(ALLOWED_COACH_TYPES)}"
+            )
+
+        return normalized
 
 
 class CoachResponse(CoachBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     train_id: int
-    created_at: datetime
-    updated_at: datetime
-    seats: List[SeatResponse] = []
+    seats: List[SeatResponse] = Field(
+        default_factory=list
+    )
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
 
 
 class CoachBulkUpdate(BaseModel):

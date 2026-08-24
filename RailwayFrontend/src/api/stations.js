@@ -134,10 +134,10 @@ const stationsApi = {
   /**
    * Find nearby stations
    */
-  findNearby: async (latitude, longitude, radiusKm = 50) => {
+  findNearby: async (latitude, longitude, radiusMiles = 31) => {
     try {
       const response = await api.get('/stations/nearby/coordinates', {
-        params: { latitude, longitude, radius_km: radiusKm }
+        params: { latitude, longitude, radius_miles: radiusMiles }
       });
       return response.data;
     } catch (error) {

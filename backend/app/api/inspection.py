@@ -7,7 +7,7 @@ import asyncio
 import os
 
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 import httpx
 import motor.motor_asyncio
@@ -16,9 +16,12 @@ from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, ConfigDict
 
 from ..core.config import settings
+from ..core.dependencies import get_current_admin_user
 
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(get_current_admin_user)]
+)
 
 # MongoDB connection using project settings
 client = motor.motor_asyncio.AsyncIOMotorClient(settings.MONGODB_URI)

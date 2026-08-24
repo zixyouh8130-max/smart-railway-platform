@@ -55,11 +55,12 @@ class TrainBase(BaseModel):
         ge=0,
     )
 
-    # Train speed in km/h
+    # Train speed in mph
     speed: Optional[float] = Field(
         default=None,
         gt=0,
-        le=500,
+        le=311,
+        description="Train speed in miles per hour (mph)",
     )
 
     status: str = Field(
@@ -195,7 +196,8 @@ class TrainUpdate(BaseModel):
     speed: Optional[float] = Field(
         default=None,
         gt=0,
-        le=500,
+        le=311,
+        description="Train speed in miles per hour (mph)",
     )
 
     status: Optional[str] = None

@@ -5,6 +5,7 @@ import { Train, Clock, MapPin, ArrowRight, Search, AlertCircle, ChevronLeft } fr
 import Button from '@/components/ui/button';
 import schedulesApi from '@/api/schedules';
 import stationsApi from '@/api/stations';
+import { formatRailwayDate, formatRailwayTime } from '@/utils/railwayDateTime';
 
 const TrainSearchResults = () => {
   const [searchParams] = useSearchParams();
@@ -69,39 +70,11 @@ const TrainSearchResults = () => {
     }
   };
 
-  const formatDateTime = (dateTimeStr) => {
-    if (!dateTimeStr) return 'N/A';
-    const date = new Date(dateTimeStr);
-    return date.toLocaleString('my-MM', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
+  const formatDate = (value) =>
+    value ? formatRailwayDate(value, 'my-MM', { weekday: 'long' }) : 'N/A';
 
-  const formatDate = (dateTimeStr) => {
-    if (!dateTimeStr) return 'N/A';
-    const date = new Date(dateTimeStr);
-    return date.toLocaleDateString('my-MM', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      weekday: 'long'
-    });
-  };
-
-  const formatTime = (dateTimeStr) => {
-    if (!dateTimeStr) return 'N/A';
-    const date = new Date(dateTimeStr);
-    return date.toLocaleTimeString('my-MM', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
+  const formatTime = (value) =>
+    value ? formatRailwayTime(value, 'my-MM', { hour12: true }) : 'N/A';
 
   const handleBackToSearch = () => {
     navigate('/');
@@ -247,11 +220,11 @@ const TrainSearchResults = () => {
                       <div className="flex items-center space-x-4">
                         <div>
                           <span className={`px-3 py-1 rounded-full text-sm ${
-                            schedule.status === 'active'
+                            schedule.status === 'ACTIVE'
                               ? 'bg-green-500/20 text-green-300'
                               : 'bg-yellow-500/20 text-yellow-300'
                           }`}>
-                            {schedule.status === 'active' ? 'ပြေးဆွဲနေသည်' : schedule.status}
+                            {schedule.status === 'ACTIVE' ? 'ပြေးဆွဲနေသည်' : schedule.status}
                           </span>
                           {schedule.available_seats !== null && schedule.available_seats !== undefined && (
                             <p className="text-white/60 text-xs mt-1">
@@ -262,9 +235,10 @@ const TrainSearchResults = () => {
 
                         <Button
                           onClick={() => handleBookNow(schedule)}
-                          className="bg-sky-500 hover:bg-sky-600 text-white"
+                          disabled={schedule.status !== 'SCHEDULED'}
+                          className="bg-sky-500 hover:bg-sky-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          လက်မှတ်ဝယ်မည်
+                          {schedule.status === 'SCHEDULED' ? 'လက်မှတ်ဝယ်မည်' : schedule.status}
                         </Button>
                       </div>
                     </div>

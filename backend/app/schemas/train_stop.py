@@ -40,18 +40,6 @@ class TrainStopUpdate(BaseModel):
     departure_buffer_minutes: Optional[int] = Field(None, ge=0)
     stop_duration_minutes: Optional[int] = Field(None, ge=0)
     is_timed_stop: Optional[bool] = None
-    actual_arrival_time: Optional[time] = None
-    actual_departure_time: Optional[time] = None
-    status: Optional[str] = None
-
-    @field_validator('status')
-    @classmethod
-    def validate_status(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            allowed_statuses = ['SCHEDULED', 'ARRIVED', 'DEPARTED', 'DELAYED', 'CANCELLED']
-            if v not in allowed_statuses:
-                raise ValueError(f'Status must be one of {allowed_statuses}')
-        return v
 
 
 class TrainStopResponse(TrainStopBase):
@@ -59,15 +47,10 @@ class TrainStopResponse(TrainStopBase):
     id: int
     train_id: int
     route_station_id: int
-    actual_arrival_time: Optional[time] = None
-    actual_departure_time: Optional[time] = None
-    status: str = "SCHEDULED"
-
     # Additional station info (populated from relationship)
     station_name: Optional[str] = None
     station_code: Optional[str] = None
     order_number: Optional[int] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 

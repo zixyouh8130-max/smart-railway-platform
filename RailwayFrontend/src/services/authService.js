@@ -1,4 +1,14 @@
 import api from '@/api/axios';
+import {
+  clearSession,
+  persistSession,
+  persistUser,
+} from '@/utils/authSession';
+
+const extractMessage = (error, fallback) =>
+  error.response?.data?.detail ||
+  error.message ||
+  fallback;
 
 export const authService = {
   async login(email, password) {
@@ -8,15 +18,60 @@ export const authService = {
         password,
       });
 
-      if (response.data.access_token) {
-        localStorage.setItem('token', response.data.access_token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
-      }
-
+      persistSession(response.data);
       return response.data;
     } catch (error) {
-      const message = error.response?.data?.detail || 'Login failed';
-      throw new Error(message);
+      throw new Error(
+        extractMessage(error, 'Login failed')
+      );
+    }
+  },
+
+  async adminLogin(email, password) {
+    try {
+      const response = await api.post(
+        '/auth/admin/login',
+        {
+          email,
+          password,
+        }
+      );
+
+      persistSession(response.data);
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        extractMessage(error, 'Admin login failed')
+      );
+    }
+  },
+
+  async staffLogin(email, password) {
+    try {
+      const response = await api.post('/auth/login', {
+        email,
+        password,
+      });
+
+      if (!response.data?.user?.staff) {
+        clearSession();
+        throw new Error('Staff profile required');
+      }
+
+      persistSession(response.data);
+      return response.data;
+    } catch (error) {
+      // Do not leave a normal USER session behind after a failed
+      // staff-portal login attempt.
+      clearSession();
+
+      if (error instanceof Error && !error.response) {
+        throw error;
+      }
+
+      throw new Error(
+        extractMessage(error, 'Staff login failed')
+      );
     }
   },
 
@@ -29,53 +84,40 @@ export const authService = {
         password: userData.password,
       });
 
-      // After registration, automatically login
-      if (response.data.message === 'Registration successful') {
-        // Auto-login after registration
-        const loginResponse = await api.post('/auth/login', {
-          email: userData.email,
-          password: userData.password,
-        });
-
-        if (loginResponse.data.access_token) {
-          localStorage.setItem('token', loginResponse.data.access_token);
-          localStorage.setItem('user', JSON.stringify(loginResponse.data.user));
-        }
-
-        return loginResponse.data;
+      // Registration creates USER only in the backend.
+      if (
+        response.data.message ===
+        'Registration successful'
+      ) {
+        return await this.login(
+          userData.email,
+          userData.password
+        );
       }
 
       return response.data;
     } catch (error) {
-      const message = error.response?.data?.detail || 'Registration failed';
-      throw new Error(message);
+      throw new Error(
+        extractMessage(error, 'Registration failed')
+      );
     }
-  },
-
-  async logout() {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
   },
 
   async getCurrentUser() {
     try {
       const response = await api.get('/auth/me');
+      persistUser(response.data);
       return response.data;
     } catch (error) {
-      throw error.response?.data || error.message;
+      throw error.response?.data || error;
     }
   },
 
+  async logout() {
+    clearSession();
+  },
+
   async refreshToken() {
-//    try {
-//      const response = await api.post('/auth/refresh');
-//      if (response.data.access_token) {
-//        localStorage.setItem('token', response.data.access_token);
-//      }
-//      return response.data;
-//    } catch (error) {
-//      throw error.response?.data || error.message;
-//    }
-    return null
+    return null;
   },
 };

@@ -10,7 +10,11 @@ class RouteBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     origin: str = Field(..., min_length=1, max_length=100)
     destination: str = Field(..., min_length=1, max_length=100)
-    distance: Optional[float] = Field(None, ge=0)
+    distance: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Route distance in miles",
+    )
     duration: Optional[str] = None
     base_price: Optional[float] = Field(None, ge=0)
     status: str = Field(default="ACTIVE")
@@ -33,7 +37,7 @@ class RouteBase(BaseModel):
 
 class RouteCreate(RouteBase):
     """Schema for creating a route with stations"""
-    stations: Optional[List[RouteStationCreate]] = []
+    stations: List[RouteStationCreate] = Field(default_factory=list)
 
     model_config = ConfigDict(extra='ignore')
 
@@ -55,7 +59,11 @@ class RouteUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     origin: Optional[str] = Field(None, min_length=1, max_length=100)
     destination: Optional[str] = Field(None, min_length=1, max_length=100)
-    distance: Optional[float] = Field(None, ge=0)
+    distance: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Route distance in miles",
+    )
     duration: Optional[str] = None
     base_price: Optional[float] = Field(None, ge=0)
     status: Optional[str] = None
@@ -82,7 +90,8 @@ class RouteUpdate(BaseModel):
 class RouteResponse(RouteBase):
     """Schema for route response"""
     id: int
-    stations: Optional[List[RouteStationResponse]] = []
+    distance_unit: str = "mile"
+    stations: List[RouteStationResponse] = Field(default_factory=list)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

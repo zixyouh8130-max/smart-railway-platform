@@ -25,14 +25,14 @@ class SeatGenerator:
         """
         Determine seat type based on coach type and position.
         """
-        if coach_type == 'FIRST_CLASS':
-            return 'FIRST_CLASS'
+        if coach_type == 'UPPER_CLASS':
+            return 'UPPER_CLASS'
         elif coach_type == 'SLEEPER':
             # Window seats for sleeper
             if position == 1 or position == seats_per_row:
                 return 'WINDOW'
             return 'REGULAR'
-        elif coach_type == 'ECONOMY':
+        elif coach_type == 'ECONOMY_CLASS':
             # Window, aisle, middle based on position
             if position == 1 or position == seats_per_row:
                 return 'WINDOW'

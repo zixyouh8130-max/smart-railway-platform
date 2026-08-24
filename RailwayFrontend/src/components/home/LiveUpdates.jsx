@@ -174,7 +174,7 @@ const LiveUpdates = () => {
                     {/* Speed Info */}
                     {device?.speed !== null && device?.speed !== undefined && (
                       <div className="flex items-center text-sm text-gray-600">
-                        <span>⚡ Speed: {device.speed || 0} km/h</span>
+                        <span>⚡ Speed: {device.speed || 0} mph</span>
                       </div>
                     )}
                   </div>

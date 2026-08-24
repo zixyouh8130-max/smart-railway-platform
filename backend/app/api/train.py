@@ -14,8 +14,10 @@ from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, joinedload
 
 from ..core.database import get_db
+from ..core.dependencies import get_current_admin_user
 from ..models.train import Train
 from ..models.route import Route
+from ..models.schedule import Schedule
 from ..schemas.train import (
     TrainCreate,
     TrainUpdate,
@@ -456,7 +458,8 @@ async def get_train(
 @router.post(
     "/",
     response_model=TrainResponse,
-    status_code=201
+    status_code=201,
+    dependencies=[Depends(get_current_admin_user)]
 )
 async def create_train(
     train_data: TrainCreate,
@@ -556,7 +559,8 @@ async def create_train(
 
 @router.put(
     "/{train_id}",
-    response_model=TrainResponse
+    response_model=TrainResponse,
+    dependencies=[Depends(get_current_admin_user)]
 )
 async def update_train(
     train_id: int,
@@ -619,6 +623,23 @@ async def update_train(
 
         if "route_id" in update_data:
             route_id = update_data["route_id"]
+
+            if route_id != train.route_id:
+                active_schedule = (
+                    db.query(Schedule)
+                    .filter(
+                        Schedule.train_id == train_id,
+                        Schedule.status == "ACTIVE",
+                    )
+                    .first()
+                )
+                if active_schedule:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Cannot change route while schedule #{active_schedule.id} is ACTIVE"
+                        )
+                    )
 
             if route_id is not None:
                 route = (
@@ -699,7 +720,7 @@ async def update_train(
 # Delete train
 # ============================================================
 
-@router.delete("/{train_id}")
+@router.delete("/{train_id}", dependencies=[Depends(get_current_admin_user)])
 async def delete_train(
     train_id: int,
     db: Session = Depends(get_db)

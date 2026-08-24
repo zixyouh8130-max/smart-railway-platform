@@ -1,13 +1,30 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
+
 import { authService } from '@/services/authService';
+import {
+  clearSession,
+  getStoredToken,
+  isAdminUser,
+  isRegularUser,
+  isStaffUser,
+} from '@/utils/authSession';
 
 const AuthContext = createContext(null);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
+
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error(
+      'useAuth must be used within an AuthProvider'
+    );
   }
+
   return context;
 };
 
@@ -17,74 +34,110 @@ export const AuthProvider = ({ children }) => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    const checkAuth = async () => {
+      const token = getStoredToken();
+
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const userData =
+          await authService.getCurrentUser();
+
+        setUser(userData);
+      } catch (authError) {
+        console.error(
+          'Auth check failed:',
+          authError
+        );
+
+        clearSession();
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     checkAuth();
   }, []);
 
-  const checkAuth = async () => {
+  const runLogin = async (loginFn) => {
+    setError(null);
+
     try {
-      const token = localStorage.getItem('token');
-      if (token) {
-        const userData = await authService.getCurrentUser();
-        setUser(userData);
-      }
-    } catch (error) {
-      console.error('Auth check failed:', error);
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-    } finally {
-      setLoading(false);
+      const data = await loginFn();
+      setUser(data.user);
+      return data;
+    } catch (loginError) {
+      setError(
+        loginError.message || 'Login failed'
+      );
+      throw loginError;
     }
   };
 
-  const login = async (email, password) => {
-    try {
-      setError(null);
-      const data = await authService.login(email, password);
-      setUser(data.user);
-      return data;
-    } catch (error) {
-      setError(error.detail || 'Login failed');
-      throw error;
-    }
-  };
+  const login = (email, password) =>
+    runLogin(() =>
+      authService.login(email, password)
+    );
+
+  const adminLogin = (email, password) =>
+    runLogin(() =>
+      authService.adminLogin(email, password)
+    );
+
+  const staffLogin = (email, password) =>
+    runLogin(() =>
+      authService.staffLogin(email, password)
+    );
 
   const register = async (userData) => {
+    setError(null);
+
     try {
-      setError(null);
-      const data = await authService.register(userData);
-      setUser(data.user);
+      const data =
+        await authService.register(userData);
+
+      if (data?.user) {
+        setUser(data.user);
+      }
+
       return data;
-    } catch (error) {
-      setError(error.detail || 'Registration failed');
-      throw error;
+    } catch (registerError) {
+      setError(
+        registerError.message ||
+        'Registration failed'
+      );
+      throw registerError;
     }
   };
 
   const logout = async () => {
-    try {
-      await authService.logout();
-      setUser(null);
-    } catch (error) {
-      console.error('Logout failed:', error);
-    }
-  };
-
-  // Add the clearError function
-  const clearError = () => {
+    await authService.logout();
+    setUser(null);
     setError(null);
   };
-  const setAuthError = (message) => {
-      setError(message);
-    };
+
+  const clearError = () => setError(null);
+
   const value = {
     user,
     loading,
     error,
+
     login,
+    adminLogin,
+    staffLogin,
     register,
     logout,
-    clearError, // Include it in the context value
+    clearError,
+
     isAuthenticated: !!user,
+    isAdmin: isAdminUser(user),
+    isStaff: isStaffUser(user),
+    isRegularUser: isRegularUser(user),
   };
 
   return (

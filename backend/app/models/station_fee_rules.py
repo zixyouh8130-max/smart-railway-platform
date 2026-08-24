@@ -34,10 +34,18 @@ class StationFeeRule(Base):
 
     # Fare configuration
     base_fare: Mapped[float] = mapped_column(Float, nullable=False)
-    per_km_rate: Mapped[float] = mapped_column(Float, default=0.0)
-    class_type: Mapped[str] = mapped_column(String(50), default="ORDINARY")
+    per_mile_rate: Mapped[float] = mapped_column(
+        Float,
+        default=0.0,
+        comment="Additional fare amount per mile",
+    )
+    class_type: Mapped[str] = mapped_column(String(50), default="ECONOMY_CLASS")
     seat_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    calculated_distance: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    calculated_distance: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Calculated route distance in miles",
+    )
     surcharge_percentage: Mapped[float] = mapped_column(Float, default=0.0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 

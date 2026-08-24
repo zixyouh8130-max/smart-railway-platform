@@ -11,6 +11,7 @@ import Card from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import api from '@/api/axios';
+import { formatRailwayDate, railwayDateTimeToInstant } from '@/utils/railwayDateTime';
 
 const POLL_INTERVAL = 15000; // Poll every 15 seconds
 const ALERT_THRESHOLD = 15; // Alert when 15 minutes or less to departure
@@ -113,13 +114,16 @@ const TrainRiderHome = () => {
     }
 
     try {
-      // Build departure datetime from assignment date + departure time
-      const timeParts = todaySchedule.departure_time.split(':');
-      const departureDateTime = new Date(todaySchedule.assignment_date);
-      departureDateTime.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]), 0, 0);
+      const serviceDate = String(todaySchedule.assignment_date).slice(0, 10);
+      const departureDateTime = railwayDateTimeToInstant(
+        `${serviceDate}T${todaySchedule.departure_time}:00`
+      );
 
-      const now = new Date();
-      const diffMs = departureDateTime.getTime() - now.getTime();
+      if (!departureDateTime) {
+        throw new Error('Invalid railway departure datetime');
+      }
+
+      const diffMs = departureDateTime.getTime() - Date.now();
       const diffMinutes = Math.floor(diffMs / 60000);
 
       setTimeToDeparture(diffMinutes);
@@ -179,19 +183,8 @@ const handleStartJourney = async () => {
     return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
   };
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '';
-    try {
-      return new Date(dateStr).toLocaleDateString('my-MM', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-    } catch {
-      return dateStr;
-    }
-  };
+  const formatDate = (dateStr) =>
+    dateStr ? formatRailwayDate(dateStr, 'my-MM', { weekday: 'long' }) : '';
 
   const getTimeStatusText = () => {
     if (journeyActive) return 'ခရီးစဉ်အတွင်း';

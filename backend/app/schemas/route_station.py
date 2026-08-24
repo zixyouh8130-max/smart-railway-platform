@@ -9,7 +9,11 @@ class RouteStationBase(BaseModel):
     station_name: str = Field(..., min_length=1, max_length=100)
     station_code: Optional[str] = Field(None, max_length=10)
     order_number: int = Field(..., ge=1)
-    distance_from_origin: Optional[float] = Field(0.0, ge=0)
+    distance_from_origin: Optional[float] = Field(
+        0.0,
+        ge=0,
+        description="Distance in miles from route origin",
+    )
     is_major_stop: bool = False
     time_from_origin_minutes: Optional[int] = Field(None, ge=0)
 
@@ -38,7 +42,11 @@ class RouteStationUpdate(BaseModel):
     station_name: Optional[str] = Field(None, min_length=1, max_length=100)
     station_code: Optional[str] = Field(None, max_length=10)
     order_number: Optional[int] = Field(None, ge=1)
-    distance_from_origin: Optional[float] = Field(None, ge=0)
+    distance_from_origin: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Distance in miles from route origin",
+    )
     is_major_stop: Optional[bool] = None
     time_from_origin_minutes: Optional[int] = Field(None, ge=0)
 
@@ -61,6 +69,7 @@ class RouteStationResponse(RouteStationBase):
     """Schema for route station response"""
     id: int
     route_id: int
+    distance_unit: str = "mile"
 
     model_config = ConfigDict(
         from_attributes=True,

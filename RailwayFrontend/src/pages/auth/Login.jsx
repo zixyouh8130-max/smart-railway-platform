@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Train, Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { getDefaultPathForUser } from '@/utils/authSession';
 import Button from '@/components/ui/button';
 
 const Login = () => {
@@ -44,10 +45,16 @@ const Login = () => {
 
     setLoading(true);
     try {
-      await login(formData.email, formData.password);
-      navigate('/', { replace: true });
+      const data = await login(
+        formData.email,
+        formData.password
+      );
+      navigate(
+        getDefaultPathForUser(data.user),
+        { replace: true }
+      );
     } catch (error) {
-      setServerError(error.detail || 'Invalid credentials');
+      setServerError(error.message || 'Invalid credentials');
     } finally {
       setLoading(false);
     }

@@ -9,6 +9,7 @@ import Card from '@/components/ui/card';
 import Button from '@/components/ui/button';
 import api from '@/api/axios';
 import schedulesApi from '@/api/schedules';
+import { formatRailwayTime } from '@/utils/railwayDateTime';
 
 const ScheduleTab = () => {
   const { user, staffInfo } = useOutletContext();
@@ -143,24 +144,8 @@ const ScheduleTab = () => {
     return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
   };
 
-  const formatActualTime = (timeString) => {
-    if (!timeString) return null;
-    try {
-      let date;
-      if (timeString.endsWith('Z') || timeString.includes('+')) {
-        date = new Date(timeString);
-      } else {
-        date = new Date(timeString + 'Z');
-      }
-      return date.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Asia/Yangon'
-      });
-    } catch {
-      return timeString;
-    }
-  };
+  const formatActualTime = (timeString) =>
+    timeString ? formatRailwayTime(timeString, 'en-US') : null;
 
   const getStatusIcon = (status) => {
     switch (status) {

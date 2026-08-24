@@ -14,108 +14,116 @@ router = APIRouter(prefix="/routes-and-stations", tags=["Routes & Stations"])
 
 @router.get("/active-trains")
 async def get_active_trains(db: Session = Depends(get_db)):
-    """Get all currently active trains with their real-time locations and route stations"""
+    """Return currently ACTIVE schedules with schedule-scoped progress."""
+    from ..models.route_station import RouteStation
+    from ..models.train_stop import TrainStop
+    from ..models.station_arrival_log import StationArrivalLog
 
-    today = date.today()
-
-    # Get ALL active schedules for today
-    active_schedules = db.query(Schedule).filter(
-        Schedule.departure_date == today,
-        Schedule.status.in_(["ACTIVE", "DEPARTED"])
-    ).all()
-
-    print(f"📊 Found {len(active_schedules)} active schedules")
+    active_schedules = (
+        db.query(Schedule)
+        .filter(Schedule.status == "ACTIVE")
+        .order_by(Schedule.departure_date, Schedule.departure_time)
+        .all()
+    )
 
     active_trains = []
-
     for schedule in active_schedules:
         train = db.query(Train).filter(Train.id == schedule.train_id).first()
         if not train:
             continue
 
-        # Find device
-        device = db.query(TrainRiderDevice).filter(
-            TrainRiderDevice.train_id == train.id,
-            TrainRiderDevice.schedule_id == schedule.id,
-            TrainRiderDevice.status == "ACTIVE"
-        ).first()
+        # Never fall back to a device from another schedule.
+        devices = (
+            db.query(TrainRiderDevice)
+            .filter(
+                TrainRiderDevice.schedule_id == schedule.id,
+                TrainRiderDevice.status == "ACTIVE",
+            )
+            .all()
+        )
+        device = devices[0] if devices else None
 
-        if not device:
-            device = db.query(TrainRiderDevice).filter(
-                TrainRiderDevice.train_id == train.id
-            ).order_by(TrainRiderDevice.location_updated_at.desc()).first()
+        route_stations = (
+            db.query(RouteStation)
+            .filter(RouteStation.route_id == schedule.route_id)
+            .order_by(RouteStation.order_number)
+            .all()
+        )
+        train_stops = (
+            db.query(TrainStop)
+            .filter(TrainStop.train_id == schedule.train_id)
+            .all()
+        )
+        train_stops_map = {item.route_station_id: item for item in train_stops}
 
-        # 🆕 Get route stations with status
-        from ..models.route_station import RouteStation
-        from ..models.train_stop import TrainStop
-        from ..models.station_arrival_log import StationArrivalLog
+        arrival_logs = (
+            db.query(StationArrivalLog)
+            .filter(StationArrivalLog.schedule_id == schedule.id)
+            .order_by(StationArrivalLog.created_at.asc())
+            .all()
+        )
+        log_map = {item.route_station_id: item for item in arrival_logs}
 
-        route_stations = db.query(RouteStation).filter(
-            RouteStation.route_id == schedule.route_id
-        ).order_by(RouteStation.order_number).all()
-
-        train_stops = db.query(TrainStop).filter(
-            TrainStop.train_id == train.id
-        ).all()
-        train_stops_map = {ts.route_station_id: ts for ts in train_stops}
-
-        arrival_logs = db.query(StationArrivalLog).filter(
-            StationArrivalLog.schedule_id == schedule.id
-        ).order_by(StationArrivalLog.arrival_time.desc()).all()
-
-        # 🆕 Build station status list
         stations_status = []
         for rs in route_stations:
             train_stop = train_stops_map.get(rs.id)
-            arrival_log = next((log for log in arrival_logs if log.route_station_id == rs.id), None)
-
-            station_data = {
+            arrival_log = log_map.get(rs.id)
+            stations_status.append({
                 "route_station_id": rs.id,
                 "station_name": rs.station_name,
                 "station_code": rs.station_code,
                 "order_number": rs.order_number,
-                "status": arrival_log.status if arrival_log else (train_stop.status if train_stop else "SCHEDULED"),
-                "arrival_time": arrival_log.arrival_time.isoformat() + "Z" if arrival_log and arrival_log.arrival_time else None,
-                "departure_time": arrival_log.departure_time.isoformat() + "Z" if arrival_log and arrival_log.departure_time else None,
+                "status": arrival_log.status if arrival_log else "SCHEDULED",
+                "arrival_time": (
+                    arrival_log.arrival_time.isoformat()
+                    if arrival_log and arrival_log.arrival_time else None
+                ),
+                "departure_time": (
+                    arrival_log.departure_time.isoformat()
+                    if arrival_log and arrival_log.departure_time else None
+                ),
                 "delay_minutes": arrival_log.arrival_delay_minutes if arrival_log else 0,
-                "expected_arrival": train_stop.expected_arrival_time.strftime("%H:%M") if train_stop and train_stop.expected_arrival_time else None,
-                "expected_departure": train_stop.expected_departure_time.strftime("%H:%M") if train_stop and train_stop.expected_departure_time else None,
-            }
-            stations_status.append(station_data)
+                "expected_arrival": (
+                    train_stop.expected_arrival_time.strftime("%H:%M")
+                    if train_stop and train_stop.expected_arrival_time else None
+                ),
+                "expected_departure": (
+                    train_stop.expected_departure_time.strftime("%H:%M")
+                    if train_stop and train_stop.expected_departure_time else None
+                ),
+            })
 
-        # Calculate progress
         total = len(route_stations)
-        completed = len([s for s in stations_status if s["status"] == "DEPARTED"])
-        progress = (completed / total * 100) if total > 0 else 0
+        completed = sum(1 for row in stations_status if row["status"] == "DEPARTED")
+        progress = (completed / total * 100.0) if total else 0.0
 
-        train_data = {
+        active_trains.append({
             "train_id": train.id,
             "train_name": train.train_name,
             "train_no": train.train_no,
             "schedule_id": schedule.id,
             "status": schedule.status,
-            "departure_time": schedule.departure_time.strftime("%H:%M") if schedule.departure_time else None,
+            "departure_time": (
+                schedule.departure_time.strftime("%H:%M")
+                if schedule.departure_time else None
+            ),
             "progress_percent": progress,
             "completed_stations": completed,
             "total_stations": total,
-            "device": {
-                "device_id": device.device_id if device else None,
-                "latitude": float(device.current_latitude) if device and device.current_latitude else None,
-                "longitude": float(device.current_longitude) if device and device.current_longitude else None,
-                "speed": device.current_speed if device else None,
-                "last_update": device.location_updated_at.isoformat() if device and device.location_updated_at else None,
-            } if device else None,
-            "stations": stations_status,  # 🆕 Add stations
-        }
+            "device": ({
+                "device_id": device.device_id,
+                "latitude": float(device.current_latitude) if device.current_latitude is not None else None,
+                "longitude": float(device.current_longitude) if device.current_longitude is not None else None,
+                "speed": device.current_speed,
+                "last_update": (
+                    device.location_updated_at.isoformat()
+                    if device.location_updated_at else None
+                ),
+            } if device else None),
+            "stations": stations_status,
+        })
 
-        active_trains.append(train_data)
-
-    print(f"📊 Returning {len(active_trains)} active trains")
-
-    return {
-        "active_count": len(active_trains),
-        "trains": active_trains
-    }
+    return {"active_count": len(active_trains), "trains": active_trains}
 
 
 @router.get("/all-devices")

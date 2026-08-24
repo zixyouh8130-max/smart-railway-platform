@@ -1,699 +1,1272 @@
-// src/components/admin/FeeConfigurationModal.jsx
-import React, { useState, useEffect } from 'react';
-import { X, Save, RotateCcw, Loader, AlertCircle, Train, Info, CheckCircle } from 'lucide-react';
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+
+import {
+  AlertCircle,
+  CheckCircle,
+  Info,
+  Loader,
+  RotateCcw,
+  Save,
+  Train,
+  X,
+} from 'lucide-react';
+
 import Button from '@/components/ui/button';
 import feesApi from '@/api/fees';
-import trainsApi from '@/api/trains';
 import routesApi from '@/api/routes';
+import trainsApi from '@/api/trains';
 
-// Error handling utility
+
 const extractErrorMessage = (error) => {
-  if (!error) return 'An unexpected error occurred';
-  if (typeof error === 'string') return error;
-  
-  // FastAPI validation errors (array of objects with loc, msg, input, type)
+  if (!error) {
+    return 'An unexpected error occurred';
+  }
+
+  if (typeof error === 'string') {
+    return error;
+  }
+
   if (Array.isArray(error)) {
     return error
-      .map(e => {
-        const field = e.loc?.join('.') || '';
-        const msg = e.msg || 'Validation error';
-        return field ? `${field}: ${msg}` : msg;
+      .map((item) => {
+        const field =
+          item.loc?.join('.') || '';
+
+        const message =
+          item.msg ||
+          'Validation error';
+
+        return field
+          ? `${field}: ${message}`
+          : message;
       })
       .join('; ');
   }
-  
-  // Error with detail property
+
   if (error.detail) {
     if (Array.isArray(error.detail)) {
-      return extractErrorMessage(error.detail);
+      return extractErrorMessage(
+        error.detail
+      );
     }
-    if (typeof error.detail === 'string') return error.detail;
-    if (error.detail.message) return error.detail.message;
-    return JSON.stringify(error.detail);
+
+    if (
+      typeof error.detail ===
+      'string'
+    ) {
+      return error.detail;
+    }
   }
-  
-  // Standard Error object
-  if (error.message) return error.message;
-  
-  // Fallback
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return 'An unexpected error occurred';
-  }
+
+  return (
+    error.message ||
+    'An unexpected error occurred'
+  );
 };
 
-const FeeConfigurationModal = ({ isOpen, onClose, routeId }) => {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
 
-  // Train selection
-  const [trains, setTrains] = useState([]);
-  const [selectedTrainId, setSelectedTrainId] = useState(null);
-  const [trainsLoading, setTrainsLoading] = useState(false);
-  
-  // Route data
-  const [stations, setStations] = useState([]);
+const emptyMatrix = (
+  stations,
+  classType
+) => {
+  const matrix = {};
 
-  // Station-to-station fare matrix
-  const [fareMatrix, setFareMatrix] = useState({});
+  for (
+    let fromIndex = 0;
+    fromIndex < stations.length;
+    fromIndex += 1
+  ) {
+    for (
+      let toIndex =
+        fromIndex + 1;
+      toIndex < stations.length;
+      toIndex += 1
+    ) {
+      const from =
+        stations[fromIndex];
 
-  // Stats
-  const [totalFarePairs, setTotalFarePairs] = useState(0);
-  const [filledFarePairs, setFilledFarePairs] = useState(0);
+      const to =
+        stations[toIndex];
 
-  // Fetch trains for this route when modal opens
-  useEffect(() => {
-    if (isOpen && routeId) {
-      fetchTrainsForRoute();
+      const distance =
+        from.distance_from_origin
+          !== null &&
+        from.distance_from_origin
+          !== undefined &&
+        to.distance_from_origin
+          !== null &&
+        to.distance_from_origin
+          !== undefined
+          ? Math.abs(
+              Number(
+                to.distance_from_origin
+              ) -
+              Number(
+                from.distance_from_origin
+              )
+            )
+          : null;
+
+      matrix[
+        `${from.id}-${to.id}`
+      ] = {
+        fromId: from.id,
+        toId: to.id,
+        classType,
+        fare: 0,
+        baseFare: 0,
+        perMileRate: 0,
+        surchargePercentage: 0,
+        calculatedDistance:
+          distance,
+        dirty: false,
+      };
     }
-    
-    return () => {
-      if (!isOpen) {
-        resetState();
+  }
+
+  return matrix;
+};
+
+
+const FeeConfigurationModal = ({
+  isOpen,
+  onClose,
+  routeId,
+}) => {
+  const [trains, setTrains] =
+    useState([]);
+
+  const [
+    selectedTrainId,
+    setSelectedTrainId,
+  ] = useState(null);
+
+  const [stations, setStations] =
+    useState([]);
+
+  const [
+    fareCoachTypes,
+    setFareCoachTypes,
+  ] = useState([]);
+
+  const [
+    selectedClassType,
+    setSelectedClassType,
+  ] = useState('');
+
+  const [fareMatrix, setFareMatrix] =
+    useState({});
+
+  const [
+    generationConfig,
+    setGenerationConfig,
+  ] = useState({
+    baseFare: 0,
+    perMileRate: '',
+    surchargePercentage: 0,
+  });
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [error, setError] =
+    useState(null);
+
+  const [success, setSuccess] =
+    useState(null);
+
+  const selectedTrain = useMemo(
+    () =>
+      trains.find(
+        (train) =>
+          Number(train.id) ===
+          Number(selectedTrainId)
+      ) || null,
+    [trains, selectedTrainId]
+  );
+
+  const selectedCoachClass =
+    useMemo(
+      () =>
+        fareCoachTypes.find(
+          (item) =>
+            item.class_type ===
+            selectedClassType
+        ) || null,
+      [
+        fareCoachTypes,
+        selectedClassType,
+      ]
+    );
+
+  const totalFarePairs =
+    useMemo(
+      () =>
+        (stations.length *
+          (stations.length - 1)) /
+        2,
+      [stations]
+    );
+
+  const filledFarePairs =
+    useMemo(
+      () =>
+        Object.values(
+          fareMatrix
+        ).filter(
+          (entry) =>
+            Number(entry.fare) > 0
+        ).length,
+      [fareMatrix]
+    );
+
+  useEffect(() => {
+    if (!isOpen || !routeId) {
+      return;
+    }
+
+    const loadTrains = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response =
+          await trainsApi.getByRoute(
+            routeId
+          );
+
+        const list =
+          response.trains ||
+          response.data?.trains ||
+          [];
+
+        setTrains(list);
+
+        setSelectedTrainId(
+          list.length
+            ? list[0].id
+            : null
+        );
+      } catch (err) {
+        setError(
+          extractErrorMessage(err)
+        );
+      } finally {
+        setLoading(false);
       }
     };
+
+    loadTrains();
   }, [isOpen, routeId]);
 
-  // Fetch stations when train is selected
   useEffect(() => {
-    if (selectedTrainId) {
-      fetchStationsForTrain();
-    } else {
+    if (!selectedTrainId) {
       setStations([]);
+      setFareCoachTypes([]);
+      setSelectedClassType('');
       setFareMatrix({});
+      return;
     }
-  }, [selectedTrainId]);
 
-  const resetState = () => {
-    setTrains([]);
-    setSelectedTrainId(null);
-    setStations([]);
-    setFareMatrix({});
-    setError(null);
-    setSuccess(null);
-    setTotalFarePairs(0);
-    setFilledFarePairs(0);
-  };
+    const loadTrainFareSetup =
+      async () => {
+        setLoading(true);
+        setError(null);
+        setSuccess(null);
 
-  const fetchTrainsForRoute = async () => {
-    setTrainsLoading(true);
-    setError(null);
-    try {
-      const response = await trainsApi.getByRoute(routeId);
-      console.log('Trains response:', response);
-      
-      const trainsList = response.trains || response.data?.trains || [];
-      setTrains(trainsList);
-      
-      if (trainsList.length > 0) {
-        setSelectedTrainId(trainsList[0].id);
-      } else {
-        setSelectedTrainId(null);
-      }
-    } catch (err) {
-      console.error('Error fetching trains:', err);
-      setError('Failed to fetch trains for this route');
-    } finally {
-      setTrainsLoading(false);
-    }
-  };
+        try {
+          const [
+            routeResponse,
+            coachTypeResponse,
+          ] = await Promise.all([
+            routesApi.getById(
+              routeId
+            ),
+            feesApi.getFareCoachTypes(
+              selectedTrainId
+            ),
+          ]);
 
-  const fetchStationsForTrain = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      console.log('Fetching route data for routeId:', routeId);
-      const routeResponse = await routesApi.getById(routeId);
-      console.log('Route response:', routeResponse);
-      
-      let routeData = routeResponse.data || routeResponse;
-      let routeStations = [];
-      
-      if (routeData.stations && Array.isArray(routeData.stations)) {
-        routeStations = routeData.stations;
-      } else if (routeData.route_stations && Array.isArray(routeData.route_stations)) {
-        routeStations = routeData.route_stations;
-      }
-      
-      if (routeStations.length > 0) {
-        const sortedStations = [...routeStations].sort((a, b) => {
-          const orderA = a.order_number || a.stop_order || a.sequence || 0;
-          const orderB = b.order_number || b.stop_order || b.sequence || 0;
-          return orderA - orderB;
-        });
-        
-        console.log('Sorted stations:', sortedStations);
-        setStations(sortedStations);
-        initializeFareMatrix(sortedStations);
-        await fetchExistingFees();
-      } else {
-        console.warn('No stations found in route data');
-        setStations([]);
-        setError('No stations found for this route. Please add stations first.');
-      }
-    } catch (err) {
-      console.error('Error fetching stations:', err);
-      setError('Failed to fetch station data');
-      setStations([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+          const routeData =
+            routeResponse.data ||
+            routeResponse;
 
-  const fetchExistingFees = async () => {
-    if (!selectedTrainId) return;
-    
-    try {
-      const response = await feesApi.getFeeRules(selectedTrainId);
-      console.log('Existing fees response:', response);
-      
-      let rules = [];
-      
-      if (Array.isArray(response)) {
-        rules = response;
-      } else if (response && response.rules && Array.isArray(response.rules)) {
-        rules = response.rules;
-      } else if (response && response.data && response.data.rules && Array.isArray(response.data.rules)) {
-        rules = response.data.rules;
-      } else if (response && Array.isArray(response.data)) {
-        rules = response.data;
-      }
+          const routeStations =
+            [
+              ...(
+                routeData.stations ||
+                routeData.route_stations ||
+                []
+              ),
+            ].sort(
+              (a, b) =>
+                Number(
+                  a.order_number ||
+                  a.stop_order ||
+                  a.sequence ||
+                  0
+                ) -
+                Number(
+                  b.order_number ||
+                  b.stop_order ||
+                  b.sequence ||
+                  0
+                )
+            );
 
-      console.log(`Found ${rules.length} existing fee rules`);
+          const coachTypes =
+            coachTypeResponse
+              .coach_types || [];
 
-      // Populate fare matrix from existing rules
-      const matrix = {};
-      rules.forEach((rule) => {
-        const fromStationId = rule.from_station_id;
-        const toStationId = rule.to_station_id;
-        const fare = rule.base_fare || 0;
-        
-        if (fromStationId && toStationId) {
-          const key = `${fromStationId}-${toStationId}`;
-          matrix[key] = {
-            fromId: fromStationId,
-            toId: toStationId,
-            fare: fare,
-            classType: rule.class_type || 'ORDINARY',
-            calculatedDistance: rule.calculated_distance || 0
-          };
+          setStations(
+            routeStations
+          );
+
+          setFareCoachTypes(
+            coachTypes
+          );
+
+          setSelectedClassType(
+            coachTypes[0]
+              ?.class_type || ''
+          );
+        } catch (err) {
+          setError(
+            extractErrorMessage(err)
+          );
+        } finally {
+          setLoading(false);
         }
-      });
-      
-      console.log('Matrix from existing rules:', matrix);
-      
-      setFareMatrix(prev => {
-        const updated = { ...prev, ...matrix };
-        return updated;
-      });
-      
-      if (rules.length > 0) {
-        setSuccess(`Loaded ${rules.length} existing fare rules`);
-        setTimeout(() => setSuccess(null), 2000);
-      }
-    } catch (err) {
-      console.error('Failed to fetch existing fees:', err);
-    }
-  };
+      };
 
-  const initializeFareMatrix = (stationList) => {
-    const matrix = {};
-    let pairCount = 0;
-    
-    for (let i = 0; i < stationList.length; i++) {
-      for (let j = i + 1; j < stationList.length; j++) {
-        const fromStation = stationList[i];
-        const toStation = stationList[j];
-        
-        // Use route_station ID (the 'id' field)
-        const fromId = fromStation.id;
-        const toId = toStation.id;
-        const key = `${fromId}-${toId}`;
+    loadTrainFareSetup();
+  }, [
+    selectedTrainId,
+    routeId,
+  ]);
 
-        const distance = Math.abs(
-          (toStation.distance_from_origin || 0) - (fromStation.distance_from_origin || 0)
-        );
-
-        if (!matrix[key]) {
-          matrix[key] = {
-            fromId,
-            toId,
-            fare: 0,
-            classType: 'ORDINARY',
-            calculatedDistance: distance
-          };
-          pairCount++;
-        }
-      }
-    }
-    
-    setTotalFarePairs(pairCount);
-    setFareMatrix(prev => {
-      const updated = { ...matrix, ...prev };
-      return updated;
-    });
-  };
-
-  // Update filled pairs count whenever fareMatrix changes
   useEffect(() => {
-    const filled = Object.values(fareMatrix).filter(entry => entry.fare > 0).length;
-    setFilledFarePairs(filled);
-  }, [fareMatrix, totalFarePairs]);
-
-  const handleFareChange = (fromId, toId, value) => {
-    const key = `${fromId}-${toId}`;
-    setFareMatrix(prev => ({
-      ...prev,
-      [key]: { ...prev[key], fare: parseFloat(value) || 0 }
-    }));
-  };
-
-  const handleGenerateFees = async () => {
-    if (!selectedTrainId) return;
-    
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-    
-    try {
-      const result = await feesApi.generateFeeRules(selectedTrainId);
-      console.log('Generate fees result:', result);
-      
-      const rulesCount = result.rules_count || result.data?.rules_count || 0;
-      if (rulesCount > 0) {
-        setSuccess(`✅ Successfully generated ${rulesCount} fee rules!`);
-      } else {
-        setSuccess(`✅ Fee rules are up to date!`);
-      }
-      
-      await fetchExistingFees();
-    } catch (err) {
-      console.error('Failed to generate fees:', err);
-      const errorMessage = extractErrorMessage(err);
-      setError(errorMessage || 'Failed to generate fee rules');
-    } finally {
-      setSaving(false);
+    if (
+      !selectedTrainId ||
+      !selectedClassType ||
+      stations.length < 2
+    ) {
+      setFareMatrix({});
+      return;
     }
+
+    const loadClassMatrix =
+      async () => {
+        setLoading(true);
+        setError(null);
+
+        const matrix =
+          emptyMatrix(
+            stations,
+            selectedClassType
+          );
+
+        try {
+          const response =
+            await feesApi.getFeeRules(
+              selectedTrainId,
+              {
+                class_type:
+                  selectedClassType,
+              }
+            );
+
+          const rules =
+            Array.isArray(response)
+              ? response
+              : response.rules || [];
+
+          for (const rule of rules) {
+            const key =
+              `${rule.from_station_id}` +
+              `-${rule.to_station_id}`;
+
+            if (!matrix[key]) {
+              continue;
+            }
+
+            const baseFare =
+              Number(
+                rule.base_fare || 0
+              );
+
+            const perMileRate =
+              Number(
+                rule.per_mile_rate || 0
+              );
+
+            const distance =
+              rule.calculated_distance
+                ?? matrix[key]
+                  .calculatedDistance;
+
+            const surcharge =
+              Number(
+                rule
+                  .surcharge_percentage
+                || 0
+              );
+
+            const subtotal =
+              baseFare +
+              perMileRate *
+                Number(
+                  distance || 0
+                );
+
+            const fare =
+              subtotal +
+              subtotal *
+                surcharge /
+                100;
+
+            matrix[key] = {
+              ...matrix[key],
+              fare,
+              baseFare,
+              perMileRate,
+              surchargePercentage:
+                surcharge,
+              calculatedDistance:
+                distance,
+              dirty: false,
+            };
+          }
+
+          setFareMatrix(
+            matrix
+          );
+        } catch (err) {
+          setFareMatrix(
+            matrix
+          );
+
+          setError(
+            extractErrorMessage(err)
+          );
+        } finally {
+          setLoading(false);
+        }
+      };
+
+    loadClassMatrix();
+  }, [
+    selectedTrainId,
+    selectedClassType,
+    stations,
+  ]);
+
+  const getStationName = (
+    station
+  ) =>
+    station?.station_name ||
+    station?.name ||
+    'Unknown Station';
+
+  const handleFareChange = (
+    fromId,
+    toId,
+    value
+  ) => {
+    const key =
+      `${fromId}-${toId}`;
+
+    const fare =
+      Number(value) || 0;
+
+    setFareMatrix(
+      (previous) => ({
+        ...previous,
+        [key]: {
+          ...previous[key],
+          fare,
+          baseFare: fare,
+          perMileRate: 0,
+          surchargePercentage: 0,
+          dirty: true,
+        },
+      })
+    );
   };
 
-  const handleSaveConfiguration = async () => {
-    if (!selectedTrainId) return;
-    
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-    
-    try {
-      const rules = Object.values(fareMatrix)
-        .filter(entry => entry.fare > 0)
-        .map(entry => ({
-          train_id: selectedTrainId,
-          route_id: routeId,
-          from_station_id: entry.fromId,
-          to_station_id: entry.toId,
-          base_fare: entry.fare,
-          per_km_rate: 0,
-          class_type: entry.classType || 'ORDINARY',
-          seat_type: null,
-          calculated_distance: entry.calculatedDistance || 0,
-          surcharge_percentage: 0,
-          is_active: true
-        }));
-
-      if (rules.length === 0) {
-        setError('⚠️ Please set at least one fare before saving');
-        setSaving(false);
+  const handleGenerateFees =
+    async () => {
+      if (
+        !selectedTrainId ||
+        !selectedClassType
+      ) {
         return;
       }
 
-      console.log('Saving rules:', rules);
-      
-      // Try sending as object with rules key
-      await feesApi.bulkUpdateFeeRules(selectedTrainId, { rules });
-      
-      setSuccess(`✅ Successfully saved ${rules.length} fare rules!`);
-      await fetchExistingFees();
-    } catch (err) {
-      console.error('Failed to save:', err);
-      const errorMessage = extractErrorMessage(err);
-      setError(errorMessage || 'Failed to save configuration');
-    } finally {
-      setSaving(false);
-    }
-  };
+      const perMileRate =
+        Number(
+          generationConfig
+            .perMileRate
+        );
 
-  const handleTrainChange = (e) => {
-    const newTrainId = parseInt(e.target.value);
-    setSelectedTrainId(newTrainId);
-    setStations([]);
-    setFareMatrix({});
-    setError(null);
-    setSuccess(null);
-    setTotalFarePairs(0);
-    setFilledFarePairs(0);
-  };
+      if (
+        !Number.isFinite(
+          perMileRate
+        ) ||
+        perMileRate <= 0
+      ) {
+        setError(
+          'Enter a per-mile rate greater than 0.'
+        );
 
-  // Helper function to get station display name
-  const getStationName = (station) => {
-    if (typeof station === 'string') return station;
-    if (!station) return 'Unknown';
-    
-    return station.station_name || 
-           station.name || 
-           station.station?.name || 
-           station.station?.station_name ||
-           'Unknown Station';
-  };
+        return;
+      }
 
-  // Helper function to get station ID (route_station ID)
-  const getStationId = (station) => {
-    if (!station) return 0;
-    return station.id || station.station_id || 0;
-  };
+      setSaving(true);
+      setError(null);
+      setSuccess(null);
 
-  if (!isOpen) return null;
+      try {
+        const result =
+          await feesApi
+            .generateFeeRules(
+              selectedTrainId,
+              {
+                base_fare:
+                  Number(
+                    generationConfig
+                      .baseFare
+                    || 0
+                  ),
+                per_mile_rate:
+                  perMileRate,
+                class_type:
+                  selectedClassType,
+                surcharge_percentage:
+                  Number(
+                    generationConfig
+                      .surchargePercentage
+                    || 0
+                  ),
+                overwrite_existing:
+                  false,
+              }
+            );
+
+        const changed =
+          Number(
+            result.created || 0
+          ) +
+          Number(
+            result.updated || 0
+          );
+
+        setSuccess(
+          changed > 0
+            ? `Generated ${changed} ${selectedClassType} fare rules.`
+            : `No rules changed (${result.skipped || 0} skipped).`
+        );
+
+        const response =
+          await feesApi
+            .getFeeRules(
+              selectedTrainId,
+              {
+                class_type:
+                  selectedClassType,
+              }
+            );
+
+        const rules =
+          Array.isArray(response)
+            ? response
+            : response.rules || [];
+
+        const matrix =
+          emptyMatrix(
+            stations,
+            selectedClassType
+          );
+
+        for (const rule of rules) {
+          const key =
+            `${rule.from_station_id}` +
+            `-${rule.to_station_id}`;
+
+          if (!matrix[key]) {
+            continue;
+          }
+
+          const baseFare =
+            Number(
+              rule.base_fare || 0
+            );
+
+          const rate =
+            Number(
+              rule.per_mile_rate || 0
+            );
+
+          const distance =
+            rule.calculated_distance
+              ?? matrix[key]
+                .calculatedDistance;
+
+          const surcharge =
+            Number(
+              rule
+                .surcharge_percentage
+              || 0
+            );
+
+          const subtotal =
+            baseFare +
+            rate *
+              Number(
+                distance || 0
+              );
+
+          matrix[key] = {
+            ...matrix[key],
+            fare:
+              subtotal +
+              subtotal *
+                surcharge /
+                100,
+            baseFare,
+            perMileRate: rate,
+            surchargePercentage:
+              surcharge,
+            calculatedDistance:
+              distance,
+            dirty: false,
+          };
+        }
+
+        setFareMatrix(
+          matrix
+        );
+      } catch (err) {
+        setError(
+          extractErrorMessage(err)
+        );
+      } finally {
+        setSaving(false);
+      }
+    };
+
+  const handleSaveConfiguration =
+    async () => {
+      if (
+        !selectedTrainId ||
+        !selectedClassType
+      ) {
+        return;
+      }
+
+      const rules =
+        Object.values(
+          fareMatrix
+        )
+          .filter(
+            (entry) =>
+              Number(entry.fare) > 0
+          )
+          .map(
+            (entry) => ({
+              train_id:
+                selectedTrainId,
+              route_id:
+                routeId,
+              from_station_id:
+                entry.fromId,
+              to_station_id:
+                entry.toId,
+
+              base_fare:
+                entry.dirty
+                  ? Number(
+                      entry.fare
+                    )
+                  : Number(
+                      entry.baseFare
+                      ?? entry.fare
+                    ),
+
+              per_mile_rate:
+                entry.dirty
+                  ? 0
+                  : Number(
+                      entry.perMileRate
+                      || 0
+                    ),
+
+              class_type:
+                selectedClassType,
+
+              seat_type: null,
+
+              calculated_distance:
+                entry
+                  .calculatedDistance,
+
+              surcharge_percentage:
+                entry.dirty
+                  ? 0
+                  : Number(
+                      entry
+                        .surchargePercentage
+                      || 0
+                    ),
+
+              is_active: true,
+            })
+          );
+
+      if (!rules.length) {
+        setError(
+          'Set at least one fare before saving.'
+        );
+
+        return;
+      }
+
+      setSaving(true);
+      setError(null);
+      setSuccess(null);
+
+      try {
+        await feesApi
+          .bulkUpdateFeeRules(
+            selectedTrainId,
+            { rules }
+          );
+
+        setSuccess(
+          `Saved ${rules.length} ` +
+          `${selectedClassType} fare rules.`
+        );
+
+        setFareMatrix(
+          (previous) =>
+            Object.fromEntries(
+              Object.entries(
+                previous
+              ).map(
+                ([key, entry]) => [
+                  key,
+                  {
+                    ...entry,
+                    dirty: false,
+                  },
+                ]
+              )
+            )
+        );
+      } catch (err) {
+        setError(
+          extractErrorMessage(err)
+        );
+      } finally {
+        setSaving(false);
+      }
+    };
+
+  if (!isOpen) {
+    return null;
+  }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="sticky top-0 bg-white flex items-center justify-between p-6 border-b border-gray-200 rounded-t-2xl z-10">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-7xl max-h-[95vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white z-30 flex items-center justify-between gap-4 p-5 border-b">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Station-to-Station Fare Configuration</h2>
-            <p className="text-sm text-gray-600 mt-1">
-              Set fares between each station pair for selected train
+            <h2 className="text-xl font-bold">
+              Fee Configuration
+            </h2>
+
+            <p className="text-sm text-gray-500">
+              Configure fares by the passenger coach types actually installed on each train.
+              Upper Class is the premium/highest class and cannot be priced below Economy or Sleeper for the same journey.
             </p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
+
+          <div className="flex items-center gap-3">
+            {trains.length > 0 && (
+              <select
+                value={
+                  selectedTrainId ||
+                  ''
+                }
+                onChange={(event) => {
+                  setSelectedTrainId(
+                    Number(
+                      event.target.value
+                    )
+                  );
+
+                  setFareMatrix({});
+                  setSuccess(null);
+                  setError(null);
+                }}
+                className="border rounded-lg px-3 py-2"
+              >
+                {trains.map(
+                  (train) => (
+                    <option
+                      key={train.id}
+                      value={train.id}
+                    >
+                      {train.train_no}
+                      {' - '}
+                      {train.train_name}
+                    </option>
+                  )
+                )}
+              </select>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        <div className="p-6 space-y-6">
-          {/* Messages */}
+        <div className="p-5 space-y-5">
           {error && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-              <p className="text-red-700 text-sm flex-1">
-                {typeof error === 'string' ? error : extractErrorMessage(error)}
-              </p>
-              <button onClick={() => setError(null)} className="text-red-600 hover:text-red-800">✕</button>
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-red-700">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <span>{error}</span>
             </div>
           )}
-          
+
           {success && (
-            <div className="p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3">
-              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-              <p className="text-green-700 text-sm flex-1">{success}</p>
-              <button onClick={() => setSuccess(null)} className="text-green-600 hover:text-green-800">✕</button>
+            <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-start gap-2 text-green-700">
+              <CheckCircle className="w-5 h-5 shrink-0" />
+              <span>{success}</span>
             </div>
           )}
 
-          {/* Train Selection */}
-          <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-200">
-            <h3 className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2">
-              <Train className="w-4 h-4" />
-              Select Train for Fare Configuration
-            </h3>
-            {trainsLoading ? (
-              <div className="flex items-center justify-center py-4">
-                <Loader className="w-5 h-5 text-indigo-600 animate-spin mr-2" />
-                <span className="text-sm text-indigo-700">Loading trains...</span>
+          {loading && (
+            <div className="py-10 flex justify-center">
+              <Loader className="w-7 h-7 animate-spin" />
+            </div>
+          )}
+
+          {!loading &&
+            selectedTrainId &&
+            fareCoachTypes.length ===
+              0 && (
+              <div className="p-5 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <Info className="w-5 h-5 text-amber-600 shrink-0" />
+
+                  <div>
+                    <p className="font-medium text-amber-800">
+                      No fare-bearing passenger coaches
+                    </p>
+
+                    <p className="text-sm text-amber-700 mt-1">
+                      Add Upper Class, Economy Class, or Sleeper coaches to this train first.
+                      Dining and baggage/goods coaches are intentionally excluded.
+                    </p>
+                  </div>
+                </div>
               </div>
-            ) : trains.length > 0 ? (
+            )}
+
+          {!loading &&
+            fareCoachTypes.length > 0 && (
               <>
-                <select
-                  value={selectedTrainId || ''}
-                  onChange={handleTrainChange}
-                  className="w-full px-4 py-2 border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  {trains.map(train => (
-                    <option key={train.id} value={train.id}>
-                      {train.train_no} - {train.train_name}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-indigo-600 mt-2">
-                  💡 Fare rules are train-specific. Select a train to configure its fares.
-                </p>
-              </>
-            ) : (
-              <div className="text-center py-4">
-                <Info className="w-8 h-8 text-indigo-400 mx-auto mb-2" />
-                <p className="text-sm text-indigo-700 font-medium">
-                  No trains assigned to this route
-                </p>
-                <p className="text-xs text-indigo-600 mt-1">
-                  Please add trains to this route first before configuring fares.
-                </p>
-              </div>
-            )}
-          </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Train className="w-4 h-4 text-indigo-600" />
 
-          {/* Loading state */}
-          {loading && selectedTrainId && (
-            <div className="text-center py-12">
-              <Loader className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-4" />
-              <p className="text-gray-600">Loading station data...</p>
-            </div>
-          )}
+                    <span className="font-medium">
+                      Passenger coach fare
+                    </span>
+                  </div>
 
-          {/* Fare Matrix */}
-          {!loading && selectedTrainId && stations.length >= 2 && (
-            <>
-              {/* Quick Stats */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-blue-50 rounded-lg p-3 text-center border border-blue-200">
-                  <div className="text-2xl font-bold text-blue-700">{stations.length}</div>
-                  <div className="text-xs text-blue-600">Stations</div>
-                </div>
-                <div className="bg-purple-50 rounded-lg p-3 text-center border border-purple-200">
-                  <div className="text-2xl font-bold text-purple-700">{totalFarePairs}</div>
-                  <div className="text-xs text-purple-600">Total Pairs</div>
-                </div>
-                <div className="bg-green-50 rounded-lg p-3 text-center border border-green-200">
-                  <div className="text-2xl font-bold text-green-700">{filledFarePairs}</div>
-                  <div className="text-xs text-green-600">Configured</div>
-                </div>
-              </div>
+                  <div className="flex flex-wrap gap-2">
+                    {fareCoachTypes.map(
+                      (item) => {
+                        const selected =
+                          item.class_type ===
+                          selectedClassType;
 
-              {/* Stats Bar */}
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <h3 className="text-lg font-semibold text-gray-900">Fare Matrix</h3>
-                <Button
-                  type="button"
-                  onClick={handleGenerateFees}
-                  disabled={saving}
-                  className="bg-purple-100 text-purple-700 hover:bg-purple-200 text-sm"
-                >
-                  {saving ? (
-                    <Loader className="w-3 h-3 animate-spin mr-1" />
-                  ) : (
-                    <RotateCcw className="w-3 h-3 mr-1" />
-                  )}
-                  Auto-Generate
-                </Button>
-              </div>
-
-              {/* Fare Matrix Table */}
-              <div className="border border-gray-200 rounded-xl overflow-hidden">
-                <div className="overflow-auto" style={{ maxHeight: '60vh' }}>
-                  <table className="w-full border-collapse" style={{ minWidth: `${stations.length * 160 + 180}px` }}>
-                    <thead className="sticky top-0 z-20">
-                      <tr>
-                        <th 
-                          className="sticky left-0 z-30 bg-gray-100 text-left py-3 px-4 font-semibold text-gray-700 border-b border-r text-sm"
-                          style={{ minWidth: '180px', maxWidth: '180px' }}
-                        >
-                          From ↓ / To →
-                        </th>
-                        {stations.map((station, idx) => (
-                          <th 
-                            key={getStationId(station) || idx} 
-                            className="bg-gray-100 text-center py-3 px-3 font-semibold text-gray-700 border-b text-sm"
-                            style={{ minWidth: '160px' }}
-                          >
-                            <div className="truncate font-bold" style={{ maxWidth: '150px' }}>
-                              {getStationName(station)}
-                            </div>
-                            <div className="text-xs text-gray-500 font-normal mt-1">
-                              {(station.distance_from_origin || 0).toLocaleString()} km
-                            </div>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {stations.map((fromStation, i) => {
-                        const fromId = getStationId(fromStation);
-                        const fromName = getStationName(fromStation);
-                        
                         return (
-                          <tr key={fromId || i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}>
-                            <td 
-                              className="sticky left-0 z-10 py-3 px-4 font-bold text-gray-900 border-b border-r text-sm bg-inherit"
-                              style={{ minWidth: '180px', maxWidth: '180px' }}
-                            >
-                              <div className="truncate" style={{ maxWidth: '160px' }}>
-                                {fromName}
-                              </div>
-                            </td>
-                            {stations.map((toStation, j) => {
-                              const toId = getStationId(toStation);
-                              const key = `${fromId}-${toId}`;
-                              const fareData = fareMatrix[key];
-
-                              // Diagonal - same station
-                              if (i === j) {
-                                return (
-                                  <td 
-                                    key={toId || j} 
-                                    className="text-center py-3 px-3 border-b bg-gray-100/50"
-                                    style={{ minWidth: '160px' }}
-                                  >
-                                    <span className="text-gray-300 text-lg font-bold">—</span>
-                                  </td>
-                                );
-                              }
-
-                              // Lower triangle - show reverse fare
-                              if (i > j) {
-                                const reverseKey = `${toId}-${fromId}`;
-                                const reverseData = fareMatrix[reverseKey];
-                                return (
-                                  <td 
-                                    key={toId || j} 
-                                    className="text-center py-3 px-3 border-b bg-gray-50"
-                                    style={{ minWidth: '160px' }}
-                                  >
-                                    {reverseData?.fare > 0 ? (
-                                      <div className="text-xs text-gray-500">
-                                        <span className="text-gray-400">← </span>
-                                        {reverseData.fare.toLocaleString()} Ks
-                                      </div>
-                                    ) : (
-                                      <span className="text-gray-300 text-sm">←</span>
-                                    )}
-                                  </td>
-                                );
-                              }
-
-                              // Upper triangle - editable
-                              const distance = Math.abs(
-                                (toStation.distance_from_origin || 0) - (fromStation.distance_from_origin || 0)
+                          <button
+                            type="button"
+                            key={
+                              item.class_type
+                            }
+                            onClick={() => {
+                              setSelectedClassType(
+                                item.class_type
                               );
-                              const hasValue = fareData?.fare > 0;
 
-                              return (
-                                <td 
-                                  key={toId || j} 
-                                  className={`text-center py-2 px-2 border-b transition-colors ${
-                                    hasValue ? 'bg-green-50 hover:bg-green-100' : 'bg-blue-50/30 hover:bg-blue-50'
-                                  }`}
-                                  style={{ minWidth: '160px' }}
+                              setSuccess(
+                                null
+                              );
+
+                              setError(
+                                null
+                              );
+                            }}
+                            className={
+                              `px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                                selected
+                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                  : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400'
+                              }`
+                            }
+                          >
+                            {item.display_name}
+                            {' · '}
+                            {item.coach_count}
+                            {' coach'}
+                            {item.coach_count !== 1
+                              ? 'es'
+                              : ''}
+                          </button>
+                        );
+                      }
+                    )}
+                  </div>
+
+                  {selectedCoachClass && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      {selectedCoachClass.total_seats}
+                      {' passenger seats · source coach types: '}
+                      {selectedCoachClass.source_coach_types.join(', ')}
+                    </p>
+                  )}
+                </div>
+
+                <div className="p-4 rounded-lg border bg-purple-50 border-purple-200">
+                  <h3 className="font-semibold text-purple-900 mb-3">
+                    Generate {selectedCoachClass?.display_name || selectedClassType} fares from base + mile
+                  </h3>
+
+                  <div className="grid sm:grid-cols-4 gap-3 items-end">
+                    <label className="text-sm">
+                      <span className="block mb-1">
+                        Base fee
+                      </span>
+
+                      <input
+                        type="number"
+                        min="0"
+                        value={
+                          generationConfig.baseFare
+                        }
+                        onChange={(event) =>
+                          setGenerationConfig(
+                            (previous) => ({
+                              ...previous,
+                              baseFare:
+                                event
+                                  .target
+                                  .value,
+                            })
+                          )
+                        }
+                        className="w-full border rounded px-3 py-2 bg-white"
+                      />
+                    </label>
+
+                    <label className="text-sm">
+                      <span className="block mb-1">
+                        Per-mile rate
+                      </span>
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={
+                          generationConfig.perMileRate
+                        }
+                        onChange={(event) =>
+                          setGenerationConfig(
+                            (previous) => ({
+                              ...previous,
+                              perMileRate:
+                                event
+                                  .target
+                                  .value,
+                            })
+                          )
+                        }
+                        className="w-full border rounded px-3 py-2 bg-white"
+                        placeholder="Required"
+                      />
+                    </label>
+
+                    <label className="text-sm">
+                      <span className="block mb-1">
+                        Surcharge %
+                      </span>
+
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={
+                          generationConfig
+                            .surchargePercentage
+                        }
+                        onChange={(event) =>
+                          setGenerationConfig(
+                            (previous) => ({
+                              ...previous,
+                              surchargePercentage:
+                                event
+                                  .target
+                                  .value,
+                            })
+                          )
+                        }
+                        className="w-full border rounded px-3 py-2 bg-white"
+                      />
+                    </label>
+
+                    <Button
+                      type="button"
+                      disabled={saving}
+                      onClick={
+                        handleGenerateFees
+                      }
+                    >
+                      {saving ? (
+                        <Loader className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-4 h-4 mr-2" />
+                      )}
+
+                      Generate
+                    </Button>
+                  </div>
+                </div>
+
+                {stations.length >= 2 ? (
+                  <div className="border rounded-xl overflow-hidden">
+                    <div className="p-3 bg-gray-50 border-b flex items-center justify-between">
+                      <div>
+                        <h3 className="font-semibold">
+                          {selectedCoachClass?.display_name || selectedClassType}
+                          {' fare matrix'}
+                        </h3>
+
+                        <p className="text-xs text-gray-500">
+                          Manual input saves an exact fare for that station pair.
+                        </p>
+                      </div>
+
+                      <span className="text-sm text-gray-600">
+                        {filledFarePairs}/{totalFarePairs}
+                        {' configured'}
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr>
+                            <th className="sticky left-0 bg-gray-100 z-10 min-w-[170px] p-3 text-left border-b">
+                              From ↓ / To →
+                            </th>
+
+                            {stations.map(
+                              (station) => (
+                                <th
+                                  key={station.id}
+                                  className="bg-gray-100 min-w-[150px] p-3 border-b text-sm"
                                 >
-                                  <div className="flex flex-col items-center gap-1">
-                                    <div className="relative">
-                                      <input
-                                        type="number"
-                                        value={fareData?.fare || ''}
-                                        onChange={(e) => handleFareChange(fromId, toId, e.target.value)}
-                                        placeholder={hasValue ? '' : 'Enter fare'}
-                                        min="0"
-                                        step="50"
-                                        className={`w-28 px-2 py-2 border-2 rounded-lg text-sm text-center font-medium
-                                          focus:outline-none focus:ring-2 focus:ring-offset-1 transition-all
-                                          ${hasValue 
-                                            ? 'border-green-400 focus:ring-green-500 text-green-700 bg-white' 
-                                            : 'border-gray-300 focus:ring-blue-500 text-gray-700 bg-white hover:border-blue-400'
-                                          }`}
-                                        />
-                                        {hasValue && (
-                                          <div className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white"></div>
-                                        )}
-                                      </div>
-                                      <span className="text-xs text-gray-500 font-medium">{distance} km</span>
-                                    </div>
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                                  {getStationName(
+                                    station
+                                  )}
 
-                {/* Legend */}
-                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-200 mt-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 bg-green-50 border-2 border-green-400 rounded flex items-center justify-center">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                  <div className="text-xs text-gray-500 font-normal">
+                                    {station.distance_from_origin ?? '?'}
+                                    {' mi'}
+                                  </div>
+                                </th>
+                              )
+                            )}
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {stations.map(
+                            (
+                              fromStation,
+                              fromIndex
+                            ) => (
+                              <tr
+                                key={
+                                  fromStation.id
+                                }
+                              >
+                                <td className="sticky left-0 bg-white z-10 p-3 border-b border-r font-medium">
+                                  {getStationName(
+                                    fromStation
+                                  )}
+                                </td>
+
+                                {stations.map(
+                                  (
+                                    toStation,
+                                    toIndex
+                                  ) => {
+                                    if (
+                                      fromIndex ===
+                                      toIndex
+                                    ) {
+                                      return (
+                                        <td
+                                          key={toStation.id}
+                                          className="text-center bg-gray-100 border-b p-3 text-gray-400"
+                                        >
+                                          —
+                                        </td>
+                                      );
+                                    }
+
+                                    if (
+                                      fromIndex >
+                                      toIndex
+                                    ) {
+                                      const reverse =
+                                        fareMatrix[
+                                          `${toStation.id}-${fromStation.id}`
+                                        ];
+
+                                      return (
+                                        <td
+                                          key={toStation.id}
+                                          className="text-center bg-gray-50 border-b p-3 text-xs text-gray-400"
+                                        >
+                                          {reverse?.fare > 0
+                                            ? `← ${Number(
+                                                reverse.fare
+                                              ).toLocaleString()} Ks`
+                                            : '←'}
+                                        </td>
+                                      );
+                                    }
+
+                                    const key =
+                                      `${fromStation.id}-${toStation.id}`;
+
+                                    const item =
+                                      fareMatrix[
+                                        key
+                                      ];
+
+                                    return (
+                                      <td
+                                        key={toStation.id}
+                                        className="border-b p-2 text-center bg-blue-50/30"
+                                      >
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="50"
+                                          value={
+                                            item?.fare ||
+                                            ''
+                                          }
+                                          onChange={(event) =>
+                                            handleFareChange(
+                                              fromStation.id,
+                                              toStation.id,
+                                              event.target.value
+                                            )
+                                          }
+                                          className="w-28 border rounded px-2 py-2 text-center"
+                                          placeholder="Fare"
+                                        />
+
+                                        <div className="text-xs text-gray-500 mt-1">
+                                          {item?.calculatedDistance ?? '?'}
+                                          {' mi'}
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                )}
+                              </tr>
+                            )
+                          )}
+                        </tbody>
+                      </table>
                     </div>
-                    <span>Fare configured</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 bg-blue-50 border-2 border-gray-300 rounded"></div>
-                    <span>Enter fare (editable)</span>
+                ) : (
+                  <div className="p-6 text-center bg-gray-50 rounded-lg">
+                    Need at least two route stations.
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 bg-gray-100 border-2 border-gray-200 rounded flex items-center justify-center">
-                      <span className="text-gray-400 text-xs">—</span>
-                    </div>
-                    <span>Same station</span>
+                )}
+
+                {stations.length >= 2 && (
+                  <div className="sticky bottom-0 bg-white border-t pt-4 flex gap-3">
+                    <Button
+                      type="button"
+                      onClick={
+                        handleSaveConfiguration
+                      }
+                      disabled={saving}
+                      className="flex-1"
+                    >
+                      {saving ? (
+                        <Loader className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Save className="w-4 h-4 mr-2" />
+                      )}
+
+                      Save {selectedCoachClass?.display_name || selectedClassType} fares
+                    </Button>
+
+                    <Button
+                      type="button"
+                      onClick={onClose}
+                      className="bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    >
+                      Close
+                    </Button>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 bg-gray-50 border-2 border-gray-200 rounded flex items-center justify-center">
-                      <span className="text-gray-400 text-xs">←</span>
-                    </div>
-                    <span>Reverse direction</span>
-                  </div>
-                  <span className="ml-auto text-indigo-600">💡 Use Auto-Generate or manually enter fares</span>
-                </div>
+                )}
               </>
             )}
 
-            {/* No stations message */}
-            {!loading && selectedTrainId && stations.length < 2 && (
-              <div className="text-center py-12 bg-gray-50 rounded-xl">
-                <Info className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 font-medium">Need at least 2 stations to configure fares</p>
-                <p className="text-sm text-gray-500 mt-1">
-                  Please add stations to this route first. Go to Edit Route to add stations.
-                </p>
+          {!loading &&
+            trains.length === 0 && (
+              <div className="p-8 text-center text-gray-500">
+                No trains are assigned to this route.
               </div>
             )}
 
-            {/* Action Buttons */}
-            {selectedTrainId && stations.length >= 2 && (
-              <div className="flex gap-3 pt-4 border-t border-gray-200 sticky bottom-0 bg-white pb-2">
-                <Button
-                  type="button"
-                  onClick={handleSaveConfiguration}
-                  disabled={saving}
-                  className="bg-blue-600 hover:bg-blue-700 text-white flex-1"
-                >
-                  {saving ? (
-                    <Loader className="w-4 h-4 animate-spin mr-2" />
-                  ) : (
-                    <Save className="w-4 h-4 mr-2" />
-                  )}
-                  Save All Fares ({filledFarePairs}/{totalFarePairs})
-                </Button>
-                <Button onClick={onClose} className="bg-gray-100 hover:bg-gray-200 text-gray-700">
-                  Close
-                </Button>
-              </div>
-            )}
-          </div>
+          {selectedTrain && (
+            <p className="text-xs text-gray-400">
+              Separate fare rules are saved per coach class for train #{selectedTrain.train_no || selectedTrain.id}.
+            </p>
+          )}
         </div>
       </div>
-    );
-  };
+    </div>
+  );
+};
 
 export default FeeConfigurationModal;

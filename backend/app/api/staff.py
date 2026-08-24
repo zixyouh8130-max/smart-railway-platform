@@ -1,11 +1,13 @@
 # api/staff.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime, timezone, date, time, timedelta
 from pydantic import BaseModel
 from ..core.database import get_db
+from ..core.railway_time import railway_now, railway_today
 from ..models import RouteStation, TrainStop, StationArrivalLog
 from ..models.train_rider_device import TrainRiderDevice
 from ..models.staff import Staff, StaffRole, StaffStatus
@@ -18,7 +20,10 @@ from ..schemas.staff import (
     StaffAttendanceCreate, StaffAttendanceResponse
 )
 from ..services.staff_assignment_service import StaffAssignmentService
-from ..core.dependencies import get_current_admin_user
+from ..core.dependencies import (
+    get_current_admin_user,
+    get_current_staff_user,
+)
 from ..schemas.staff import UpdateStatusRequest
 
 router = APIRouter(tags=["Staff Management"])
@@ -30,7 +35,7 @@ class StartJourneyRequest(BaseModel):
 
 # ==================== STAFF CRUD ====================
 
-@router.post("/", response_model=StaffResponse, status_code=201)
+@router.post("/", response_model=StaffResponse, status_code=201, dependencies=[Depends(get_current_admin_user)])
 async def create_staff(
         staff_data: StaffCreate,
         db: Session = Depends(get_db),
@@ -80,7 +85,7 @@ async def create_staff(
     return staff
 
 
-@router.get("/", response_model=List[StaffResponse])
+@router.get("/", response_model=List[StaffResponse], dependencies=[Depends(get_current_admin_user)])
 async def get_all_staff(
         role: Optional[StaffRole] = None,
         status: Optional[StaffStatus] = None,
@@ -101,7 +106,7 @@ async def get_all_staff(
     return query.all()
 
 
-@router.get("/{staff_id}", response_model=StaffResponse)
+@router.get("/{staff_id}", response_model=StaffResponse, dependencies=[Depends(get_current_admin_user)])
 async def get_staff_by_id(
         staff_id: UUID,
         db: Session = Depends(get_db),
@@ -114,7 +119,7 @@ async def get_staff_by_id(
     return staff
 
 
-@router.put("/{staff_id}", response_model=StaffResponse)
+@router.put("/{staff_id}", response_model=StaffResponse, dependencies=[Depends(get_current_admin_user)])
 async def update_staff(
         staff_id: UUID,
         staff_update: StaffUpdate,
@@ -135,7 +140,7 @@ async def update_staff(
     return staff
 
 
-@router.delete("/{staff_id}")
+@router.delete("/{staff_id}", dependencies=[Depends(get_current_admin_user)])
 async def delete_staff(
         staff_id: UUID,
         db: Session = Depends(get_db),
@@ -153,7 +158,7 @@ async def delete_staff(
 
 # ==================== AVAILABLE STAFF FOR TRAIN ====================
 
-@router.get("/available-for-train/{train_id}")
+@router.get("/available-for-train/{train_id}", dependencies=[Depends(get_current_admin_user)])
 async def get_available_staff_for_train(
         train_id: int,
         schedule_id: Optional[int] = None,
@@ -176,7 +181,7 @@ async def get_available_staff_for_train(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     else:
-        target_date = date.today()
+        target_date = railway_today()
 
     # Verify train exists
     train = db.query(Train).filter(Train.id == train_id).first()
@@ -216,7 +221,7 @@ async def get_available_staff_for_train(
 
 # ==================== STAFF ASSIGNMENTS ====================
 
-@router.post("/assignments", response_model=StaffAssignmentResponse, status_code=201)
+@router.post("/assignments", response_model=StaffAssignmentResponse, status_code=201, dependencies=[Depends(get_current_admin_user)])
 async def create_staff_assignment(
         assignment: StaffAssignmentCreate,
         db: Session = Depends(get_db),
@@ -226,33 +231,46 @@ async def create_staff_assignment(
     staff = db.query(Staff).filter(Staff.id == assignment.staff_id).first()
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
-    if not staff.is_available:
-        raise HTTPException(status_code=400, detail="Staff is not available")
-
     train = db.query(Train).filter(Train.id == assignment.train_id).first()
     if not train:
         raise HTTPException(status_code=404, detail="Train not found")
 
-    conflicting = db.query(TrainStaffAssignment).filter(
-        TrainStaffAssignment.staff_id == assignment.staff_id,
-        TrainStaffAssignment.assignment_date == assignment.assignment_date,
-        TrainStaffAssignment.status.in_([
-            AssignmentStatus.SCHEDULED,
-            AssignmentStatus.ACTIVE
-        ])
-    ).first()
+    schedule = None
+    if assignment.schedule_id:
+        schedule = db.query(Schedule).filter(Schedule.id == assignment.schedule_id).first()
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        if schedule.train_id != assignment.train_id:
+            raise HTTPException(status_code=400, detail="Assignment train does not match schedule train")
 
-    if conflicting:
-        raise HTTPException(
-            status_code=400,
-            detail="Staff already has an assignment for this date"
+    service = StaffAssignmentService(db)
+    is_available, reason = service.is_staff_available(
+        staff_id=assignment.staff_id,
+        assignment_date=(schedule.departure_date if schedule else assignment.assignment_date),
+        schedule_id=assignment.schedule_id,
+        departure_time=(schedule.departure_time if schedule else assignment.start_time.time()),
+        arrival_time=(schedule.arrival_time if schedule else (assignment.end_time.time() if assignment.end_time else None)),
+        is_overnight=(schedule.is_overnight if schedule else False),
+    )
+    if not is_available:
+        raise HTTPException(status_code=400, detail=reason)
+
+    payload = assignment.model_dump()
+    payload["assignment_date"] = datetime.combine(
+        schedule.departure_date if schedule else assignment.assignment_date,
+        time.min,
+    )
+    if schedule:
+        payload["start_time"] = datetime.combine(
+            schedule.departure_date,
+            schedule.departure_time or time.min,
         )
 
-    db_assignment = TrainStaffAssignment(**assignment.model_dump())
+    db_assignment = TrainStaffAssignment(**payload)
     db.add(db_assignment)
 
-    staff.status = StaffStatus.ON_DUTY
-    staff.is_available = False
+    # A future SCHEDULED assignment does not mean the staff is ON_DUTY now.
+    # Staff status is changed when the journey actually starts.
 
     db.commit()
     db.refresh(db_assignment)
@@ -260,7 +278,7 @@ async def create_staff_assignment(
     return db_assignment
 
 
-@router.get("/assignments/train/{train_id}")
+@router.get("/assignments/train/{train_id}", dependencies=[Depends(get_current_admin_user)])
 async def get_train_staff_assignments(
         train_id: int,
         schedule_id: Optional[int] = None,
@@ -275,7 +293,7 @@ async def get_train_staff_assignments(
     if schedule_id:
         query = query.filter(TrainStaffAssignment.schedule_id == schedule_id)
     if assignment_date:
-        query = query.filter(TrainStaffAssignment.assignment_date == assignment_date)
+        query = query.filter(func.date(TrainStaffAssignment.assignment_date) == assignment_date)
 
     return query.all()
 
@@ -283,18 +301,23 @@ async def get_train_staff_assignments(
 @router.get("/assignments/current/{staff_id}")
 async def get_current_assignment(
         staff_id: str,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        current_user: dict = Depends(get_current_staff_user),
 ):
-    """Get current assignment for a staff member"""
+    """Get current assignment for the logged-in staff member."""
+    token_staff_id = (current_user.get("staff") or {}).get("staff_id")
+    if token_staff_id != staff_id:
+        raise HTTPException(status_code=403, detail="Cannot access another staff member's assignment")
+
     staff = db.query(Staff).filter(Staff.staff_id == staff_id).first()
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
 
     # Get today's active/scheduled assignment
-    today = date.today()
+    today = railway_today()
     assignment = db.query(TrainStaffAssignment).filter(
         TrainStaffAssignment.staff_id == staff.id,
-        TrainStaffAssignment.assignment_date == today,
+        func.date(TrainStaffAssignment.assignment_date) == today,
         TrainStaffAssignment.status.in_([
             AssignmentStatus.SCHEDULED,
             AssignmentStatus.ACTIVE
@@ -325,7 +348,7 @@ async def get_current_assignment(
     }
 
 
-@router.put("/assignments/{assignment_id}/status")
+@router.put("/assignments/{assignment_id}/status", dependencies=[Depends(get_current_admin_user)])
 async def update_assignment_status(
         assignment_id: UUID,
         request: UpdateStatusRequest,
@@ -349,23 +372,16 @@ async def update_assignment_status(
     assignment.status = new_status
 
     if new_status == AssignmentStatus.ACTIVE:
-        assignment.start_time = datetime.now(timezone.utc)
+        assignment.start_time = railway_now()
         # Update staff status
         staff = db.query(Staff).filter(Staff.id == assignment.staff_id).first()
         if staff:
             staff.status = StaffStatus.ON_DUTY
             staff.is_available = False
 
-        # Update schedule status
-        if assignment.schedule_id:
-            schedule = db.query(Schedule).filter(
-                Schedule.id == assignment.schedule_id
-            ).first()
-            if schedule:
-                schedule.status = "ACTIVE"
 
     elif new_status == AssignmentStatus.COMPLETED:
-        assignment.end_time = datetime.now(timezone.utc)
+        assignment.end_time = railway_now()
         # Free up staff
         staff = db.query(Staff).filter(Staff.id == assignment.staff_id).first()
         if staff:
@@ -384,144 +400,348 @@ async def update_assignment_status(
 async def start_journey(
         assignment_id: UUID,
         request: StartJourneyRequest,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        current_user: dict = Depends(get_current_staff_user),
 ):
-    """Start a journey - activate assignment, link device, and auto-depart first station"""
-    assignment = db.query(TrainStaffAssignment).filter(
-        TrainStaffAssignment.id == assignment_id
-    ).first()
+    """
+    Start one dated schedule/run.
+
+    Runtime ownership:
+      TrainStop          -> static expected timetable only
+      Schedule           -> dated run
+      StationArrivalLog  -> actual per-station state for this schedule
+      TrainRiderDevice   -> current live pointer
+
+    This function never mutates TrainStop runtime state.
+    """
+
+    assignment = (
+        db.query(TrainStaffAssignment)
+        .filter(
+            TrainStaffAssignment.id == assignment_id
+        )
+        .first()
+    )
 
     if not assignment:
-        raise HTTPException(status_code=404, detail="Assignment not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Assignment not found"
+        )
 
-    current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+    token_staff_id = (current_user.get("staff") or {}).get("staff_id")
+    assignment_staff = db.query(Staff).filter(Staff.id == assignment.staff_id).first()
+    if not assignment_staff or assignment_staff.staff_id != token_staff_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot start another staff member's assignment"
+        )
 
-    # Update assignment status
-    assignment.status = AssignmentStatus.ACTIVE
-    assignment.start_time = current_time
+    if not assignment.schedule_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Assignment has no schedule"
+        )
 
-    # Update staff status
-    staff = db.query(Staff).filter(Staff.id == assignment.staff_id).first()
-    if staff:
-        staff.status = StaffStatus.ON_DUTY
-        staff.is_available = False
+    schedule = (
+        db.query(Schedule)
+        .filter(
+            Schedule.id == assignment.schedule_id
+        )
+        .first()
+    )
 
-    # Link device to train
+    if not schedule:
+        raise HTTPException(
+            status_code=404,
+            detail="Assigned schedule not found"
+        )
+
+    if schedule.train_id != assignment.train_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Assignment train does not match "
+                "the assigned schedule train"
+            )
+        )
+
+    if assignment.status == AssignmentStatus.ACTIVE:
+        raise HTTPException(
+            status_code=409,
+            detail="This staff assignment has already started"
+        )
+
+    if schedule.status in {"COMPLETED", "CANCELLED"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot start journey from schedule status {schedule.status}"
+        )
+
+    train = (
+        db.query(Train)
+        .filter(Train.id == schedule.train_id)
+        .first()
+    )
+
+    if not train:
+        raise HTTPException(
+            status_code=404,
+            detail="Train not found"
+        )
+
+    # Use the frozen route on the schedule, not train.route_id.
+    route_stations = (
+        db.query(RouteStation)
+        .filter(
+            RouteStation.route_id == schedule.route_id
+        )
+        .order_by(RouteStation.order_number)
+        .all()
+    )
+
+    if not route_stations:
+        raise HTTPException(
+            status_code=400,
+            detail="Schedule route has no stations"
+        )
+
+    # TrainStop is a static template. It must already be configured.
+    train_stops = (
+        db.query(TrainStop)
+        .filter(
+            TrainStop.train_id == schedule.train_id
+        )
+        .all()
+    )
+
+    train_stops_map = {
+        stop.route_station_id: stop
+        for stop in train_stops
+    }
+
+    route_station_ids = {
+        rs.id for rs in route_stations
+    }
+
+    missing_station_ids = (
+        route_station_ids
+        - set(train_stops_map)
+    )
+
+    if missing_station_ids:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "Train timetable is incomplete. "
+                    "Configure TrainStop rows before "
+                    "starting the journey."
+                ),
+                "missing_route_station_ids": sorted(
+                    missing_station_ids
+                )
+            }
+        )
+
+    # One physical train cannot have two simultaneously ACTIVE schedules.
+    other_active_schedule = (
+        db.query(Schedule)
+        .filter(
+            Schedule.train_id == schedule.train_id,
+            Schedule.status == "ACTIVE",
+            Schedule.id != schedule.id,
+        )
+        .first()
+    )
+    if other_active_schedule:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Train is already active on schedule #{other_active_schedule.id}"
+            )
+        )
+
+    current_time = railway_now()
+
+    staff = (
+        db.query(Staff)
+        .filter(Staff.id == assignment.staff_id)
+        .first()
+    )
+
     device = None
     device_id = request.device_id
-    if device_id:
-        device = db.query(TrainRiderDevice).filter(
-            TrainRiderDevice.device_id == device_id
-        ).first()
 
-        if not device:
-            device = TrainRiderDevice(
-                device_id=device_id,
-                device_name=f"Staff Device - {staff.staff_id if staff else 'Unknown'}",
-                device_type="STAFF_DEVICE",
-                train_id=assignment.train_id,
-                schedule_id=assignment.schedule_id,
-                staff_id=staff.id if staff else None,
-                status="ACTIVE"
-            )
-            db.add(device)
-            db.flush()
-        else:
-            device.train_id = assignment.train_id
-            device.schedule_id = assignment.schedule_id
-            device.staff_id = staff.id if staff else None
-            device.status = "ACTIVE"
+    try:
+        # ----------------------------------------------------
+        # Assignment/staff/schedule state
+        # ----------------------------------------------------
+        assignment.status = AssignmentStatus.ACTIVE
+        assignment.start_time = current_time
 
-    # Update schedule status
-    if assignment.schedule_id:
-        schedule = db.query(Schedule).filter(
-            Schedule.id == assignment.schedule_id
-        ).first()
-        if schedule:
+        if staff:
+            staff.status = StaffStatus.ON_DUTY
+            staff.is_available = False
+
+        if schedule.status != "ACTIVE":
             schedule.status = "ACTIVE"
+        if schedule.actual_departure_time is None:
             schedule.actual_departure_time = current_time
 
-    if device and assignment.train_id:
-        # Find the first route station
-        train = db.query(Train).filter(Train.id == assignment.train_id).first()
-        if train and train.route_id:
-            first_route_station = db.query(RouteStation).filter(
-                RouteStation.route_id == train.route_id
-            ).order_by(RouteStation.order_number).first()
+        # ----------------------------------------------------
+        # Reusable device -> bind to THIS schedule and clear
+        # previous journey's transient state.
+        # ----------------------------------------------------
+        if device_id:
+            device = (
+                db.query(TrainRiderDevice)
+                .filter(
+                    TrainRiderDevice.device_id == device_id
+                )
+                .first()
+            )
 
-            if first_route_station:
-                # Get or create train_stop for first station
-                train_stop = db.query(TrainStop).filter(
-                    TrainStop.train_id == assignment.train_id,
-                    TrainStop.route_station_id == first_route_station.id
-                ).first()
-
-                if not train_stop:
-                    train_stop = TrainStop(
-                        train_id=assignment.train_id,
-                        route_station_id=first_route_station.id,
-                        status="SCHEDULED"
+            if device and device.schedule_id and device.schedule_id != schedule.id:
+                previous_schedule = (
+                    db.query(Schedule)
+                    .filter(Schedule.id == device.schedule_id)
+                    .first()
+                )
+                if previous_schedule and previous_schedule.status == "ACTIVE":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Device {device.device_id} is already assigned "
+                            f"to active schedule #{previous_schedule.id}"
+                        )
                     )
-                    db.add(train_stop)
-                    db.flush()
 
-                # Set departure time (same as journey start time)
-                departure_time = current_time.replace(tzinfo=None) if current_time.tzinfo else current_time
+            if not device:
+                device = TrainRiderDevice(
+                    device_id=device_id,
+                    device_name=(
+                        "Staff Device - "
+                        f"{staff.staff_id if staff else 'Unknown'}"
+                    ),
+                    device_type="STAFF_DEVICE",
+                )
+                db.add(device)
+                db.flush()
 
-                # Create arrival log for first station (arrived and departed at same time)
+            # A reused device must not carry the previous schedule's
+            # current station/location pointer into the new run.
+            device.train_id = schedule.train_id
+            device.schedule_id = schedule.id
+            device.staff_id = (
+                staff.id if staff else None
+            )
+            device.status = "ACTIVE"
+
+            device.current_route_station_id = None
+            device.next_route_station_id = None
+
+            device.current_latitude = None
+            device.current_longitude = None
+            device.current_speed = None
+            device.location_updated_at = None
+
+        first_station_departed = False
+
+        # ----------------------------------------------------
+        # If there is a tracking device, create/update only the
+        # CURRENT schedule's first-station runtime log.
+        # ----------------------------------------------------
+        if device:
+            first_route_station = route_stations[0]
+            first_train_stop = train_stops_map[
+                first_route_station.id
+            ]
+
+            # Idempotency / contamination guard:
+            # schedule_id + route_station_id identifies the run-stop.
+            arrival_log = (
+                db.query(StationArrivalLog)
+                .filter(
+                    StationArrivalLog.schedule_id == schedule.id,
+                    StationArrivalLog.route_station_id
+                    == first_route_station.id
+                )
+                .first()
+            )
+
+            next_station = (
+                route_stations[1]
+                if len(route_stations) > 1
+                else None
+            )
+
+            if arrival_log is None:
                 arrival_log = StationArrivalLog(
                     device_id=device.id,
-                    train_id=assignment.train_id,
-                    schedule_id=assignment.schedule_id,
+                    train_id=schedule.train_id,
+                    schedule_id=schedule.id,
                     route_station_id=first_route_station.id,
-                    train_stop_id=train_stop.id,
-                    schedule_date=current_time.date(),
-                    arrival_time=departure_time,
-                    departure_time=departure_time,  # Same as arrival
-                    arrival_latitude=device.current_latitude,
-                    arrival_longitude=device.current_longitude,
-                    status="DEPARTED",  # Already departed
+                    train_stop_id=first_train_stop.id,
+                    schedule_date=schedule.departure_date,
+                    arrival_time=current_time,
+                    departure_time=current_time,
+                    expected_arrival_time=first_train_stop.expected_arrival_time,
+                    expected_departure_time=first_train_stop.expected_departure_time,
+                    arrival_latitude=None,
+                    arrival_longitude=None,
+                    status="DEPARTED",
                     stop_duration_seconds=0,
-                    stop_duration_minutes=0
+                    stop_duration_minutes=0,
+                    next_route_station_id=(next_station.id if next_station else None),
+                    next_station_name=(next_station.station_name if next_station else None),
                 )
                 db.add(arrival_log)
+                first_station_departed = True
+            else:
+                first_station_departed = arrival_log.status == "DEPARTED"
 
-                # Update train stop
-                train_stop.status = "DEPARTED"
-                train_stop.actual_arrival_time = departure_time.time()
-                train_stop.actual_departure_time = departure_time.time()
+            device.current_route_station_id = None
+            device.next_route_station_id = (
+                next_station.id
+                if next_station
+                else None
+            )
 
-                # Set next station
-                next_station = db.query(RouteStation).filter(
-                    RouteStation.route_id == train.route_id,
-                    RouteStation.order_number > first_route_station.order_number
-                ).order_by(RouteStation.order_number).first()
 
-                if next_station:
-                    arrival_log.next_route_station_id = next_station.id
-                    arrival_log.next_station_name = next_station.station_name
-                    device.current_route_station_id = None  # In transit to next
-                    device.next_route_station_id = next_station.id
+        db.commit()
 
-                print(f"✅ Auto-departed first station: {first_route_station.station_name}")
+        return {
+            "message": "Journey started successfully",
+            "assignment_id": str(assignment.id),
+            "schedule_id": schedule.id,
+            "status": "ACTIVE",
+            "device_linked": device is not None,
+            "first_station_departed": first_station_departed,
+        }
 
-    db.commit()
-
-    return {
-        "message": "Journey started successfully",
-        "assignment_id": str(assignment.id),
-        "status": "ACTIVE",
-        "device_linked": device_id is not None,
-        "first_station_departed": True
-    }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start journey: {exc}"
+        )
 
 
 @router.get("/{staff_id}/weekly-schedules")
 async def get_staff_weekly_schedules(
         staff_id: str,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        current_user: dict = Depends(get_current_staff_user),
 ):
-    """Get all schedules for a staff member for the current week"""
+    """Get the logged-in staff member's schedules for the current week."""
+
+    token_staff_id = (current_user.get("staff") or {}).get("staff_id")
+    if token_staff_id != staff_id:
+        raise HTTPException(status_code=403, detail="Cannot access another staff member's schedules")
 
     # Find staff
     staff = db.query(Staff).filter(Staff.staff_id == staff_id).first()
@@ -529,7 +749,7 @@ async def get_staff_weekly_schedules(
         raise HTTPException(status_code=404, detail="Staff not found")
 
     # Calculate week range (Sunday to Saturday)
-    today = date.today()
+    today = railway_today()
     if today.weekday() == 6:  # Sunday
         start_of_week = today
     else:
@@ -542,8 +762,8 @@ async def get_staff_weekly_schedules(
     # Get staff assignments for this week
     assignments = db.query(TrainStaffAssignment).filter(
         TrainStaffAssignment.staff_id == staff.id,
-        TrainStaffAssignment.assignment_date >= start_of_week,
-        TrainStaffAssignment.assignment_date <= end_of_week
+        func.date(TrainStaffAssignment.assignment_date) >= start_of_week,
+        func.date(TrainStaffAssignment.assignment_date) <= end_of_week
     ).all()
 
     # Get schedule IDs from assignments
@@ -590,9 +810,14 @@ async def get_staff_weekly_schedules(
 async def get_staff_schedule_history(
         staff_id: str,
         limit: int = 10,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        current_user: dict = Depends(get_current_staff_user),
 ):
-    """Get recent schedule history for a staff member"""
+    """Get recent schedule history for the logged-in staff member."""
+
+    token_staff_id = (current_user.get("staff") or {}).get("staff_id")
+    if token_staff_id != staff_id:
+        raise HTTPException(status_code=403, detail="Cannot access another staff member's history")
 
     staff = db.query(Staff).filter(Staff.staff_id == staff_id).first()
     if not staff:

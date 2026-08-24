@@ -87,7 +87,7 @@ const schedulesApi = {
 
   updateStatus: async (id, status) => {
     try {
-      const response = await api.patch(`/schedules/${id}/status`, { status });
+      const response = await api.put(`/schedules/${id}`, { status });
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };

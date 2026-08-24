@@ -5,10 +5,11 @@ import { Train, LogIn, AlertCircle, BadgeCheck } from 'lucide-react';
 import Button from '@/components/ui/button';
 import Card from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import api from '@/api/axios';
+import { useAuth } from '@/context/AuthContext';
 
 const StaffLoginPage = () => {
   const navigate = useNavigate();
+  const { staffLogin } = useAuth();
   const [form, setForm] = useState({
     email: '',
     password: ''
@@ -22,36 +23,29 @@ const StaffLoginPage = () => {
     setLoading(true);
 
     try {
-      // Use the regular login endpoint - backend will check for staff profile
-      const response = await api.post('/auth/login', {
-        email: form.email,
-        password: form.password
-      });
+      await staffLogin(
+        form.email,
+        form.password
+      );
 
-      const { access_token, user } = response.data;
-
-      // Check if user has staff profile
-      if (!user.staff) {
-        setError('ဤအကောင့်သည် ဝန်ထမ်းအကောင့် မဟုတ်ပါ။ ကျေးဇူးပြု၍ ဝန်ထမ်းအကောင့်ဖြင့် ဝင်ရောက်ပါ');
-        setLoading(false);
-        return;
-      }
-
-      // Store token and user info
-      localStorage.setItem('token', access_token);
-      localStorage.setItem('user', JSON.stringify(user));
-      localStorage.setItem('staffInfo', JSON.stringify(user.staff));
-
-      // Redirect to train rider dashboard
-      navigate('/train-rider');
+      navigate(
+        '/train-rider',
+        { replace: true }
+      );
     } catch (err) {
       console.error('Staff login error:', err);
-      if (err.response?.status === 401) {
-        setError('အီးမေးလ် သို့မဟုတ် စကားဝှက် မှားယွင်းနေပါသည်');
-      } else if (err.response?.status === 403) {
-        setError('ဤအကောင့်ကို ပိတ်ထားပါသည်');
+
+      if (
+        err.message === 'Staff profile required'
+      ) {
+        setError(
+          'ဤအကောင့်သည် ဝန်ထမ်းအကောင့် မဟုတ်ပါ။ ကျေးဇူးပြု၍ ဝန်ထမ်းအကောင့်ဖြင့် ဝင်ရောက်ပါ'
+        );
       } else {
-        setError('ဝင်ရောက်ရန် မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ');
+        setError(
+          err.message ||
+          'ဝင်ရောက်ရန် မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ'
+        );
       }
     } finally {
       setLoading(false);

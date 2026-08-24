@@ -69,6 +69,10 @@ class Schedule(Base):
     # Relationships
     train = relationship("Train", back_populates="schedules")
     route = relationship("Route", back_populates="schedules")
+    bookings = relationship(
+        "Booking",
+        back_populates="schedule"
+    )
 
     # 🆕 Staff assignments relationship
     staff_assignments = relationship(

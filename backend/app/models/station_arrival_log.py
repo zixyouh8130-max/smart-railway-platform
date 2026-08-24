@@ -1,89 +1,197 @@
-# models/station_arrival_log.py
 from typing import Optional
-from datetime import datetime, time
-from sqlalchemy import ForeignKey, Integer, String, Float, DateTime, Time
+from datetime import datetime, time, date
+
+from sqlalchemy import (
+    ForeignKey,
+    Integer,
+    String,
+    Float,
+    DateTime,
+    Time,
+    Date,
+    UniqueConstraint,
+    Index,
+)
 from sqlalchemy.orm import relationship, Mapped, mapped_column
+
 from ..core.database import Base
 
 
 class StationArrivalLog(Base):
-    """Logs actual train arrivals and departures at stations"""
+    """
+    Runtime state/event record for ONE dated schedule at ONE route station.
+
+    This is the authoritative home for actual arrival/departure state.
+    """
+
     __tablename__ = "station_arrival_logs"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    __table_args__ = (
+        UniqueConstraint(
+            "schedule_id",
+            "route_station_id",
+            name="uq_station_arrival_logs_schedule_station"
+        ),
+        Index(
+            "ix_station_arrival_logs_schedule_station",
+            "schedule_id",
+            "route_station_id"
+        ),
+    )
 
-    # Device and train info
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True
+    )
+
     device_id: Mapped[int] = mapped_column(
-        ForeignKey("train_rider_devices.id", ondelete="CASCADE"),
+        ForeignKey(
+            "train_rider_devices.id",
+            ondelete="CASCADE"
+        ),
         nullable=False
     )
+
     train_id: Mapped[int] = mapped_column(
-        ForeignKey("trains.id", ondelete="CASCADE"),
+        ForeignKey(
+            "trains.id",
+            ondelete="CASCADE"
+        ),
         nullable=False
     )
+
     schedule_id: Mapped[int] = mapped_column(
-        ForeignKey("schedules.id", ondelete="CASCADE"),
-        nullable=False
+        ForeignKey(
+            "schedules.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
     )
 
-    # Station info - current station
     route_station_id: Mapped[int] = mapped_column(
-        ForeignKey("route_stations.id", ondelete="CASCADE"),
+        ForeignKey(
+            "route_stations.id",
+            ondelete="CASCADE"
+        ),
         nullable=False
     )
+
+    # Optional pointer back to the static timetable row.
     train_stop_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("train_stops.id", ondelete="SET NULL"),
+        ForeignKey(
+            "train_stops.id",
+            ondelete="SET NULL"
+        ),
         nullable=True
     )
 
-    # Schedule dates
-    schedule_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # The run's date. A DATE is clearer than a DateTime here.
+    schedule_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        index=True
+    )
 
-    # Arrival information
-    arrival_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    expected_arrival_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
-    arrival_delay_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)
+    # Actual runtime events
+    arrival_time: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True
+    )
 
-    # Departure information
-    departure_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    expected_departure_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
-    departure_delay_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)
+    departure_time: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True
+    )
 
-    # Stop duration
-    stop_duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    stop_duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Expected-time snapshot for this run/station.
+    expected_arrival_time: Mapped[Optional[time]] = mapped_column(
+        Time,
+        nullable=True
+    )
 
-    # Next station info - separate FK for next station
+    expected_departure_time: Mapped[Optional[time]] = mapped_column(
+        Time,
+        nullable=True
+    )
+
+    arrival_delay_minutes: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        default=0
+    )
+
+    departure_delay_minutes: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        default=0
+    )
+
+    stop_duration_seconds: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True
+    )
+
+    stop_duration_minutes: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True
+    )
+
     next_route_station_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("route_stations.id", ondelete="SET NULL"),
+        ForeignKey(
+            "route_stations.id",
+            ondelete="SET NULL"
+        ),
         nullable=True
     )
-    next_station_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    expected_next_arrival: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    # GPS coordinates at time of arrival
-    arrival_latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    arrival_longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    next_station_name: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True
+    )
 
-    # Status
-    status: Mapped[str] = mapped_column(String(20), default="ARRIVED")  # ARRIVED, DEPARTED, SKIPPED
+    expected_next_arrival: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True
+    )
 
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    arrival_latitude: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True
+    )
 
-    # Relationships - explicitly specify foreign_keys to resolve ambiguity
-    device = relationship("TrainRiderDevice", back_populates="station_logs")
+    arrival_longitude: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True
+    )
+
+    # SCHEDULED, ARRIVED, DEPARTED, SKIPPED
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="SCHEDULED",
+        nullable=False
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+    device = relationship(
+        "TrainRiderDevice",
+        back_populates="station_logs"
+    )
+
     train = relationship("Train")
     schedule = relationship("Schedule")
 
-    # Current station relationship - specify which foreign key to use
     route_station = relationship(
         "RouteStation",
         foreign_keys=[route_station_id],
         back_populates="arrival_logs"
     )
 
-    # Next station relationship - specify which foreign key to use
     next_route_station = relationship(
         "RouteStation",
         foreign_keys=[next_route_station_id]

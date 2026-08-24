@@ -2,15 +2,144 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from ..core.database import get_db
+from ..core.dependencies import get_current_admin_user
 from ..models.coach import Coach
 from ..models.train import Train
 from ..models.seat import Seat
+from ..models.booking import Booking
 from ..schemas.coach import (
     CoachCreate, CoachUpdate, CoachResponse,
     CoachBulkUpdate, SeatResponse
 )
 
 router = APIRouter(tags=["coaches"])
+
+
+def _coach_has_booking_history(
+    db: Session,
+    coach_id: int,
+) -> bool:
+    """
+    Any booking referencing a seat in this coach means those Seat IDs
+    are historical ticket data and must not be deleted/recreated.
+    """
+    found = (
+        db.query(Booking.id)
+        .join(
+            Seat,
+            Booking.seat_id == Seat.id,
+        )
+        .filter(
+            Seat.coach_id == coach_id
+        )
+        .first()
+    )
+
+    return found is not None
+
+
+def _train_has_booking_history(
+    db: Session,
+    train_id: int,
+) -> bool:
+    found = (
+        db.query(Booking.id)
+        .join(
+            Seat,
+            Booking.seat_id == Seat.id,
+        )
+        .join(
+            Coach,
+            Seat.coach_id == Coach.id,
+        )
+        .filter(
+            Coach.train_id == train_id
+        )
+        .first()
+    )
+
+    return found is not None
+
+
+def _seat_type_for_coach_type(coach_type: str) -> str:
+    """
+    Seat metadata for the current coach type.
+
+    Fare selection does NOT depend on this value; booking uses coach_type.
+    This only keeps Seat rows semantically consistent after a coach-type
+    change while preserving each existing Seat.id.
+    """
+    mapping = {
+        "UPPER_CLASS": "UPPER_CLASS",
+        "ECONOMY_CLASS": "REGULAR",
+        "SLEEPER": "SLEEPER",
+        "DINING": "DINING",
+        "BAGGAGE": "BAGGAGE",
+    }
+
+    return mapping.get(
+        str(coach_type).upper(),
+        "REGULAR",
+    )
+
+
+def _sync_existing_seats_for_coach_type(
+    db: Session,
+    coach: Coach,
+) -> int:
+    """
+    Update seat metadata IN PLACE after coach_type changes.
+
+    Important:
+    - Seat IDs are preserved.
+    - seat_number/row/position are preserved.
+    - is_active is preserved.
+    - If a passenger coach previously had no Seat rows (for example,
+      BAGGAGE -> ECONOMY_CLASS), seats are generated using the existing layout.
+    """
+    seats = (
+        db.query(Seat)
+        .filter(Seat.coach_id == coach.id)
+        .order_by(
+            Seat.row_number,
+            Seat.position_in_row,
+        )
+        .all()
+    )
+
+    coach_type = str(
+        coach.coach_type
+    ).upper()
+
+    if not seats:
+        # Baggage coaches intentionally have no seats.
+        if coach_type == "BAGGAGE":
+            return 0
+
+        # A coach converted from BAGGAGE (or another empty configuration)
+        # into a passenger/dining coach needs seat rows. There are no old
+        # Seat IDs to preserve in this case.
+        seats_data = generate_seats_for_coach(coach)
+
+        for seat_data in seats_data:
+            db.add(
+                Seat(
+                    coach_id=coach.id,
+                    **seat_data,
+                )
+            )
+
+        return len(seats_data)
+
+    seat_type = _seat_type_for_coach_type(
+        coach_type
+    )
+
+    for seat in seats:
+        # Preserve the physical seat identity and layout.
+        seat.seat_type = seat_type
+
+    return len(seats)
 
 
 @router.get("/train/{train_id}", response_model=dict)
@@ -106,7 +235,7 @@ async def get_coach(
     }
 
 
-@router.post("/bulk-update", response_model=dict)
+@router.post("/bulk-update", response_model=dict, dependencies=[Depends(get_current_admin_user)])
 async def bulk_update_coaches(
         data: CoachBulkUpdate,
         db: Session = Depends(get_db)
@@ -117,7 +246,18 @@ async def bulk_update_coaches(
         print(f"Received bulk update for train_id: {data.train_id}")
         print(f"Number of coaches: {len(data.coaches)}")
 
-        # Delete existing coaches and their seats
+        # Bookings reference immutable Seat IDs. A destructive coach rebuild
+        # would delete/recreate those IDs and corrupt historical tickets.
+        if _train_has_booking_history(db, data.train_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Cannot bulk-rebuild coaches/seats because this train "
+                    "already has booking history. Keep existing Seat IDs."
+                )
+            )
+
+        # Delete existing coaches and their seats only when no booking history exists.
         existing_coaches = db.query(Coach).filter(Coach.train_id == data.train_id).all()
         for coach in existing_coaches:
             db.query(Seat).filter(Seat.coach_id == coach.id).delete()
@@ -183,6 +323,9 @@ async def bulk_update_coaches(
             "coaches": coaches_data
         }
 
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         print(f"Error in bulk_update_coaches: {str(e)}")
@@ -192,7 +335,7 @@ async def bulk_update_coaches(
         )
 
 
-@router.post("/", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=dict, status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_admin_user)])
 async def create_coach(
         coach_data: CoachCreate,
         db: Session = Depends(get_db)
@@ -238,61 +381,213 @@ async def create_coach(
     }
 
 
-@router.put("/{coach_id}", response_model=dict)
+@router.put("/{coach_id}", response_model=dict, dependencies=[Depends(get_current_admin_user)])
 async def update_coach(
         coach_id: int,
         coach_data: CoachUpdate,
         db: Session = Depends(get_db)
 ):
-    """Update a coach"""
-    coach = db.query(Coach).filter(Coach.id == coach_id).first()
+    """
+    Update a coach while preserving Seat IDs whenever the physical
+    seat layout has not changed.
+
+    Rules:
+    - name/order/is_active change -> seats unchanged
+    - coach_type change -> existing Seat rows updated IN PLACE
+    - rows/seats_per_row change -> physical layout rebuild
+      (blocked if booking history exists)
+    - total_seats is derived by the backend, not trusted from the client
+    """
+    coach = (
+        db.query(Coach)
+        .filter(Coach.id == coach_id)
+        .first()
+    )
+
     if not coach:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Coach not found"
         )
 
-    old_total_seats = coach.total_seats
+    old_total_seats = int(
+        coach.total_seats or 0
+    )
 
-    # Update fields
-    update_data = coach_data.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(coach, field, value)
+    update_data = coach_data.model_dump(
+        exclude_unset=True
+    )
 
-    # If seats configuration changed, regenerate seats
-    if 'rows' in update_data or 'seats_per_row' in update_data:
-        # Delete existing seats
-        db.query(Seat).filter(Seat.coach_id == coach.id).delete()
+    old_coach_type = str(
+        coach.coach_type
+    ).upper()
 
-        # Regenerate seats
-        seats_data = generate_seats_for_coach(coach)
-        for seat_data in seats_data:
-            seat = Seat(coach_id=coach.id, **seat_data)
-            db.add(seat)
+    old_rows = int(
+        coach.rows or 0
+    )
 
-    # Update train capacity if train exists
-    train = db.query(Train).filter(Train.id == coach.train_id).first()
-    if train:
-        train.capacity = train.capacity - old_total_seats + coach.total_seats
+    old_seats_per_row = int(
+        coach.seats_per_row or 0
+    )
 
-    db.commit()
-    db.refresh(coach)
+    new_coach_type = str(
+        update_data.get(
+            "coach_type",
+            coach.coach_type,
+        )
+    ).upper()
 
-    # Convert to dictionary
-    return {
-        "id": coach.id,
-        "train_id": coach.train_id,
-        "coach_type": coach.coach_type,
-        "name": coach.name,
-        "rows": coach.rows,
-        "seats_per_row": coach.seats_per_row,
-        "total_seats": coach.total_seats,
-        "order_number": coach.order_number,
-        "is_active": coach.is_active,
-    }
+    new_rows = int(
+        update_data.get(
+            "rows",
+            coach.rows,
+        )
+    )
+
+    new_seats_per_row = int(
+        update_data.get(
+            "seats_per_row",
+            coach.seats_per_row,
+        )
+    )
+
+    coach_type_changed = (
+        new_coach_type
+        != old_coach_type
+    )
+
+    layout_changed = (
+        new_rows != old_rows
+        or new_seats_per_row
+        != old_seats_per_row
+    )
+
+    # Only a physical layout change destroys/recreates seat rows.
+    # Because Bookings reference Seat.id, that operation is forbidden
+    # once this coach has booking history.
+    if (
+        layout_changed
+        and _coach_has_booking_history(
+            db,
+            coach.id,
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Cannot change rows or seats_per_row because "
+                "seats in this coach are referenced by booking history. "
+                "Seat IDs must be preserved."
+            )
+        )
+
+    try:
+        # Apply editable fields, but never trust client-supplied total_seats.
+        for field, value in update_data.items():
+            if field == "total_seats":
+                continue
+
+            setattr(
+                coach,
+                field,
+                value,
+            )
+
+        # total_seats is derived from the actual coach configuration.
+        if str(coach.coach_type).upper() == "BAGGAGE":
+            coach.total_seats = 0
+        else:
+            coach.total_seats = (
+                int(coach.rows or 0)
+                * int(
+                    coach.seats_per_row
+                    or 0
+                )
+            )
+
+        if layout_changed:
+            # Safe only because the booking-history guard above passed.
+            db.query(Seat).filter(
+                Seat.coach_id == coach.id
+            ).delete(
+                synchronize_session=False
+            )
+
+            db.flush()
+
+            seats_data = (
+                generate_seats_for_coach(
+                    coach
+                )
+            )
+
+            for seat_data in seats_data:
+                db.add(
+                    Seat(
+                        coach_id=coach.id,
+                        **seat_data,
+                    )
+                )
+
+        elif coach_type_changed:
+            # No physical layout change:
+            # preserve Seat IDs and update only type metadata.
+            _sync_existing_seats_for_coach_type(
+                db,
+                coach,
+            )
+
+        # Keep train capacity consistent with the derived coach capacity.
+        train = (
+            db.query(Train)
+            .filter(
+                Train.id
+                == coach.train_id
+            )
+            .first()
+        )
+
+        if train:
+            train.capacity = max(
+                0,
+                int(train.capacity or 0)
+                - old_total_seats
+                + int(
+                    coach.total_seats
+                    or 0
+                ),
+            )
+
+        db.commit()
+        db.refresh(coach)
+
+        return {
+            "id": coach.id,
+            "train_id": coach.train_id,
+            "coach_type": coach.coach_type,
+            "name": coach.name,
+            "rows": coach.rows,
+            "seats_per_row": coach.seats_per_row,
+            "total_seats": coach.total_seats,
+            "order_number": coach.order_number,
+            "is_active": coach.is_active,
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "Error updating coach: "
+                f"{str(exc)}"
+            ),
+        )
 
 
-@router.delete("/{coach_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{coach_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_admin_user)])
 async def delete_coach(
         coach_id: int,
         db: Session = Depends(get_db)
@@ -303,6 +598,15 @@ async def delete_coach(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Coach not found"
+        )
+
+    if _coach_has_booking_history(db, coach.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Cannot delete coach because its seats are "
+                "referenced by booking history."
+            )
         )
 
     train_id = coach.train_id
@@ -335,8 +639,8 @@ def generate_seats_for_coach(coach: Coach) -> List[dict]:
 
     # Seat type mapping
     seat_type_mapping = {
-        'FIRST_CLASS': 'FIRST_CLASS',
-        'ECONOMY': 'REGULAR',
+        'UPPER_CLASS': 'UPPER_CLASS',
+        'ECONOMY_CLASS': 'REGULAR',
         'SLEEPER': 'SLEEPER',
         'DINING': 'DINING',
         'BAGGAGE': 'BAGGAGE'

@@ -10,6 +10,7 @@ import TrainTrackerMap from '@/pages/TrainRider/TrainTrackerMap';
 import api from '@/api/axios';
 import schedulesApi from '@/api/schedules';
 import locationTrackingApi from '@/api/locationTracking';
+import { formatRailwayTime } from '@/utils/railwayDateTime';
 
 const LiveTrackingPage = () => {
   const { user, staffInfo, currentAssignment, connectionStatus, batteryLevel } = useOutletContext();
@@ -179,7 +180,7 @@ const LiveTrackingPage = () => {
     setGpsData({
       latitude,
       longitude,
-      speed: speed ? Math.round(speed * 3.6) : null,
+      speed: speed ? Math.round(speed * 2.2369362920544) : null,
       accuracy: Math.round(accuracy),
       lastUpdate: new Date()
     });
@@ -194,7 +195,7 @@ const LiveTrackingPage = () => {
         device_id: deviceId,
         latitude,
         longitude,
-        speed: speed ? Math.round(speed * 3.6) : null,
+        speed: speed ? Math.round(speed * 2.2369362920544) : null,
         accuracy: Math.round(accuracy)
       });
 
@@ -281,28 +282,8 @@ const LiveTrackingPage = () => {
     }
   };
 
-  const formatTime = (timeString) => {
-    if (!timeString) return null;
-    try {
-      // Handle both cases: with or without timezone suffix
-      let date;
-      if (timeString.endsWith('Z') || timeString.includes('+')) {
-        date = new Date(timeString);  // UTC time
-      } else {
-        // No timezone info - assume UTC
-        date = new Date(timeString + 'Z');
-      }
-
-      return date.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Asia/Yangon'
-      });
-    } catch (err) {
-      console.error('Error formatting time:', timeString, err);
-      return timeString;
-    }
-  };
+  const formatTime = (timeString) =>
+    timeString ? formatRailwayTime(timeString, 'en-US') : null;
 
 
 
@@ -364,7 +345,7 @@ const LiveTrackingPage = () => {
             <Gauge className="w-4 h-4 text-railway-red-500" />
             <div>
               <p className="text-xs text-gray-500">Speed</p>
-              <p className="text-sm font-semibold">{journeyCompleted ? '0' : gpsData.speed || 0} km/h</p>
+              <p className="text-sm font-semibold">{journeyCompleted ? '0' : gpsData.speed || 0} mph</p>
             </div>
           </div>
         </Card>

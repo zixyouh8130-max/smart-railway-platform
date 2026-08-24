@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
 from ..core.database import get_db
+from ..core.dependencies import get_current_admin_user
 from ..models.train_class import TrainClass
 from pydantic import BaseModel, Field, field_validator
 
@@ -13,7 +14,7 @@ router = APIRouter()
 # Pydantic Schemas
 class TrainClassBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Class name (e.g., ရိုးရိုးတန်း)")
-    code: str = Field(..., min_length=2, max_length=20, description="Unique class code (e.g., ORDINARY)")
+    code: str = Field(..., min_length=2, max_length=20, description="Unique class code (e.g., ECONOMY_CLASS)")
     description: Optional[str] = Field(None, max_length=500, description="Class description")
     multiplier: float = Field(1.0, ge=0.1, le=10.0, description="Price multiplier from base fare")
     amenities: Optional[str] = Field(None, max_length=500, description="Available amenities")
@@ -110,7 +111,7 @@ async def get_train_class(
         db: Session = Depends(get_db)
 ):
     """
-    Get a specific train class by its code (e.g., ORDINARY, UPPER).
+    Get a specific train class by its code (e.g., ECONOMY_CLASS, UPPER_CLASS).
     """
     train_class = db.query(TrainClass).filter(
         TrainClass.code == class_code.upper()
@@ -136,7 +137,7 @@ async def get_train_class(
     return response
 
 
-@router.post("/", response_model=TrainClassResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=TrainClassResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_admin_user)])
 async def create_train_class(
         train_class: TrainClassCreate,
         db: Session = Depends(get_db)
@@ -171,7 +172,7 @@ async def create_train_class(
     return db_class
 
 
-@router.put("/{class_code}", response_model=TrainClassResponse)
+@router.put("/{class_code}", response_model=TrainClassResponse, dependencies=[Depends(get_current_admin_user)])
 async def update_train_class(
         class_code: str,
         class_update: TrainClassUpdate,
@@ -202,7 +203,7 @@ async def update_train_class(
     return db_class
 
 
-@router.delete("/{class_code}", status_code=status.HTTP_200_OK)
+@router.delete("/{class_code}", status_code=status.HTTP_200_OK, dependencies=[Depends(get_current_admin_user)])
 async def delete_train_class(
         class_code: str,
         force: bool = Query(False, description="Force delete even if class is in use"),
@@ -237,39 +238,32 @@ async def delete_train_class(
         )
 
 
-@router.post("/seed-defaults", response_model=List[TrainClassResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/seed-defaults", response_model=List[TrainClassResponse], status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_admin_user)])
 async def seed_default_classes(db: Session = Depends(get_db)):
     """
     Seed the default train classes if they don't exist.
     """
     default_classes = [
         {
-            "name": "ရိုးရိုးတန်း",
-            "code": "ORDINARY",
-            "description": "သာမန်ထိုင်ခုံတန်း",
+            "name": "သာမန်တန်း",
+            "code": "ECONOMY_CLASS",
+            "description": "သာမန်ခရီးသည်ထိုင်ခုံတန်း",
             "multiplier": 1.0,
-            "amenities": "ပန်ကာ၊ သာမန်ထိုင်ခုံ"
-        },
-        {
-            "name": "အထက်တန်း",
-            "code": "UPPER",
-            "description": "အထက်တန်းထိုင်ခုံ",
-            "multiplier": 1.5,
-            "amenities": "အဲကွန်း၊ သက်တောင့်သက်သာထိုင်ခုံ၊ ရေသန့်"
+            "amenities": "သာမန်ခရီးသည်ဝန်ဆောင်မှု"
         },
         {
             "name": "အိပ်စင်တန်း",
             "code": "SLEEPER",
-            "description": "အိပ်စင်တွဲ",
-            "multiplier": 2.0,
-            "amenities": "အဲကွန်း၊ အိပ်စင်၊ အိပ်ယာခင်း၊ ခေါင်းအုံး"
+            "description": "အိပ်စင်/အိပ်ရာပါ ခရီးသည်တွဲ",
+            "multiplier": 1.5,
+            "amenities": "အိပ်စင်၊ အိပ်ရာဝန်ဆောင်မှု"
         },
         {
-            "name": "ပထမတန်း",
-            "code": "FIRST",
-            "description": "ပထမတန်းအခန်း",
-            "multiplier": 2.5,
-            "amenities": "အဲကွန်း၊ သီးသန့်အခန်း၊ အစားအသောက်၊ WiFi"
+            "name": "အထက်တန်း",
+            "code": "UPPER_CLASS",
+            "description": "အမြင့်ဆုံးအဆင့် luxury passenger class",
+            "multiplier": 2.0,
+            "amenities": "အဆင့်မြင့်ထိုင်ခုံနှင့် luxury amenities"
         }
     ]
 

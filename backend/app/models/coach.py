@@ -17,7 +17,7 @@ class Coach(Base):
     )
 
     # Coach details
-    coach_type: Mapped[str] = mapped_column(String(20), nullable=False, default="ECONOMY")
+    coach_type: Mapped[str] = mapped_column(String(20), nullable=False, default="ECONOMY_CLASS")
     name: Mapped[str] = mapped_column(String(100), nullable=False)
 
     # Configuration
