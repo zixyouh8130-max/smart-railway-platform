@@ -404,12 +404,59 @@ async def sync_inspection_issues(
             event_id = str(event.get("_id"))
             gps = event.get("gps") or {}
 
-            distance_meters = gps.get("distance_from_start_m")
+            distance_meters = (
+                gps.get("distance_from_start_m")
+                if gps.get("distance_from_start_m") is not None
+                else event.get("distance_from_start_m")
+            )
             distance_miles = (
                 float(distance_meters) * MILES_PER_METER
                 if distance_meters is not None
                 else None
             )
+
+            # Prepare every AI/source field before the first database flush.
+            # TrackIssue.defect_type is NOT NULL, so a partially populated
+            # object must never be flushed.
+            run_id = inspection.get("run_id")
+            run_id_value = str(run_id) if run_id not in (None, "") else None
+
+            defect_type_value = str(
+                event.get("defect_type")
+                or event.get("type")
+                or event.get("class_name")
+                or "Unknown defect"
+            )
+
+            confidence_value = _optional_float(
+                event.get("confidence")
+                if event.get("confidence") is not None
+                else event.get("score")
+            )
+
+            rail_side_value = (
+                str(event.get("rail_side"))
+                if event.get("rail_side") not in (None, "")
+                else None
+            )
+
+            latitude_value = _optional_float(
+                gps.get("latitude")
+                if gps.get("latitude") is not None
+                else event.get("latitude")
+            )
+            longitude_value = _optional_float(
+                gps.get("longitude")
+                if gps.get("longitude") is not None
+                else event.get("longitude")
+            )
+
+            ai_priority_value = _priority_from_source(inspection, event)
+            ai_snapshot_value = _build_ai_snapshot(inspection, event)
+            media_snapshot_value = _json_safe_snapshot({
+                "event_media": event.get("media") or {},
+                "inspection_media": inspection.get("media") or {},
+            })
 
             issue = (
                 db.query(TrackIssue)
@@ -421,36 +468,30 @@ async def sync_inspection_issues(
             )
 
             is_new = issue is None
+
             if is_new:
                 issue = TrackIssue(
                     inspection_id=inspection_id,
                     inspection_event_id=event_id,
+                    run_id=run_id_value,
+                    defect_type=defect_type_value,
+                    confidence=confidence_value,
+                    rail_side=rail_side_value,
+                    latitude=latitude_value,
+                    longitude=longitude_value,
+                    distance_from_start_miles=distance_miles,
+                    ai_priority=ai_priority_value,
+                    ai_snapshot=ai_snapshot_value,
+                    media_snapshot=media_snapshot_value,
                     created_by_user_id=_actor_user_id(current_user),
                     status="OPEN",
                 )
                 db.add(issue)
+
+                # Flush only after all NOT NULL/source fields are populated.
+                # This also generates issue.id for the activity row.
                 db.flush()
-                created += 1
-            else:
-                updated += 1
 
-            # Refresh AI/source metadata without overwriting human workflow state.
-            run_id = inspection.get("run_id")
-            issue.run_id = str(run_id) if run_id not in (None, "") else None
-            issue.defect_type = str(event.get("defect_type") or "Unknown defect")
-            issue.confidence = _optional_float(event.get("confidence"))
-            issue.rail_side = str(event.get("rail_side")) if event.get("rail_side") not in (None, "") else None
-            issue.latitude = _optional_float(gps.get("latitude"))
-            issue.longitude = _optional_float(gps.get("longitude"))
-            issue.distance_from_start_miles = distance_miles
-            issue.ai_priority = _priority_from_source(inspection, event)
-            issue.ai_snapshot = _build_ai_snapshot(inspection, event)
-            issue.media_snapshot = _json_safe_snapshot({
-                "event_media": event.get("media") or {},
-                "inspection_media": inspection.get("media") or {},
-            })
-
-            if is_new:
                 _add_activity(
                     db,
                     issue,
@@ -460,8 +501,24 @@ async def sync_inspection_issues(
                     extra_data={
                         "inspection_id": inspection_id,
                         "inspection_event_id": event_id,
+                        "defect_type": defect_type_value,
                     },
                 )
+                created += 1
+            else:
+                # Re-sync refreshes AI/source metadata only. Human workflow
+                # state is intentionally preserved.
+                issue.run_id = run_id_value
+                issue.defect_type = defect_type_value
+                issue.confidence = confidence_value
+                issue.rail_side = rail_side_value
+                issue.latitude = latitude_value
+                issue.longitude = longitude_value
+                issue.distance_from_start_miles = distance_miles
+                issue.ai_priority = ai_priority_value
+                issue.ai_snapshot = ai_snapshot_value
+                issue.media_snapshot = media_snapshot_value
+                updated += 1
 
         db.commit()
     except Exception:
