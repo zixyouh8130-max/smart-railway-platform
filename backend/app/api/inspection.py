@@ -1,26 +1,188 @@
 # backend/app/api/inspection.py
 
 from datetime import datetime
+import hashlib
+import hmac
+import time
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
 import asyncio
 import os
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import StreamingResponse
 import httpx
 import motor.motor_asyncio
+from sqlalchemy.orm import Session
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, ConfigDict
 
 from ..core.config import settings
-from ..core.dependencies import get_current_admin_user
+from ..core.database import get_db
+from ..core.security import decode_access_token
+from ..models.user import User, UserRole
+
+
+# HTML <video src="..."> requests cannot attach the Axios Authorization
+# header.  Inspection metadata stays admin-only, but media URLs returned from
+# an authenticated detail request receive a short-lived, path-scoped signature.
+#
+# The signature is NOT the user's JWT.  It grants read-only access only to one
+# inspection video side and expires automatically.
+MEDIA_URL_TTL_SECONDS = 60 * 60  # 60 minutes
+
+_optional_bearer = HTTPBearer(auto_error=False)
+
+
+def _media_signature(
+    inspection_id: str,
+    rail_side: str,
+    expires: int,
+) -> str:
+    message = (
+        f"inspection-media|{inspection_id}|{rail_side.lower()}|{int(expires)}"
+    ).encode("utf-8")
+
+    return hmac.new(
+        settings.SECRET_KEY.encode("utf-8"),
+        message,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _valid_signed_media_request(request: Request) -> bool:
+    """
+    Return True only for a valid signed inspection-media request.
+
+    A signature is bound to:
+      - inspection_id
+      - rail side
+      - expiration timestamp
+
+    It cannot be reused for another inspection or another rail side.
+    """
+    inspection_id = request.path_params.get("inspection_id")
+    rail_side = request.path_params.get("rail_side")
+
+    # Only the media endpoint has both of these path parameters.
+    if not inspection_id or not rail_side:
+        return False
+
+    rail_side = str(rail_side).strip().lower()
+    if rail_side not in {"left", "right"}:
+        return False
+
+    raw_expires = request.query_params.get("expires")
+    signature = request.query_params.get("sig")
+
+    if not raw_expires or not signature:
+        return False
+
+    try:
+        expires = int(raw_expires)
+    except (TypeError, ValueError):
+        return False
+
+    # Expired links are rejected.
+    if expires < int(time.time()):
+        return False
+
+    expected = _media_signature(
+        str(inspection_id),
+        rail_side,
+        expires,
+    )
+
+    return hmac.compare_digest(
+        expected,
+        str(signature),
+    )
+
+
+def _require_inspection_admin_or_signed_media(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(
+        _optional_bearer
+    ),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Keep the inspection API admin-only while allowing the browser's native
+    <video> request to use a short-lived signed media URL.
+
+    Normal API calls:
+        Authorization: Bearer <admin JWT>
+
+    Native video calls:
+        ?expires=<unix timestamp>&sig=<scoped HMAC signature>
+    """
+
+    if _valid_signed_media_request(request):
+        return {
+            "access": "signed_inspection_media",
+        }
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    payload = decode_access_token(
+        credentials.credentials
+    )
+
+    if not payload or not payload.get("sub"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = (
+        db.query(User)
+        .filter(User.id == payload["sub"])
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User no longer exists",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive",
+        )
+
+    if user.role not in {
+        UserRole.ADMIN,
+        UserRole.SUPER_ADMIN,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+
+    fresh_payload = dict(payload)
+    fresh_payload["role"] = (
+        user.role.value
+        if hasattr(user.role, "value")
+        else str(user.role)
+    )
+    return fresh_payload
 
 
 router = APIRouter(
-    dependencies=[Depends(get_current_admin_user)]
+    dependencies=[
+        Depends(_require_inspection_admin_or_signed_media)
+    ]
 )
 
 # MongoDB connection using project settings
@@ -462,6 +624,40 @@ async def _proxy_drive_video(
             or "video/mp4"
         ),
         headers=response_headers,
+    )
+
+
+
+def _build_signed_media_url(
+    request: Request,
+    inspection_id: str,
+    rail_side: str,
+) -> str:
+    """
+    Build a short-lived URL usable by a native HTML5 <video> element.
+
+    The real admin JWT is never placed in the URL.
+    """
+    rail_side = rail_side.strip().lower()
+    expires = int(time.time()) + MEDIA_URL_TTL_SECONDS
+
+    signature = _media_signature(
+        inspection_id,
+        rail_side,
+        expires,
+    )
+
+    url = request.url_for(
+        "stream_inspection_video",
+        inspection_id=inspection_id,
+        rail_side=rail_side,
+    )
+
+    return str(
+        url.include_query_params(
+            expires=str(expires),
+            sig=signature,
+        )
     )
 
 
@@ -909,20 +1105,19 @@ async def get_inspection_detail(
     normalized_inspection["inspection_events"] = len(events)
     normalized_inspection["defect_count"] = len(events)
 
+    # Native HTML5 <video> requests do not inherit the Axios Authorization
+    # header. Return scoped, short-lived signed URLs instead of exposing the
+    # user's admin JWT or making the media endpoint public.
     normalized_inspection["media_urls"] = {
-        "left": str(
-            request.url_for(
-                "stream_inspection_video",
-                inspection_id=inspection_id,
-                rail_side="left",
-            )
+        "left": _build_signed_media_url(
+            request,
+            inspection_id,
+            "left",
         ),
-        "right": str(
-            request.url_for(
-                "stream_inspection_video",
-                inspection_id=inspection_id,
-                rail_side="right",
-            )
+        "right": _build_signed_media_url(
+            request,
+            inspection_id,
+            "right",
         ),
     }
 
