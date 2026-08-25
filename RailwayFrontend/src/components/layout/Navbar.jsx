@@ -87,12 +87,12 @@ const Navbar = () => {
             </button>
 
             {/* Language Switcher */}
-            <button className={`flex items-center space-x-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+            {/* <button className={`flex items-center space-x-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
               isScrolled ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-white/10 text-white'
             }`}>
               <span>မြန်မာ</span>
               <ChevronDown className="w-4 h-4" />
-            </button>
+            </button> */}
 
             {/* User Profile Icon */}
             <div className="relative">

@@ -20,6 +20,7 @@ class StaffRole(str, Enum):
     DISPATCHER = "DISPATCHER"  # ရထားထိန်းချုပ်ရေးဝန်ထမ်း
     MAINTENANCE = "MAINTENANCE"  # ပြုပြင်ထိန်းသိမ်းရေးဝန်ထမ်း
     INSPECTOR = "INSPECTOR"  # စစ်ဆေးရေးမှူး
+    TRACK_ENGINEER = "TRACK_ENGINEER"  # လမ်းပိုင်းပြုပြင်စစ်ဆေးရေးအင်ဂျင်နီယာ
 
 
 class StaffStatus(str, Enum):

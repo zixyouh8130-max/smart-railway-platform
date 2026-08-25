@@ -275,12 +275,10 @@ const HeroSection = () => {
       <div className="absolute top-20 right-10 hidden lg:block">
         <div className="bg-white/15 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-white/20" style={{ animation: 'float 3s ease-in-out infinite' }}>
           <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center">
-              <Train className="w-6 h-6 text-white" />
-            </div>
+            <Train className="w-5 h-5 text-blue-300" />
             <div>
               <p className="text-white text-sm font-medium">ပြေးဆွဲနေသော ရထားများ</p>
-              <p className="text-sky-400 text-2xl font-bold">
+              <p className="text-sky-400 text-sm font-bold">
                 {activeTrainsCount !== null ? activeTrainsCount.toLocaleString() : '...'}
               </p>
             </div>

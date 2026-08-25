@@ -81,6 +81,7 @@ def _get_active_user_from_payload(
 
 def _fresh_staff_payload(staff: Staff) -> dict:
     return {
+        "id": str(staff.id),
         "staff_id": staff.staff_id,
         "role": (
             staff.role.value
@@ -194,3 +195,48 @@ def get_current_train_crew(
         )
 
     return current_user
+
+
+def get_current_track_engineer(
+    current_user: dict = Depends(get_current_staff_user),
+) -> dict:
+    """Require a live TRACK_ENGINEER staff profile."""
+    if current_user["staff"].get("role") != StaffRole.TRACK_ENGINEER.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Track Engineer privileges required",
+        )
+    return current_user
+
+
+def get_current_admin_or_track_engineer(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Allow current ADMIN/SUPER_ADMIN or TRACK_ENGINEER, using fresh DB state."""
+    payload = _decode_credentials(credentials)
+    user = _get_active_user_from_payload(db, payload)
+
+    fresh_payload = dict(payload)
+    fresh_payload["role"] = user.role.value if hasattr(user.role, "value") else str(user.role)
+
+    if user.role in {UserRole.ADMIN, UserRole.SUPER_ADMIN}:
+        fresh_payload["actor_type"] = "ADMIN"
+        return fresh_payload
+
+    staff = db.query(Staff).filter(Staff.user_id == user.id).first()
+    if not staff or staff.status == StaffStatus.INACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Active Track Engineer profile required",
+        )
+
+    if staff.role != StaffRole.TRACK_ENGINEER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Track Engineer privileges required",
+        )
+
+    fresh_payload["staff"] = _fresh_staff_payload(staff)
+    fresh_payload["actor_type"] = "TRACK_ENGINEER"
+    return fresh_payload

@@ -1,15 +1,19 @@
-// layouts/TrainRiderLayout.jsx
-import React, { useState, useEffect } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Train, MapPin, Clock, Users, Settings, LogOut,
-  Menu, Wifi, WifiOff, Battery, Bell, ChevronRight,
-  Radio, User, UserCircle
+  Battery,
+  ChevronRight,
+  Clock,
+  LogOut,
+  Menu,
+  Radio,
+  Train,
+  Wifi,
+  WifiOff,
+  Wrench,
 } from 'lucide-react';
+
 import Button from '@/components/ui/button';
-import Card from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import api from '@/api/axios';
 import { useAuth } from '@/context/AuthContext';
 
@@ -18,275 +22,202 @@ const TrainRiderLayout = () => {
   const location = useLocation();
   const { user, isStaff, logout } = useAuth();
   const staffInfo = user?.staff || null;
+  const isTrackEngineer = staffInfo?.role === 'TRACK_ENGINEER';
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('checking');
+  const [connectionStatus, setConnectionStatus] = useState(navigator.onLine ? 'connected' : 'disconnected');
   const [batteryLevel, setBatteryLevel] = useState(null);
   const [currentAssignment, setCurrentAssignment] = useState(null);
 
   useEffect(() => {
-    checkConnection();
-    startBatteryMonitoring();
+    const online = () => setConnectionStatus('connected');
+    const offline = () => setConnectionStatus('disconnected');
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
+
+    if ('getBattery' in navigator) {
+      navigator.getBattery().then((battery) => {
+        const update = () => setBatteryLevel(Math.round(battery.level * 100));
+        update();
+        battery.addEventListener('levelchange', update);
+      });
+    }
+
+    return () => {
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', offline);
+    };
   }, []);
 
   useEffect(() => {
-    if (isStaff && staffInfo?.staff_id) {
-      fetchCurrentAssignment();
-      const interval = setInterval(
-        fetchCurrentAssignment,
-        30000
-      );
-      return () => clearInterval(interval);
+    // Track Engineers are assigned to maintenance issues, not train schedules.
+    if (!isStaff || !staffInfo?.staff_id || isTrackEngineer) {
+      setCurrentAssignment(null);
+      return undefined;
     }
-  }, [isStaff, staffInfo?.staff_id]);
 
-  const checkConnection = () => {
-    if (navigator.onLine) {
-      setConnectionStatus('connected');
-    } else {
-      setConnectionStatus('disconnected');
+    const fetchCurrentAssignment = async () => {
+      try {
+        const response = await api.get(`/staff/assignments/current/${staffInfo.staff_id}`);
+        setCurrentAssignment(response.data || null);
+      } catch (err) {
+        console.error('Failed to fetch staff train assignment:', err);
+      }
+    };
+
+    fetchCurrentAssignment();
+    const interval = setInterval(fetchCurrentAssignment, 30000);
+    return () => clearInterval(interval);
+  }, [isStaff, staffInfo?.staff_id, isTrackEngineer]);
+
+  const navigationItems = useMemo(() => {
+    if (isTrackEngineer) {
+      return [
+        {
+          name: 'Issues',
+          path: '/train-rider/issues',
+          icon: Wrench,
+          description: 'AI findings & maintenance work',
+        },
+      ];
     }
-    window.addEventListener('online', () => setConnectionStatus('connected'));
-    window.addEventListener('offline', () => setConnectionStatus('disconnected'));
+
+    return [
+      {
+        name: 'Home',
+        path: '/train-rider',
+        icon: Radio,
+        description: 'Train duty & journey controls',
+      },
+      {
+        name: 'Schedule',
+        path: '/train-rider/schedule',
+        icon: Clock,
+        description: 'Train schedule & timing',
+      },
+    ];
+  }, [isTrackEngineer]);
+
+  const getStaffRoleBadge = (role) => {
+    const styles = {
+      TRAIN_DRIVER: 'bg-blue-100 text-blue-700 border-blue-300',
+      ASSISTANT_DRIVER: 'bg-indigo-100 text-indigo-700 border-indigo-300',
+      TRAIN_GUARD: 'bg-green-100 text-green-700 border-green-300',
+      TICKET_CHECKER: 'bg-purple-100 text-purple-700 border-purple-300',
+      TRACK_ENGINEER: 'bg-emerald-100 text-emerald-700 border-emerald-300',
+    };
+    return styles[role] || 'bg-gray-100 text-gray-700 border-gray-300';
   };
 
-  const fetchCurrentAssignment = async () => {
-    if (!staffInfo?.staff_id) return;
-    try {
-      const response = await api.get(`/staff/assignments/current/${staffInfo.staff_id}`);
-      setCurrentAssignment(response.data);
-    } catch (err) {
-      console.error('Failed to fetch assignment:', err);
-    }
-  };
-
-  const startBatteryMonitoring = () => {
-    if ('getBattery' in navigator) {
-      navigator.getBattery().then(battery => {
-        setBatteryLevel(Math.round(battery.level * 100));
-        battery.addEventListener('levelchange', () => {
-          setBatteryLevel(Math.round(battery.level * 100));
-        });
-      });
-    }
+  const getStaffRoleLabel = (role) => {
+    const labels = {
+      TRAIN_DRIVER: 'Driver',
+      ASSISTANT_DRIVER: 'Asst. Driver',
+      TRAIN_GUARD: 'Guard',
+      TICKET_CHECKER: 'Ticket Checker',
+      TRACK_ENGINEER: 'Track Engineer',
+    };
+    return labels[role] || role;
   };
 
   const handleLogout = async () => {
     await logout();
-    navigate(
-      '/train-rider/login',
-      { replace: true }
-    );
+    navigate('/train-rider/login', { replace: true });
   };
 
-  const navigationItems = [
-    { name: 'Home', path: '/train-rider', icon: Radio, description: 'Real-time GPS tracking' },
-    { name: 'Schedule', path: '/train-rider/schedule', icon: Clock, description: 'Train schedule & timing' },
-    // { name: 'Live Tracking ', path: '/train-rider/settings', icon: Settings, description: 'App settings' },
-    // { name: 'Route Map', path: '/train-rider/route', icon: MapPin, description: 'View route and stations' },
-  ];
+  if (!isStaff || !staffInfo) return null;
 
-  const getStaffRoleBadge = (role) => {
-    const roleStyles = {
-      'TRAIN_DRIVER': 'bg-blue-100 text-blue-700 border-blue-300',
-      'ASSISTANT_DRIVER': 'bg-indigo-100 text-indigo-700 border-indigo-300',
-      'TRAIN_GUARD': 'bg-green-100 text-green-700 border-green-300',
-      'TICKET_CHECKER': 'bg-purple-100 text-purple-700 border-purple-300',
-    };
-    return roleStyles[role] || 'bg-gray-100 text-gray-700 border-gray-300';
-  };
-
-  const getStaffRoleLabel = (role) => {
-    const roleLabels = {
-      'TRAIN_DRIVER': 'Driver',
-      'ASSISTANT_DRIVER': 'Asst. Driver',
-      'TRAIN_GUARD': 'Guard',
-      'TICKET_CHECKER': 'Ticket Checker',
-    };
-    return roleLabels[role] || role;
-  };
-
-  if (!isStaff || !staffInfo) {
-    return null;
-  }
+  const PortalIcon = isTrackEngineer ? Wrench : Train;
+  const portalTitle = isTrackEngineer ? 'Track Engineer' : 'Train Rider';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-lg border-b border-gray-200 shadow-sm">
+      <header className="sticky top-0 z-50 bg-white/85 backdrop-blur-lg border-b border-gray-200 shadow-sm">
         <div className="flex items-center justify-between px-4 h-16">
           <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              icon={<Menu className="w-5 h-5" />}
-            />
-
+            <Button variant="ghost" size="sm" onClick={() => setIsSidebarOpen(true)} icon={<Menu className="w-5 h-5" />} />
             <div className="flex items-center gap-2">
-              <Train className="w-6 h-6 text-railway-red-500" />
-              <span className="font-bold text-gray-800 hidden sm:block">Train Rider</span>
+              <PortalIcon className={`w-6 h-6 ${isTrackEngineer ? 'text-emerald-600' : 'text-railway-red-500'}`} />
+              <span className="font-bold text-gray-800 hidden sm:block">{portalTitle}</span>
             </div>
           </div>
 
-          {currentAssignment && (
-            <div className="hidden md:flex items-center gap-4">
+          <div className="hidden md:flex items-center gap-3">
+            {currentAssignment && (
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold border border-gray-200 bg-white">
                 <Train className="w-3 h-3 text-railway-red-500" />
                 {currentAssignment.train_name}
               </span>
-              <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${getStaffRoleBadge(staffInfo?.role)}`}>
-                {getStaffRoleLabel(staffInfo?.role)}
-              </span>
-            </div>
-          )}
+            )}
+            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${getStaffRoleBadge(staffInfo.role)}`}>
+              {getStaffRoleLabel(staffInfo.role)}
+            </span>
+          </div>
 
           <div className="flex items-center gap-2">
-            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-              connectionStatus === 'connected'
-                ? 'bg-green-50 text-green-700 border border-green-200'
-                : 'bg-red-50 text-red-700 border border-red-200'
-            }`}>
+            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs ${connectionStatus === 'connected' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
               {connectionStatus === 'connected' ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
             </span>
-
             {batteryLevel !== null && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-700 border border-gray-200">
-                <Battery className={`w-3 h-3 ${batteryLevel > 20 ? 'text-green-500' : 'text-red-500'}`} />
-                <span>{batteryLevel}%</span>
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-gray-50 border border-gray-200">
+                <Battery className={`w-3 h-3 ${batteryLevel > 20 ? 'text-green-500' : 'text-red-500'}`} /> {batteryLevel}%
               </span>
             )}
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleLogout}
-              icon={<LogOut className="w-5 h-5 text-red-500" />}
-            />
+            <Button variant="ghost" size="sm" onClick={handleLogout} icon={<LogOut className="w-5 h-5 text-red-500" />} />
           </div>
         </div>
-
-        {currentAssignment && (
-          <div className="md:hidden px-4 py-2 bg-blue-50 border-t border-gray-200 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Train className="w-4 h-4 text-railway-red-500" />
-              <span className="text-sm font-medium">{currentAssignment.train_name}</span>
-            </div>
-            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border ${getStaffRoleBadge(staffInfo?.role)}`}>
-              {getStaffRoleLabel(staffInfo?.role)}
-            </span>
-          </div>
-        )}
       </header>
 
-      {/* Sidebar - FIXED: User info moved to bottom */}
       {isSidebarOpen && (
-        <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}>
-          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
-            {/* Header Section - Simplified, no user info here */}
-            <div className="p-6 bg-gradient-to-br from-railway-red-500 to-railway-orange-500 text-white">
+        <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}>
+          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-2xl flex flex-col" onClick={(event) => event.stopPropagation()}>
+            <div className={`p-6 text-white ${isTrackEngineer ? 'bg-gradient-to-br from-emerald-600 to-teal-600' : 'bg-gradient-to-br from-railway-red-500 to-railway-orange-500'}`}>
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
-                  <Train className="w-7 h-7" />
-                </div>
-                <div>
-                  <h2 className="font-bold text-lg">Train Rider</h2>
-                  <p className="text-sm opacity-80">Staff Portal</p>
-                </div>
+                <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center"><PortalIcon className="w-7 h-7" /></div>
+                <div><h2 className="font-bold text-lg">{portalTitle}</h2><p className="text-sm opacity-80">Railway Staff Portal</p></div>
               </div>
             </div>
 
-            {/* Navigation Items - Fixed position, stays at top */}
             <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
               {navigationItems.map((item) => {
                 const Icon = item.icon;
-                const isActive = location.pathname === item.path;
-
+                const active = location.pathname === item.path || (item.path !== '/train-rider' && location.pathname.startsWith(`${item.path}/`));
                 return (
                   <button
                     key={item.path}
-                    onClick={() => {
-                      navigate(item.path);
-                      setIsSidebarOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${
-                      isActive
-                        ? 'bg-railway-red-50 text-railway-red-700 font-medium border border-railway-red-200'
-                        : 'hover:bg-gray-50 text-gray-700 border border-transparent'
-                    }`}
+                    onClick={() => { navigate(item.path); setIsSidebarOpen(false); }}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${active ? 'bg-blue-50 text-blue-700 font-medium border border-blue-200' : 'hover:bg-gray-50 text-gray-700 border border-transparent'}`}
                   >
                     <Icon className="w-5 h-5" />
-                    <div className="text-left">
-                      <p className="text-sm font-medium">{item.name}</p>
-                      <p className="text-xs text-gray-500">{item.description}</p>
-                    </div>
-                    {isActive && <ChevronRight className="w-4 h-4 ml-auto" />}
+                    <div className="text-left flex-1"><p className="text-sm font-medium">{item.name}</p><p className="text-xs text-gray-500">{item.description}</p></div>
+                    {active && <ChevronRight className="w-4 h-4" />}
                   </button>
                 );
               })}
             </nav>
 
-            {/* User Info Section - Moved to bottom */}
-            {staffInfo && (
-              <div className="border-t border-gray-200 p-4 bg-gray-50">
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-white shadow-sm border border-gray-200">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-railway-red-500 to-railway-orange-500 flex items-center justify-center text-white font-bold text-sm">
-                    {staffInfo.staff_id ? staffInfo.staff_id.substring(0, 2).toUpperCase() : 'ST'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 truncate">
-                      {staffInfo.staff_name || staffInfo.staff_id}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getStaffRoleBadge(staffInfo?.role)}`}>
-                        {getStaffRoleLabel(staffInfo?.role)}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        ID: {staffInfo.staff_id}
-                      </span>
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleLogout}
-                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                    icon={<LogOut className="w-4 h-4" />}
-                  />
-                </div>
+            <div className="border-t border-gray-200 p-4 bg-gray-50">
+              <div className="p-3 rounded-xl bg-white border border-gray-200">
+                <p className="text-sm font-semibold text-gray-800">{user.full_name || staffInfo.staff_id}</p>
+                <p className="text-xs text-gray-500 mt-1">{getStaffRoleLabel(staffInfo.role)} · {staffInfo.staff_id}</p>
               </div>
-            )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Main Content */}
       <main className="p-4">
-        <Outlet context={{
-          user,
-          staffInfo,
-          currentAssignment,
-          connectionStatus,
-          batteryLevel
-        }} />
+        <Outlet context={{ user, staffInfo, currentAssignment, connectionStatus, batteryLevel }} />
       </main>
 
-      {/* Bottom Navigation (Mobile) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-lg border-t border-gray-200 shadow-lg z-50">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-gray-200 shadow-lg z-50">
         <div className="flex justify-around items-center h-16">
           {navigationItems.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
-
+            const active = location.pathname === item.path || (item.path !== '/train-rider' && location.pathname.startsWith(`${item.path}/`));
             return (
-              <button
-                key={item.path}
-                onClick={() => navigate(item.path)}
-                className={`flex flex-col items-center justify-center w-full h-full transition-colors ${
-                  isActive ? 'text-railway-red-500' : 'text-gray-400'
-                }`}
-              >
-                <Icon className="w-5 h-5" />
-                <span className="text-xs mt-1">{item.name.split(' ')[0]}</span>
+              <button key={item.path} onClick={() => navigate(item.path)} className={`flex flex-col items-center justify-center w-full h-full ${active ? 'text-blue-600' : 'text-gray-400'}`}>
+                <Icon className="w-5 h-5" /><span className="text-xs mt-1">{item.name}</span>
               </button>
             );
           })}

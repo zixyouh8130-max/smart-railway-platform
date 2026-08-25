@@ -15,6 +15,7 @@ import Settings from '@/pages/admin/Settings';
 import AdminLayout from '@/layouts/AdminLayout';
 import InspectionDashboard from '@/pages/Inspection/InspectionDashboard';
 import TrainMonitoringPage from '@/pages/admin/TrainMonitoringPage';
+import TrackIssuesAdminPage from '@/pages/admin/TrackIssuesAdminPage';
 import ProtectedRoute from '@/routes/ProtectedRoute';
 
 const AdminRoutes = () => (
@@ -73,6 +74,10 @@ const AdminRoutes = () => (
         <Route
           path="inspection"
           element={<InspectionDashboard />}
+        />
+        <Route
+          path="track-issues"
+          element={<TrackIssuesAdminPage />}
         />
         <Route
           path="settings"

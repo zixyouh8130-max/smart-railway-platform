@@ -21,3 +21,5 @@ from .train_rider_device import TrainRiderDevice
 from .train_staff_assignment import TrainStaffAssignment, AssignmentStatus
 from .train_stop import TrainStop
 from .user import User, UserRole
+
+from .track_issue import TrackIssue, TrackIssueActivity

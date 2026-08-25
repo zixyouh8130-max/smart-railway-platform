@@ -46,8 +46,12 @@ const StaffLoginScreen = () => {
       await AsyncStorage.setItem('user', JSON.stringify(user));
       await AsyncStorage.setItem('staffInfo', JSON.stringify(user.staff));
 
-      // Navigate to TrainRider Home
-      navigation.replace('TrainRiderHome');
+      // Route staff to the workspace for their current staff role.
+      if (user.staff.role === 'TRACK_ENGINEER') {
+        navigation.replace('TrackEngineerHome');
+      } else {
+        navigation.replace('TrainRiderHome');
+      }
     } catch (err) {
       console.error('Staff login error:', err);
       if (err.response?.status === 401) {
@@ -70,7 +74,7 @@ const StaffLoginScreen = () => {
           <View style={styles.logoContainer}>
             <Icon name="train" size={40} color="#fff" />
           </View>
-          <Text style={styles.title}>Train Rider</Text>
+          <Text style={styles.title}>Railway Staff</Text>
           <Text style={styles.subtitle}>ဝန်ထမ်းအကောင့်ဖြင့် ဝင်ရောက်ပါ</Text>
         </View>
 

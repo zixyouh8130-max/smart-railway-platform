@@ -4,9 +4,9 @@ import Button from '@/components/ui/button';
 
 const Footer = () => {
   const footerLinks = {
-    services: ['Online Booking', 'Live Tracking', 'Schedule', 'Cancellation', 'PNR Status'],
-    company: ['About Us', 'Careers', 'Press', 'Blog', 'Partners'],
-    support: ['Help Center', 'FAQs', 'Contact Us', 'Feedback', 'Accessibility'],
+    services: ['Online Booking', 'PNR Status'],
+    company: ['About Us','Blog', 'Partners'],
+    support: [],
   };
 
   return (
@@ -51,15 +51,15 @@ const Footer = () => {
             <div className="space-y-3">
               <div className="flex items-center space-x-3 text-sm">
                 <Mail className="w-4 h-4 text-accent-400" />
-                <span>support@railconnect.com</span>
+                <span>myanmarailways.npt@gmail.com</span>
               </div>
               <div className="flex items-center space-x-3 text-sm">
                 <Phone className="w-4 h-4 text-accent-400" />
-                <span>+1 (555) 123-4567</span>
+                <span> +95-53-24508</span>
               </div>
               <div className="flex items-center space-x-3 text-sm">
                 <MapPin className="w-4 h-4 text-accent-400" />
-                <span>123 Railway Street, NY 10001</span>
+                <span>Bogyoke Road, Pyay Township, Pyay District, Bago Region, Myanmar</span>
               </div>
             </div>
           </div>

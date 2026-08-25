@@ -4,7 +4,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Train, LayoutDashboard, Calendar, Route, Users, Settings,
   LogOut, Menu, X, ChevronDown, Bell, User, Shield, MapPin,
-  Search, AlertTriangle, Radio, TrainFront, Gauge, Signal
+  Search, AlertTriangle, Radio, TrainFront, Gauge, Signal, Wrench
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
@@ -42,10 +42,10 @@ const AdminLayout = () => {
       badge: null
     },
     {
-      icon: <MapPin className="w-5 h-5" />,
-      label: 'Stations',
-      path: '/admin/stations',
-      myanmarLabel: 'ဘူတာများ',
+      icon: <TrainFront className="w-5 h-5" />,
+      label: 'Trains',
+      path: '/admin/trains',
+      myanmarLabel: 'ရထားများ',
       badge: null
     },
     {
@@ -56,10 +56,10 @@ const AdminLayout = () => {
       badge: null
     },
     {
-      icon: <TrainFront className="w-5 h-5" />,
-      label: 'Trains',
-      path: '/admin/trains',
-      myanmarLabel: 'ရထားများ',
+      icon: <MapPin className="w-5 h-5" />,
+      label: 'Stations',
+      path: '/admin/stations',
+      myanmarLabel: 'ဘူတာများ',
       badge: null
     },
     {
@@ -67,6 +67,13 @@ const AdminLayout = () => {
       label: 'Schedules',
       path: '/admin/schedules',
       myanmarLabel: 'အချိန်ဇယား',
+      badge: null
+    },
+    {
+      icon: <Users className="w-5 h-5" />,
+      label: 'Users',
+      path: '/admin/users',
+      myanmarLabel: 'အသုံးပြုသူများ',
       badge: null
     },
     {
@@ -84,10 +91,10 @@ const AdminLayout = () => {
       badge: null
     },
     {
-      icon: <Users className="w-5 h-5" />,
-      label: 'Users',
-      path: '/admin/users',
-      myanmarLabel: 'အသုံးပြုသူများ',
+      icon: <Wrench className="w-5 h-5" />,
+      label: 'Track Issues',
+      path: '/admin/track-issues',
+      myanmarLabel: 'လမ်းပိုင်းပြုပြင်မှု',
       badge: null
     },
     {

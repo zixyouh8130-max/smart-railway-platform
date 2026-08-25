@@ -1353,18 +1353,11 @@ const InspectionDashboard = () => {
   }
 
   return (
-    <div className="space-y-6 p-4 md:p-6 bg-gray-50 min-h-screen">
+    <div className="space-y-6 p-4 md:p-6  min-h-screen">
       {/* Header */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
-              စမတ်ရထားလမ်း ဉာဏ်ရည်တုစနစ်
-            </p>
-            <h1 className="mt-1 text-2xl md:text-3xl font-bold text-slate-900 flex items-center gap-3">
-              <Shield className="w-8 h-8 text-blue-600" />
-              ရထားလမ်း စစ်ဆေးမှု ဒတ်ရှ်ဘုတ်
-            </h1>
             <p className="mt-1 text-sm text-slate-500">
               ချို့ယွင်းချက်ရှာဖွေတွေ့ရှိမှုများ၊ လမ်းကြောင်းတည်နေရာများနှင့် AI ထိန်းသိမ်းမှု အကြံပြုချက်များ
             </p>

@@ -18,7 +18,9 @@ import AdminRoutes from '@/routes/AdminRoutes';
 import TrainRiderLayout from '@/layouts/TrainRiderLayout';
 import LiveTrackingPage from '@/pages/TrainRider/LiveTrackingPage';
 import StaffLoginPage from '@/pages/TrainRider/StaffLoginPage';
-import TrainRiderHome from '@/pages/TrainRider/TrainRiderHome';
+import RoleAwareStaffHome from '@/pages/TrainRider/RoleAwareStaffHome';
+import TrackEngineerHome from '@/pages/TrainRider/TrackEngineerHome';
+import TrackEngineerIssuePage from '@/pages/TrainRider/TrackEngineerIssuePage';
 import ScheduleTab from '@/pages/TrainRider/ScheduleTab';
 import ProtectedRoute from '@/routes/ProtectedRoute';
 
@@ -83,16 +85,46 @@ export default function AppRouter() {
           >
             <Route
               index
-              element={<TrainRiderHome />}
+              element={<RoleAwareStaffHome />}
             />
             <Route
-              path="tracking"
-              element={<LiveTrackingPage />}
-            />
+              element={
+                <ProtectedRoute
+                  allowedStaffRoles={[
+                    'TRAIN_DRIVER',
+                    'ASSISTANT_DRIVER',
+                    'TRAIN_GUARD',
+                    'TICKET_CHECKER',
+                  ]}
+                />
+              }
+            >
+              <Route
+                path="tracking"
+                element={<LiveTrackingPage />}
+              />
+              <Route
+                path="schedule"
+                element={<ScheduleTab />}
+              />
+            </Route>
+
             <Route
-              path="schedule"
-              element={<ScheduleTab />}
-            />
+              element={
+                <ProtectedRoute
+                  allowedStaffRoles={['TRACK_ENGINEER']}
+                />
+              }
+            >
+              <Route
+                path="issues"
+                element={<TrackEngineerHome />}
+              />
+              <Route
+                path="issues/:issueId"
+                element={<TrackEngineerIssuePage />}
+              />
+            </Route>
           </Route>
         </Route>
 

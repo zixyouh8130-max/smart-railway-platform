@@ -12,6 +12,7 @@ import {
 export default function ProtectedRoute({
   allowedRoles = null,
   requireStaff = false,
+  allowedStaffRoles = null,
   redirectTo = '/login',
 }) {
   const {
@@ -56,6 +57,18 @@ export default function ProtectedRoute({
     return (
       <Navigate
         to={getDefaultPathForUser(user)}
+        replace
+      />
+    );
+  }
+
+  if (
+    allowedStaffRoles &&
+    !allowedStaffRoles.includes(user?.staff?.role)
+  ) {
+    return (
+      <Navigate
+        to="/train-rider"
         replace
       />
     );

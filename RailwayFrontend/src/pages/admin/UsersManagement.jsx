@@ -52,6 +52,7 @@ const UsersManagement = () => {
     { value: 'STATION_STAFF', label: 'Station Staff', icon: Building2 },
     { value: 'DISPATCHER', label: 'Dispatcher', icon: Briefcase },
     { value: 'MAINTENANCE', label: 'Maintenance', icon: Briefcase },
+    { value: 'TRACK_ENGINEER', label: 'Track Engineer', icon: Briefcase },
     { value: 'INSPECTOR', label: 'Inspector', icon: Shield },
   ];
 
@@ -244,6 +245,7 @@ const UsersManagement = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
+          <h1 className="text-2xl font-bold text-gray-900">အသုံးပြုသူများ စီမံခန့်ခွဲခြင်း</h1>
           <p className="text-gray-600 mt-1">စနစ်အသုံးပြုသူများနှင့် ဝန်ထမ်းများအား စီမံခန့်ခွဲပါ</p>
         </div>
         <Button 

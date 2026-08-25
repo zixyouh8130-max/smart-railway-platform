@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Trash2, GripVertical, Search, Loader, MapPin } from 'lucide-react';
+import { 
+  X, Plus, Trash2, GripVertical, Search, Loader, MapPin, 
+  Train, Route, Clock, DollarSign, CheckCircle, AlertCircle,
+  ArrowRight, Layers, Star, Info
+} from 'lucide-react';
 import Button from '@/components/ui/button';
 import stationsApi from '@/api/stations';
 import {
@@ -72,148 +76,191 @@ const SortableStation = ({
   const isLastStation = index === totalStations - 1;
   const isMiddleStation = !isFirstStation && !isLastStation;
 
+  const getStationBadge = () => {
+    if (isFirstStation) {
+      return {
+        label: 'စတင်ရာ',
+        bg: 'bg-emerald-100',
+        text: 'text-emerald-700',
+        icon: '🟢',
+        border: 'border-emerald-200'
+      };
+    }
+    if (isLastStation) {
+      return {
+        label: 'အဆုံးသတ်',
+        bg: 'bg-red-100',
+        text: 'text-red-700',
+        icon: '🔴',
+        border: 'border-red-200'
+      };
+    }
+    return {
+      label: 'ရပ်နားရာ',
+      bg: 'bg-blue-100',
+      text: 'text-blue-700',
+      icon: '🔵',
+      border: 'border-blue-200'
+    };
+  };
+
+  const badge = getStationBadge();
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-start space-x-2 p-3 bg-gray-50 rounded-lg ${
-        isDragging ? 'shadow-lg ring-2 ring-blue-400' : ''
+      className={`group rounded-xl border-2 p-4 transition-all duration-200 ${
+        isDragging 
+          ? 'border-blue-400 shadow-lg shadow-blue-100 scale-[1.02]' 
+          : isFirstStation 
+          ? 'border-emerald-200 bg-emerald-50/30 hover:bg-emerald-50/50' 
+          : isLastStation 
+          ? 'border-red-200 bg-red-50/30 hover:bg-red-50/50' 
+          : 'border-gray-200 bg-white hover:border-blue-200 hover:shadow-md'
       }`}
     >
-      <div className="flex items-center pt-3">
-        <div
-          {...attributes}
-          {...listeners}
-          className="cursor-grab active:cursor-grabbing hover:bg-gray-200 p-1 rounded transition-colors"
-        >
-          <GripVertical className="w-4 h-4 text-gray-400" />
-        </div>
-        <span className="ml-1 text-xs font-medium text-gray-500 w-6">{index + 1}.</span>
-        {isFirstStation && (
-          <span className="ml-1 text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">Origin</span>
-        )}
-        {isLastStation && (
-          <span className="ml-1 text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">Destination</span>
-        )}
-        {isMiddleStation && (
-          <span className="ml-1 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Stop</span>
-        )}
-      </div>
-
-      <div className="flex-1 space-y-2">
-        {/* Station Search/Autocomplete */}
-        <div className="relative">
-          <div className="flex items-center">
-            <Search className="absolute left-3 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search station or type custom name..."
-              value={station.station_name}
-              onChange={(e) => {
-                onChange(index, 'station_name', e.target.value);
-                onSearch(index, e.target.value);
-              }}
-              onFocus={() => {
-                if (station.station_name) onSearch(index, station.station_name);
-              }}
-              className={`w-full pl-10 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                errors?.stationDetails?.[index]?.station_name ? 'border-red-500' : 'border-gray-300'
-              }`}
-            />
+      <div className="flex items-start gap-3">
+        {/* Drag Handle & Index */}
+        <div className="flex flex-col items-center pt-1">
+          <div
+            {...attributes}
+            {...listeners}
+            className={`cursor-grab active:cursor-grabbing p-1.5 rounded-lg transition-colors ${
+              isDragging ? 'bg-blue-100' : 'hover:bg-gray-100'
+            }`}
+          >
+            <GripVertical className="w-4 h-4 text-gray-400" />
           </div>
+          <span className="mt-1 text-xs font-bold text-gray-500 w-6 text-center">
+            #{index + 1}
+          </span>
+        </div>
 
-          {stationDropdowns[index] && (
-            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-              {getFilteredStations(index).length > 0 ? (
-                getFilteredStations(index).map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => handleStationSelect(index, s)}
-                    className="w-full text-left px-4 py-2 hover:bg-blue-50 transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-gray-900">{s.name}</span>
-                      {s.code && <span className="text-xs text-gray-500 font-mono">{s.code}</span>}
+        <div className="flex-1 space-y-3">
+          {/* Station Badge & Name Input */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${badge.bg} ${badge.text} border ${badge.border}`}>
+              {badge.icon} {badge.label}
+            </span>
+            
+            <div className="relative flex-1 min-w-[180px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder={isFirstStation ? "စတင်ရာ ဘူတာ ရှာပါ..." : isLastStation ? "အဆုံးသတ် ဘူတာ ရှာပါ..." : "ဘူတာအမည် ရှာပါ..."}
+                value={station.station_name}
+                onChange={(e) => {
+                  onChange(index, 'station_name', e.target.value);
+                  onSearch(index, e.target.value);
+                }}
+                onFocus={() => {
+                  if (station.station_name) onSearch(index, station.station_name);
+                }}
+                className={`w-full pl-9 pr-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
+                  errors?.stationDetails?.[index]?.station_name 
+                    ? 'border-red-300 focus:ring-red-400' 
+                    : 'border-gray-200 focus:border-blue-400'
+                }`}
+              />
+              
+              {stationDropdowns[index] && (
+                <div className="absolute z-20 w-full mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+                  {getFilteredStations(index).length > 0 ? (
+                    getFilteredStations(index).map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => handleStationSelect(index, s)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-900">{s.name}</span>
+                          {s.code && <span className="text-xs text-gray-500 font-mono">{s.code}</span>}
+                        </div>
+                        {s.city && <p className="text-xs text-gray-400 mt-0.5">{s.city}</p>}
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-4 py-3 text-sm text-gray-500">
+                      {stationSearchTerms[index]
+                        ? 'ဘူတာ မတွေ့ပါ။ ဆက်ရိုက်ပြီး ကိုယ်တိုင်ထည့်ပါ။'
+                        : 'ဘူတာ ရှာရန် စတင်ရိုက်ပါ...'}
                     </div>
-                    {s.city && <p className="text-xs text-gray-500">{s.city}</p>}
-                  </button>
-                ))
-              ) : (
-                <div className="px-4 py-2 text-sm text-gray-500">
-                  {stationSearchTerms[index]
-                    ? 'No stations found. Type to create custom station.'
-                    : 'Type to search stations...'}
+                  )}
                 </div>
               )}
             </div>
-          )}
+          </div>
+
+          {/* Station Details */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                ဘူတာကုဒ်
+              </label>
+              <input
+                type="text"
+                placeholder="ဥပမာ - YGN"
+                value={station.station_code || ''}
+                onChange={(e) => onChange(index, 'station_code', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                အကွာအဝေး (မိုင်)
+              </label>
+              <input
+                type="number"
+                placeholder="0.0"
+                value={station.distance_from_origin || ''}
+                onChange={(e) => onChange(index, 'distance_from_origin', parseFloat(e.target.value) || 0)}
+                step="0.1"
+                min="0"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              />
+            </div>
+          </div>
+
+          {/* Major Stop Checkbox */}
+          <div className="flex items-center gap-2 pt-1">
+            <input
+              type="checkbox"
+              id={`major-stop-${index}`}
+              checked={station.is_major_stop || false}
+              onChange={(e) => onChange(index, 'is_major_stop', e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 focus:ring-2 border-gray-300"
+            />
+            <label htmlFor={`major-stop-${index}`} className="text-sm text-gray-600 flex items-center gap-1.5">
+              <Star className="w-3.5 h-3.5 text-amber-500" />
+              အဓိက ရပ်နားရာ
+            </label>
+          </div>
 
           {errors?.stationDetails?.[index]?.station_name && (
-            <p className="mt-1 text-xs text-red-600">{errors.stationDetails[index].station_name}</p>
+            <p className="text-xs text-red-600 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3" />
+              {errors.stationDetails[index].station_name}
+            </p>
           )}
         </div>
 
-        {/* Station Details */}
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Station Code (optional)</label>
-            <input
-              type="text"
-              placeholder="e.g., YGN"
-              value={station.station_code || ''}
-              onChange={(e) => onChange(index, 'station_code', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Distance from Origin (mi)</label>
-            <input
-              type="number"
-              placeholder="0.0"
-              value={station.distance_from_origin || ''}
-              onChange={(e) => onChange(index, 'distance_from_origin', parseFloat(e.target.value) || 0)}
-              step="0.1"
-              min="0"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* Major Stop Checkbox */}
-        <div className="flex items-center gap-2 pt-1">
-          <input
-            type="checkbox"
-            id={`major-stop-${index}`}
-            checked={station.is_major_stop || false}
-            onChange={(e) => onChange(index, 'is_major_stop', e.target.checked)}
-            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-          />
-          <label htmlFor={`major-stop-${index}`} className="text-xs text-gray-600">
-            Major Stop
-          </label>
-        </div>
-
-        {/* Station type indicator */}
-        <div className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-          <MapPin className="w-3 h-3" />
-          {isFirstStation && 'Origin - trains depart from here'}
-          {isLastStation && 'Destination - trains terminate here'}
-          {isMiddleStation && 'Intermediate stop'}
-        </div>
+        {/* Remove Button */}
+        <button
+          type="button"
+          onClick={() => onRemove(index)}
+          className={`p-2 rounded-xl transition-all duration-200 ${
+            (isFirstStation || isLastStation) 
+              ? 'text-gray-300 cursor-not-allowed' 
+              : 'text-red-400 hover:bg-red-50 hover:text-red-600 hover:scale-110'
+          }`}
+          disabled={isFirstStation || isLastStation}
+          title={isFirstStation ? 'စတင်ရာဘူတာကို မဖယ်ရှားနိုင်ပါ' : isLastStation ? 'အဆုံးသတ်ဘူတာကို မဖယ်ရှားနိုင်ပါ' : 'ဘူတာ ဖယ်ရှားရန်'}
+        >
+          <Trash2 className={`w-4 h-4 ${(isFirstStation || isLastStation) ? 'opacity-30' : ''}`} />
+        </button>
       </div>
-
-      <button
-        type="button"
-        onClick={() => onRemove(index)}
-        className={`p-2 rounded-lg transition-colors ${
-          (isFirstStation || isLastStation) ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50'
-        }`}
-        disabled={isFirstStation || isLastStation}
-        title={isFirstStation ? 'Cannot remove origin' : isLastStation ? 'Cannot remove destination' : 'Remove station'}
-      >
-        <Trash2 className={`w-4 h-4 ${(isFirstStation || isLastStation) ? 'opacity-30' : ''}`} />
-      </button>
     </div>
   );
 };
@@ -344,7 +391,7 @@ const RouteFormModal = ({ isOpen, onClose, onSubmit, route }) => {
   const removeStation = (index) => {
     if (index === 0 || index === formData.stations.length - 1) return;
     if (formData.stations.length <= 2) {
-      setErrors((prev) => ({ ...prev, stations: 'At least 2 stations are required' }));
+      setErrors((prev) => ({ ...prev, stations: 'အနည်းဆုံး ဘူတာ ၂ ခု လိုအပ်ပါသည်' }));
       return;
     }
     const updatedStations = formData.stations
@@ -380,22 +427,22 @@ const RouteFormModal = ({ isOpen, onClose, onSubmit, route }) => {
 
   const validateForm = () => {
     const newErrors = {};
-    if (!formData.origin.trim()) newErrors.origin = 'Origin city is required';
-    if (!formData.destination.trim()) newErrors.destination = 'Destination city is required';
+    if (!formData.origin.trim()) newErrors.origin = 'စတင်ရာမြို့ ထည့်သွင်းရန် လိုအပ်ပါသည်';
+    if (!formData.destination.trim()) newErrors.destination = 'ဦးတည်ရာမြို့ ထည့်သွင်းရန် လိုအပ်ပါသည်';
     if (formData.origin.trim() && formData.destination.trim() &&
         formData.origin.trim().toLowerCase() === formData.destination.trim().toLowerCase()) {
-      newErrors.destination = 'Origin and destination must be different';
+      newErrors.destination = 'စတင်ရာနှင့် ဦးတည်ရာ မတူညီရပါ';
     }
     const stationErrors = [];
     formData.stations.forEach((station, index) => {
       if (!station.station_name.trim() && !station.station_id) {
-        stationErrors[index] = { station_name: 'Station name is required' };
+        stationErrors[index] = { station_name: 'ဘူတာအမည် ထည့်သွင်းရန် လိုအပ်ပါသည်' };
       }
     });
     if (stationErrors.length > 0) newErrors.stationDetails = stationErrors;
     const stationIds = formData.stations.map((s) => s.station_id || s.station_name.toLowerCase()).filter(Boolean);
     if (new Set(stationIds).size !== stationIds.length) {
-      newErrors.stations = 'Duplicate stations are not allowed';
+      newErrors.stations = 'ဘူတာတူများ ထည့်သွင်းခွင့်မရှိပါ';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -438,13 +485,23 @@ const RouteFormModal = ({ isOpen, onClose, onSubmit, route }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white flex items-center justify-between p-6 border-b border-gray-200 rounded-t-2xl">
-          <h2 className="text-xl font-bold text-gray-900">
-            {route ? 'Edit Route' : 'Add New Route'}
-          </h2>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+    <div className="fixed inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-gray-200/50">
+        {/* Header */}
+        <div className="sticky top-0 bg-white/95 backdrop-blur-sm flex items-center justify-between p-6 border-b border-gray-200 rounded-t-2xl z-10">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <Route className="w-6 h-6 text-blue-600" />
+              {route ? 'လမ်းကြောင်း ပြင်ဆင်ရန်' : 'လမ်းကြောင်းအသစ် ထည့်ရန်'}
+            </h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {route ? 'လမ်းကြောင်းအချက်အလက်များကို ပြင်ဆင်ပါ' : 'ခရီးစဉ်လမ်းကြောင်းအသစ် ဖန်တီးပါ'}
+            </p>
+          </div>
+          <button 
+            onClick={onClose} 
+            className="p-2 hover:bg-gray-100 rounded-xl transition-all duration-200 hover:rotate-90"
+          >
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
@@ -452,101 +509,129 @@ const RouteFormModal = ({ isOpen, onClose, onSubmit, route }) => {
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           {/* Error display */}
           {errors.submit && (
-            <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-              {typeof errors.submit === 'string' ? errors.submit : extractError(errors.submit)}
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 animate-shake">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-red-800">{typeof errors.submit === 'string' ? errors.submit : extractError(errors.submit)}</p>
+                <p className="text-xs text-red-600 mt-0.5">ကျေးဇူးပြု၍ ပြန်လည်ကြိုးစားပါ</p>
+              </div>
             </div>
           )}
 
           {/* Basic Info */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Origin City <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text" name="origin" value={formData.origin} onChange={handleChange}
-                placeholder="e.g., Yangon"
-                className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.origin ? 'border-red-500' : 'border-gray-300'}`}
-              />
-              {errors.origin && <p className="mt-1 text-sm text-red-600">{errors.origin}</p>}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-5 border border-blue-100">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                  စတင်ရာမြို့ <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text" name="origin" value={formData.origin} onChange={handleChange}
+                  placeholder="ဥပမာ - ရန်ကုန်"
+                  className={`w-full px-4 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white ${
+                    errors.origin ? 'border-red-300 focus:ring-red-400' : 'border-gray-200'
+                  }`}
+                />
+                {errors.origin && <p className="mt-1.5 text-sm text-red-600 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{errors.origin}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                  ဦးတည်ရာမြို့ <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text" name="destination" value={formData.destination} onChange={handleChange}
+                  placeholder="ဥပမာ - မန္တလေး"
+                  className={`w-full px-4 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white ${
+                    errors.destination ? 'border-red-300 focus:ring-red-400' : 'border-gray-200'
+                  }`}
+                />
+                {errors.destination && <p className="mt-1.5 text-sm text-red-600 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{errors.destination}</p>}
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Destination City <span className="text-red-500">*</span>
+
+            <div className="mt-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                လမ်းကြောင်းအမည်
               </label>
               <input
-                type="text" name="destination" value={formData.destination} onChange={handleChange}
-                placeholder="e.g., Mandalay"
-                className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.destination ? 'border-red-500' : 'border-gray-300'}`}
+                type="text" name="name" value={formData.name} onChange={handleChange}
+                placeholder="ဥပမာ - ရန်ကုန်-မန္တလေး အမြန်ရထား"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white"
               />
-              {errors.destination && <p className="mt-1 text-sm text-red-600">{errors.destination}</p>}
+              <p className="mt-1 text-xs text-gray-400">လွတ်ထားပါက စတင်ရာနှင့် ဦးတည်ရာမှ အလိုအလျောက် ဖန်တီးပေးမည်</p>
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Route Name</label>
-            <input
-              type="text" name="name" value={formData.name} onChange={handleChange}
-              placeholder="e.g., Yangon - Mandalay Express"
-              className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                errors.name ? 'border-red-500' : 'border-gray-300'}`}
-            />
-            <p className="mt-1 text-xs text-gray-500">Leave blank to auto-generate from origin and destination</p>
-          </div>
-
+          {/* Route Details */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Distance (mi)</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-blue-500" />
+                အကွာအဝေး (မိုင်)
+              </label>
               <input type="number" name="distance" value={formData.distance} onChange={handleChange}
                 placeholder="620" step="0.1" min="0"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Duration</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-blue-500" />
+                ကြာချိန်
+              </label>
               <input type="text" name="duration" value={formData.duration} onChange={handleChange}
-                placeholder="e.g., 8 hours"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                placeholder="ဥပမာ - ၈ နာရီ"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Base Price (MMK)</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                <DollarSign className="w-4 h-4 text-blue-500" />
+                အခြေခံခရီးစဉ်စရိတ် (ကျပ်)
+              </label>
               <input type="number" name="base_price" value={formData.base_price} onChange={handleChange}
                 placeholder="15000" step="100" min="0"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white" />
             </div>
           </div>
 
+          {/* Status */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-1.5">အခြေအနေ</label>
             <select name="status" value={formData.status} onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="ACTIVE">Active</option>
-              <option value="INACTIVE">Inactive</option>
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white">
+              <option value="ACTIVE">🟢 အသက်ဝင်</option>
+              <option value="INACTIVE">🔴 မသက်ဝင်</option>
             </select>
           </div>
 
           {/* Stations */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <label className="block text-sm font-medium text-gray-700">
-                Stations <span className="text-red-500">*</span>
-                <span className="text-xs text-gray-400 ml-2">
-                  (Schedule times are configured per train)
-                </span>
-              </label>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <label className="block text-lg font-semibold text-gray-900">
+                  ဘူတာများ <span className="text-red-500">*</span>
+                </label>
+                <p className="text-sm text-gray-500">
+                  ရထားတစ်စီးချင်းအလိုက် အချိန်ဇယား သတ်မှတ်နိုင်သည်
+                </p>
+              </div>
               <Button type="button" onClick={addStation}
-                className="bg-green-600 hover:bg-green-700 text-white text-sm py-1 px-3">
-                <Plus className="w-4 h-4 mr-1" /> Add Stop
+                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl px-4 py-2 shadow-md shadow-emerald-200">
+                <Plus className="w-4 h-4 mr-1.5" />
+                ရပ်နားရာ ထည့်မည်
               </Button>
             </div>
 
-            <p className="text-xs text-gray-500 mb-3">
-              Drag the grip handle <GripVertical className="w-3 h-3 inline" /> to reorder stations. 
-              Origin and destination cannot be removed or moved.
-            </p>
+            <div className="text-xs text-gray-400 mb-3 flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+              <GripVertical className="w-3 h-3" />
+              ဆွဲယူ၍ ဘူတာများကို ပြန်လည်စီစဉ်နိုင်သည်။ စတင်ရာနှင့် အဆုံးသတ်ဘူတာများကို ရွှေ့၍မရပါ။
+            </div>
 
-            {errors.stations && <p className="mb-2 text-sm text-red-600">{errors.stations}</p>}
+            {errors.stations && (
+              <p className="mb-3 text-sm text-red-600 flex items-center gap-1">
+                <AlertCircle className="w-4 h-4" />
+                {errors.stations}
+              </p>
+            )}
 
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <SortableContext
@@ -567,23 +652,55 @@ const RouteFormModal = ({ isOpen, onClose, onSubmit, route }) => {
                 </div>
               </SortableContext>
             </DndContext>
+
+            <div className="mt-4 p-3 bg-blue-50/50 rounded-xl border border-blue-100">
+              <p className="text-xs text-blue-700 flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5" />
+                စတင်ရာနှင့် အဆုံးသတ်ဘူတာများအပြင် ကြားခံဘူတာများကို ထည့်သွင်းနိုင်သည်။
+                အဓိကရပ်နားရာများကို အမှန်ခြစ်ပေးပါ။
+              </p>
+            </div>
           </div>
 
           {/* Action Buttons */}
-          <div className="flex space-x-3 pt-4 border-t border-gray-200">
+          <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3 pt-4 border-t border-gray-200">
             <Button type="button" onClick={onClose}
-              className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700">Cancel</Button>
+              className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl font-medium">
+              မလုပ်တော့ပါ
+            </Button>
             <Button type="submit" disabled={loading}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white">
+              className="flex-1 bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-700 hover:to-indigo-700 text-white py-3 rounded-xl font-medium shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed">
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
-                  <Loader className="w-4 h-4 animate-spin" /> Saving...
+                  <Loader className="w-5 h-5 animate-spin" />
+                  သိမ်းဆည်းနေသည်...
                 </span>
-              ) : route ? 'Update Route' : 'Create Route'}
+              ) : route ? (
+                <span className="flex items-center justify-center gap-2">
+                  <CheckCircle className="w-5 h-5" />
+                  လမ်းကြောင်း ပြင်ဆင်မည်
+                </span>
+              ) : (
+                <span className="flex items-center justify-center gap-2">
+                  <Plus className="w-5 h-5" />
+                  လမ်းကြောင်းအသစ် ဖန်တီးမည်
+                </span>
+              )}
             </Button>
           </div>
         </form>
       </div>
+
+      <style >{`
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-6px); }
+          75% { transform: translateX(6px); }
+        }
+        .animate-shake {
+          animation: shake 0.3s ease-in-out;
+        }
+      `}</style>
     </div>
   );
 };
