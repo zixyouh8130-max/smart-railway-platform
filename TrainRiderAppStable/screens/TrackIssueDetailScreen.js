@@ -18,75 +18,88 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import trackIssuesApi from '../api/trackIssues';
 import { requestLocationPermission } from '../utils/locationPermission';
 
-const STATUS_COLORS = {
-  OPEN: '#dc2626',
-  ACKNOWLEDGED: '#2563eb',
-  INSPECTING: '#0891b2',
-  REPAIRING: '#d97706',
-  VERIFYING: '#7c3aed',
-  RESOLVED: '#059669',
-  BLOCKED: '#4b5563',
-  REOPENED: '#ea580c',
+const CASE_COLORS = {
+  OPEN: '#dc2626', ACKNOWLEDGED: '#2563eb', IN_PROGRESS: '#0891b2', VERIFYING: '#7c3aed',
+  COMPLETED: '#059669', BLOCKED: '#4b5563', REOPENED: '#ea580c',
 };
 
-const TRANSITIONS = {
+const CASE_TRANSITIONS = {
   OPEN: ['ACKNOWLEDGED', 'BLOCKED'],
-  ACKNOWLEDGED: ['INSPECTING', 'BLOCKED'],
-  INSPECTING: ['REPAIRING', 'VERIFYING', 'BLOCKED'],
-  REPAIRING: ['VERIFYING', 'BLOCKED'],
-  VERIFYING: ['RESOLVED', 'REPAIRING', 'BLOCKED'],
-  BLOCKED: ['ACKNOWLEDGED', 'INSPECTING'],
-  REOPENED: ['ACKNOWLEDGED', 'INSPECTING', 'BLOCKED'],
-  RESOLVED: [],
+  ACKNOWLEDGED: ['IN_PROGRESS', 'BLOCKED'],
+  IN_PROGRESS: ['VERIFYING', 'BLOCKED'],
+  VERIFYING: ['COMPLETED', 'IN_PROGRESS', 'BLOCKED'],
+  BLOCKED: ['ACKNOWLEDGED', 'IN_PROGRESS'],
+  REOPENED: ['IN_PROGRESS', 'BLOCKED'],
+  COMPLETED: [],
 };
 
-const statusLabel = (value) => String(value || '').replace(/_/g, ' ');
+const VERIFICATION_OPTIONS = [
+  ['CONFIRMED', 'Confirmed'],
+  ['PARTIALLY_CONFIRMED', 'Partially confirmed'],
+  ['NOT_CONFIRMED', 'Not confirmed / false positive'],
+  ['UNABLE_TO_VERIFY', 'Unable to verify'],
+];
 
-const formatDateTime = (value) => {
+const MAINTENANCE_OPTIONS = [
+  ['NO_ACTION_REQUIRED', 'No action required'],
+  ['REPAIR_REQUIRED', 'Repair required'],
+  ['REPAIR_IN_PROGRESS', 'Repair in progress'],
+  ['REPAIR_COMPLETED', 'Repair completed'],
+  ['FOLLOW_UP_REQUIRED', 'Follow-up required'],
+];
+
+const label = (value) => String(value || '—').replace(/_/g, ' ');
+const formatDate = (value) => {
   if (!value) return '—';
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
 };
 
-const safeText = (value) => {
-  if (value == null) return 'Not available';
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
+const priorityRank = (value) => {
+  const text = String(value || '').toLowerCase();
+  if (text.includes('critical') || text.includes('urgent')) return 0;
+  if (text.includes('priority') || text.includes('high')) return 1;
+  if (text.includes('monitor') || text.includes('medium')) return 2;
+  return 3;
 };
 
 const TrackIssueDetailScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const issueId = route.params?.issueId;
+  const caseId = route.params?.caseId || route.params?.issueId;
 
-  const [issue, setIssue] = useState(null);
+  const [inspectionCase, setInspectionCase] = useState(null);
+  const [selectedIssueId, setSelectedIssueId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [locationResult, setLocationResult] = useState(null);
-  const [statusNote, setStatusNote] = useState('');
-  const [comment, setComment] = useState('');
-  const [commentKind, setCommentKind] = useState('UPDATE');
+  const [caseNote, setCaseNote] = useState('');
   const [verificationStatus, setVerificationStatus] = useState('CONFIRMED');
   const [verificationNote, setVerificationNote] = useState('');
+  const [maintenanceStatus, setMaintenanceStatus] = useState('PENDING');
+  const [maintenanceNote, setMaintenanceNote] = useState('');
+  const [caseComment, setCaseComment] = useState('');
+  const [findingComment, setFindingComment] = useState('');
 
   const load = useCallback(async (refresh = false) => {
-    if (!issueId) return;
+    if (!caseId) return;
     if (refresh) setRefreshing(true);
     try {
-      const data = await trackIssuesApi.getById(issueId);
-      setIssue(data);
+      const data = await trackIssuesApi.getById(caseId);
+      setInspectionCase(data);
+      setSelectedIssueId((previous) => {
+        if (previous && data.issues?.some((item) => item.id === previous)) return previous;
+        const next = (data.issues || []).find((item) => !item.checklist_complete);
+        return next?.id || data.issues?.[0]?.id || null;
+      });
     } catch (error) {
-      Alert.alert('Could not load issue', error.response?.data?.detail || 'Please try again.');
+      Alert.alert('Could not load case', error.response?.data?.detail || 'Please try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [issueId]);
+  }, [caseId]);
 
   useEffect(() => {
     load();
@@ -94,391 +107,243 @@ const TrackIssueDetailScreen = () => {
     return unsubscribe;
   }, [load, navigation]);
 
-  const nextStatuses = useMemo(
-    () => TRANSITIONS[issue?.status] || [],
-    [issue?.status],
+  const selectedIssue = useMemo(
+    () => inspectionCase?.issues?.find((item) => item.id === selectedIssueId) || null,
+    [inspectionCase, selectedIssueId],
   );
 
+  useEffect(() => {
+    if (!selectedIssue) return;
+    setVerificationStatus(selectedIssue.field_verification_status === 'NOT_CHECKED' ? 'CONFIRMED' : selectedIssue.field_verification_status);
+    setVerificationNote(selectedIssue.field_verification_note || '');
+    setMaintenanceStatus(selectedIssue.maintenance_status || 'PENDING');
+    setMaintenanceNote(selectedIssue.maintenance_note || '');
+    setLocationResult(null);
+  }, [selectedIssueId, selectedIssue?.updated_at]);
+
+  const sortedIssues = useMemo(() => [...(inspectionCase?.issues || [])].sort((a, b) => {
+    if (a.checklist_complete !== b.checklist_complete) return a.checklist_complete ? 1 : -1;
+    const rank = priorityRank(a.ai_priority) - priorityRank(b.ai_priority);
+    if (rank !== 0) return rank;
+    return Number(a.distance_from_start_miles ?? 99999) - Number(b.distance_from_start_miles ?? 99999);
+  }), [inspectionCase?.issues]);
+
   const claim = async () => {
-    setActionLoading(true);
+    setBusy(true);
     try {
-      const updated = await trackIssuesApi.claim(issueId);
-      setIssue(updated);
-      Alert.alert('Claimed', 'This issue is now assigned to you.');
+      setInspectionCase(await trackIssuesApi.claim(caseId));
+      Alert.alert('Case claimed', 'The complete inspection case is now assigned to you.');
     } catch (error) {
-      Alert.alert('Could not claim', error.response?.data?.detail || 'Another engineer may have claimed it.');
-    } finally {
-      setActionLoading(false);
-    }
+      Alert.alert('Could not claim case', error.response?.data?.detail || 'Another engineer may have claimed it.');
+    } finally { setBusy(false); }
   };
 
-  const openDefectMap = async () => {
-    if (issue?.latitude == null || issue?.longitude == null) return;
-    const lat = Number(issue.latitude);
-    const lon = Number(issue.longitude);
-    const url = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=18/${lat}/${lon}`;
-    try {
-      await Linking.openURL(url);
-    } catch (error) {
-      Alert.alert('Map unavailable', 'Could not open the defect location in the map application.');
+  const changeCaseStatus = async (nextStatus) => {
+    if (['BLOCKED', 'COMPLETED'].includes(nextStatus) && !caseNote.trim()) {
+      Alert.alert('Note required', nextStatus === 'COMPLETED' ? 'Add a completion summary.' : 'Explain why this case is blocked.');
+      return;
     }
+    setBusy(true);
+    try {
+      setInspectionCase(await trackIssuesApi.updateStatus(caseId, nextStatus, caseNote.trim() || null));
+      setCaseNote('');
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      Alert.alert('Could not update case', typeof detail === 'string' ? detail : detail?.message || 'The checklist may still have incomplete findings.');
+    } finally { setBusy(false); }
   };
 
   const checkLocation = async () => {
+    if (!selectedIssue) return;
     const granted = await requestLocationPermission();
     if (!granted) {
-      Alert.alert('Location required', 'Location permission is needed to compare your position with the AI finding.');
+      Alert.alert('Location required', 'Location permission is needed to compare your position with this AI finding.');
       return;
     }
-
-    setActionLoading(true);
+    setBusy(true);
     Geolocation.getCurrentPosition(
       async (position) => {
         try {
           const result = await trackIssuesApi.checkLocation(
-            issueId,
+            caseId,
+            selectedIssue.id,
             position.coords.latitude,
             position.coords.longitude,
             position.coords.accuracy,
           );
           setLocationResult(result);
-          if (result.gps_reliable === false) {
-            Alert.alert('GPS accuracy too low', 'Move to an open area and retry before treating this as an on-site verification.');
-          }
+          if (result.gps_reliable === false) Alert.alert('GPS accuracy too low', 'Move to an open area and retry before treating this as an on-site verification.');
           await load();
         } catch (error) {
           Alert.alert('Location check failed', error.response?.data?.detail || 'Please try again.');
-        } finally {
-          setActionLoading(false);
-        }
+        } finally { setBusy(false); }
       },
-      (error) => {
-        setActionLoading(false);
-        Alert.alert('Location error', error.message);
-      },
+      (error) => { setBusy(false); Alert.alert('Location error', error.message); },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
     );
   };
 
-  const claimIssue = async () => {
-    setActionLoading(true);
+  const openMap = async () => {
+    if (selectedIssue?.latitude == null || selectedIssue?.longitude == null) return;
+    const lat = Number(selectedIssue.latitude);
+    const lon = Number(selectedIssue.longitude);
     try {
-      const detail = await trackIssuesApi.claim(issueId);
-      setIssue(detail);
-      Alert.alert('Claimed', 'This issue is now assigned to you.');
-    } catch (error) {
-      Alert.alert('Could not claim issue', error.response?.data?.detail || 'Another engineer may already have claimed it.');
-    } finally {
-      setActionLoading(false);
+      await Linking.openURL(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=18/${lat}/${lon}`);
+    } catch {
+      Alert.alert('Map unavailable', 'Could not open the defect location.');
     }
   };
 
-  const saveFieldVerification = async () => {
-    if (!verificationNote.trim()) {
-      Alert.alert('Observation required', 'Describe what you physically observed before saving verification.');
+  const saveVerification = async () => {
+    if (!selectedIssue) return;
+    if (verificationNote.trim().length < 3) {
+      Alert.alert('Observation required', 'Describe what you physically observed.');
       return;
     }
-    setActionLoading(true);
+    setBusy(true);
     try {
-      const updated = await trackIssuesApi.updateFieldVerification(issueId, verificationStatus, verificationNote.trim());
-      setIssue(updated);
-      setVerificationNote('');
+      setInspectionCase(await trackIssuesApi.verifyFinding(caseId, selectedIssue.id, verificationStatus, verificationNote.trim()));
     } catch (error) {
-      Alert.alert('Verification failed', error.response?.data?.detail || 'Please try again.');
-    } finally {
-      setActionLoading(false);
-    }
+      Alert.alert('Could not save verification', error.response?.data?.detail || 'Please try again.');
+    } finally { setBusy(false); }
   };
 
-  const updateStatus = async (nextStatus) => {
-    if (['BLOCKED', 'RESOLVED'].includes(nextStatus) && !statusNote.trim()) {
-      Alert.alert(
-        nextStatus === 'BLOCKED' ? 'Block reason required' : 'Resolution note required',
-        nextStatus === 'BLOCKED'
-          ? 'Describe what is preventing the work from continuing.'
-          : 'Describe what was fixed (or why no repair was required) and how it was verified.',
-      );
+  const saveMaintenance = async (target = maintenanceStatus) => {
+    if (!selectedIssue) return;
+    if (['NO_ACTION_REQUIRED', 'REPAIR_COMPLETED', 'FOLLOW_UP_REQUIRED'].includes(target) && !maintenanceNote.trim()) {
+      Alert.alert('Note required', 'Describe the final maintenance/follow-up outcome.');
       return;
     }
-
-    setActionLoading(true);
+    setBusy(true);
     try {
-      const updated = await trackIssuesApi.updateStatus(
-        issueId,
-        nextStatus,
-        statusNote.trim() || null,
-      );
-      setIssue(updated);
-      setStatusNote('');
+      setInspectionCase(await trackIssuesApi.updateMaintenance(caseId, selectedIssue.id, target, maintenanceNote.trim() || null));
+      setMaintenanceStatus(target);
     } catch (error) {
-      Alert.alert('Status update failed', error.response?.data?.detail || 'Please try again.');
-    } finally {
-      setActionLoading(false);
-    }
+      Alert.alert('Could not update maintenance', error.response?.data?.detail || 'Check the field-verification result and workflow order.');
+    } finally { setBusy(false); }
   };
 
-  const sendComment = async () => {
-    if (!comment.trim()) return;
-    setActionLoading(true);
+  const sendCaseComment = async () => {
+    if (!caseComment.trim()) return;
+    setBusy(true);
     try {
-      const updated = await trackIssuesApi.addComment(
-        issueId,
-        comment.trim(),
-        commentKind,
-      );
-      setIssue(updated);
-      setComment('');
-      setCommentKind('UPDATE');
+      setInspectionCase(await trackIssuesApi.addCaseComment(caseId, caseComment.trim(), 'UPDATE'));
+      setCaseComment('');
     } catch (error) {
       Alert.alert('Could not send update', error.response?.data?.detail || 'Please try again.');
-    } finally {
-      setActionLoading(false);
-    }
+    } finally { setBusy(false); }
   };
 
-  if (loading || !issue) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#059669" />
-        <Text style={styles.muted}>Loading issue…</Text>
-      </View>
-    );
+  const sendFindingComment = async () => {
+    if (!selectedIssue || !findingComment.trim()) return;
+    setBusy(true);
+    try {
+      setInspectionCase(await trackIssuesApi.addIssueComment(caseId, selectedIssue.id, findingComment.trim(), 'UPDATE'));
+      setFindingComment('');
+    } catch (error) {
+      Alert.alert('Could not add finding note', error.response?.data?.detail || 'Please try again.');
+    } finally { setBusy(false); }
+  };
+
+  if (loading || !inspectionCase) {
+    return <View style={styles.loadingContainer}><ActivityIndicator size="large" color="#059669" /><Text style={styles.muted}>Loading inspection case…</Text></View>;
   }
 
-  const aiSnapshot = issue.ai_snapshot || {};
-  const eventContext = aiSnapshot.event_context || {};
-  const inspectionContext = aiSnapshot.inspection_context || {};
-  const visualReview = aiSnapshot.event_visual_review || {};
-  const matchedArea = eventContext.matched_area || null;
-  const recommendedChecks = eventContext.recommended_checks || visualReview.recommended_checks || [];
+  const assigned = Boolean(inspectionCase.assigned_staff_id);
+  const caseAi = inspectionCase.ai_snapshot || {};
+  const issueAi = selectedIssue?.ai_snapshot || {};
+  const eventContext = issueAi.event_context || {};
+  const remaining = Math.max(0, inspectionCase.total_findings - inspectionCase.completed_findings);
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
-    >
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}>
       <View style={styles.headerRow}>
-        <TouchableOpacity style={styles.iconButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={22} color="#0f172a" />
+        <TouchableOpacity style={styles.iconButton} onPress={() => navigation.goBack()}><Icon name="arrow-left" size={22} color="#334155" /></TouchableOpacity>
+        <View style={styles.headerText}><Text style={styles.eyebrow}>INSPECTION MAINTENANCE CASE</Text><Text style={styles.title}>{inspectionCase.total_findings} AI findings</Text><Text numberOfLines={1} style={styles.meta}>{inspectionCase.inspection_id}</Text></View>
+      </View>
+
+      <View style={styles.card}>
+        <View style={styles.rowBetween}>
+          <View style={[styles.badge, { backgroundColor: `${CASE_COLORS[inspectionCase.status] || '#6b7280'}18` }]}><Text style={[styles.badgeText, { color: CASE_COLORS[inspectionCase.status] || '#6b7280' }]}>{label(inspectionCase.status)}</Text></View>
+          <Text style={styles.priority}>AI {label(inspectionCase.ai_overall_priority)}</Text>
+        </View>
+        <Text style={styles.meta}>Assigned: {inspectionCase.assigned_staff_name || inspectionCase.assigned_staff_code || 'Unassigned'}</Text>
+        <Text style={styles.meta}>Progress: {inspectionCase.completed_findings}/{inspectionCase.total_findings} completed · {remaining} remaining</Text>
+        <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.min(100, inspectionCase.progress_percent || 0)}%` }]} /></View>
+        {!assigned && inspectionCase.status !== 'COMPLETED' ? <TouchableOpacity style={styles.primaryButton} onPress={claim} disabled={busy}><Text style={styles.primaryButtonText}>Claim complete case</Text></TouchableOpacity> : null}
+      </View>
+
+      <Text style={styles.sectionTitle}>AI inspection summary</Text>
+      <View style={styles.card}>
+        <Text style={styles.subheading}>Executive summary</Text>
+        <Text style={styles.bodyText}>{caseAi.executive_summary || 'No inspection-wide summary available.'}</Text>
+        {(caseAi.key_findings || []).slice(0, 4).map((item, index) => <Text key={index} style={styles.checkText}>• {item}</Text>)}
+        {(caseAi.areas_of_attention || []).length > 0 ? <Text style={styles.helper}>{caseAi.areas_of_attention.length} AI area(s) of attention are represented in the checklist below.</Text> : null}
+      </View>
+
+      {assigned && inspectionCase.status !== 'COMPLETED' ? (
+        <>
+          <Text style={styles.sectionTitle}>Case workflow</Text>
+          <View style={styles.card}>
+            <TextInput style={styles.noteInput} multiline placeholder="Case update / blocked reason / completion summary…" value={caseNote} onChangeText={setCaseNote} />
+            <View style={styles.wrapRow}>{(CASE_TRANSITIONS[inspectionCase.status] || []).map((status) => <TouchableOpacity key={status} style={[styles.statusButton, status === 'BLOCKED' && styles.blockedButton]} onPress={() => changeCaseStatus(status)} disabled={busy}><Text style={styles.statusButtonText}>{label(status)}</Text></TouchableOpacity>)}</View>
+          </View>
+        </>
+      ) : null}
+
+      <Text style={styles.sectionTitle}>Defect checklist</Text>
+      {sortedIssues.map((item, index) => (
+        <TouchableOpacity key={item.id} style={[styles.findingRow, selectedIssueId === item.id && styles.findingRowActive]} onPress={() => setSelectedIssueId(item.id)}>
+          <View style={[styles.findingIndex, item.checklist_complete && styles.findingIndexDone]}><Text style={styles.findingIndexText}>{item.checklist_complete ? '✓' : index + 1}</Text></View>
+          <View style={{ flex: 1 }}><Text style={styles.findingTitle}>{item.defect_type}</Text><Text style={styles.findingMeta}>{label(item.ai_priority)} · {label(item.field_verification_status)}</Text><Text style={styles.findingMeta}>{label(item.maintenance_status)}{item.distance_from_start_miles != null ? ` · ${Number(item.distance_from_start_miles).toFixed(3)} mi` : ''}</Text></View>
         </TouchableOpacity>
-        <View style={styles.headerText}>
-          <Text style={styles.eyebrow}>TRACK ISSUE</Text>
-          <Text style={styles.title}>{issue.defect_type}</Text>
-        </View>
-      </View>
-
-      <View style={styles.card}>
-        <View style={styles.rowBetween}>
-          <View style={[styles.badge, { backgroundColor: `${STATUS_COLORS[issue.status] || '#64748b'}18` }]}>
-            <Text style={[styles.badgeText, { color: STATUS_COLORS[issue.status] || '#64748b' }]}>{statusLabel(issue.status)}</Text>
-          </View>
-          {issue.ai_priority ? <Text style={styles.priority}>AI: {statusLabel(issue.ai_priority)}</Text> : null}
-        </View>
-        <Text style={styles.meta}>Confidence: {issue.confidence != null ? `${(Number(issue.confidence) * 100).toFixed(1)}%` : '—'}</Text>
-        <Text style={styles.meta}>Rail side: {issue.rail_side || '—'}</Text>
-        <Text style={styles.meta}>Inspection position: {issue.distance_from_start_miles != null ? `${Number(issue.distance_from_start_miles).toFixed(2)} mi` : '—'}</Text>
-        <Text style={styles.meta}>Assigned: {issue.assigned_staff_name || issue.assigned_staff_code || 'Unassigned'}</Text>
-
-        {!issue.assigned_staff_id && issue.status !== 'RESOLVED' ? (
-          <TouchableOpacity style={styles.primaryButton} onPress={claim} disabled={actionLoading}>
-            <Icon name="account-check" size={19} color="#fff" />
-            <Text style={styles.primaryButtonText}>Claim this issue</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      <Text style={styles.sectionTitle}>Field location verification</Text>
-      <View style={styles.card}>
-        {issue.latitude != null && issue.longitude != null ? (
-          <>
-            <Text style={styles.meta}>Issue GPS: {Number(issue.latitude).toFixed(6)}, {Number(issue.longitude).toFixed(6)}</Text>
-            <Text style={styles.meta}>Last proximity: {statusLabel(issue.last_location_proximity || 'NOT CHECKED')}</Text>
-            {issue.last_location_distance_miles != null ? (
-              <Text style={styles.meta}>Last distance: {Number(issue.last_location_distance_miles).toFixed(3)} mi</Text>
-            ) : null}
-            {issue.location_verified_at ? <Text style={styles.goodText}>On-site verified: {formatDateTime(issue.location_verified_at)}</Text> : null}
-            {locationResult ? (
-              <View style={styles.locationResult}>
-                <Text style={styles.locationResultTitle}>{statusLabel(locationResult.proximity)}</Text>
-                <Text style={styles.locationResultText}>{Number(locationResult.distance_miles).toFixed(3)} mi from finding</Text>
-              </View>
-            ) : null}
-            <TouchableOpacity style={styles.locationButton} onPress={checkLocation} disabled={actionLoading}>
-              <Icon name="crosshairs-gps" size={20} color="#fff" />
-              <Text style={styles.primaryButtonText}>Check my current location</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.mapButton} onPress={openDefectMap}>
-              <Icon name="map-marker-path" size={20} color="#0f766e" />
-              <Text style={styles.mapButtonText}>Open defect in OpenStreetMap</Text>
-            </TouchableOpacity>
-            <Text style={styles.helper}>GPS proximity is recorded as field evidence; it does not block you from reading or updating the issue.</Text>
-          </>
-        ) : (
-          <Text style={styles.warning}>This AI finding has no GPS coordinates. You can still review and progress the work manually.</Text>
-        )}
-      </View>
-
-      <Text style={styles.sectionTitle}>AI decision support</Text>
-      <View style={styles.card}>
-        <View style={styles.rowBetween}>
-          <Text style={styles.subheading}>This defect</Text>
-          <Text style={styles.priority}>{statusLabel(issue.ai_priority || 'UNASSESSED')}</Text>
-        </View>
-        <Text style={styles.meta}>Confidence: {issue.confidence != null ? `${(Number(issue.confidence) * 100).toFixed(1)}%` : '—'}</Text>
-        <Text style={styles.meta}>Rail side: {issue.rail_side || '—'}</Text>
-        {aiSnapshot.event_representative_timestamp != null ? <Text style={styles.meta}>Video time: {Number(aiSnapshot.event_representative_timestamp).toFixed(2)} s</Text> : null}
-        <Text style={styles.subheading}>Why AI assigned this priority</Text>
-        <Text style={styles.aiText}>{eventContext.priority_reason || visualReview.assessment || visualReview.summary || 'No event-specific explanation was provided.'}</Text>
-        {recommendedChecks.length > 0 ? (
-          <>
-            <Text style={styles.subheading}>Recommended field checks</Text>
-            {recommendedChecks.map((item, index) => <Text key={index} style={styles.checkText}>• {item}</Text>)}
-          </>
-        ) : null}
-        {matchedArea ? (
-          <View style={styles.clusterBox}>
-            <Text style={styles.clusterTitle}>Nearby defect cluster</Text>
-            <Text style={styles.aiText}>{matchedArea.assessment || 'AI identified this event inside an area of attention.'}</Text>
-            <Text style={styles.meta}>{matchedArea.start_distance_m}–{matchedArea.end_distance_m} m · {matchedArea.rail_side || 'rail'} · {matchedArea.event_count || 0} events</Text>
-          </View>
-        ) : null}
-        <Text style={styles.subheading}>Whole inspection context</Text>
-        <Text style={styles.aiText}>{inspectionContext.executive_summary || 'No inspection summary available.'}</Text>
-        {(inspectionContext.limitations || []).map((item, index) => <Text key={`lim-${index}`} style={styles.helper}>• {item}</Text>)}
-        <Text style={styles.helper}>AI output is advisory. Field personnel must confirm the physical condition and determine the final maintenance action.</Text>
-      </View>
-
-      {!issue.assigned_staff_id && issue.status !== 'RESOLVED' ? (
-        <>
-          <Text style={styles.sectionTitle}>Take ownership</Text>
-          <View style={styles.card}>
-            <Text style={styles.helper}>Review the AI evidence and location first. Claim this issue before recording repair progress or discussion updates.</Text>
-            <TouchableOpacity style={styles.primaryButton} onPress={claimIssue} disabled={actionLoading}>
-              <Icon name="account-check" size={18} color="#fff" />
-              <Text style={styles.primaryButtonText}>Claim this issue</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      ) : null}
-
-      {issue.assigned_staff_id ? (
-        <>
-          <Text style={styles.sectionTitle}>Field verification</Text>
-          <View style={styles.card}>
-            <Text style={styles.subheading}>{statusLabel(issue.field_verification_status || 'NOT_CHECKED')}</Text>
-            {issue.field_verification_note ? <Text style={styles.aiText}>{issue.field_verification_note}</Text> : <Text style={styles.helper}>Record whether the AI finding is physically confirmed before final resolution.</Text>}
-            {['INSPECTING', 'REPAIRING', 'VERIFYING', 'BLOCKED'].includes(issue.status) && issue.status !== 'RESOLVED' ? (
-              <>
-                <View style={styles.wrapRow}>
-                  {[
-                    ['CONFIRMED', 'Confirmed'],
-                    ['PARTIALLY_CONFIRMED', 'Partial'],
-                    ['NOT_CONFIRMED', 'False positive'],
-                    ['UNABLE_TO_VERIFY', 'Unable'],
-                  ].map(([value, label]) => (
-                    <TouchableOpacity key={value} style={[styles.kindButton, verificationStatus === value && styles.kindButtonActive]} onPress={() => setVerificationStatus(value)}>
-                      <Text style={[styles.kindText, verificationStatus === value && styles.kindTextActive]}>{label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <TextInput style={styles.commentInput} placeholder="What did you physically observe?" multiline value={verificationNote} onChangeText={setVerificationNote} />
-                <TouchableOpacity style={styles.primaryButton} onPress={saveFieldVerification} disabled={actionLoading || !verificationNote.trim()}>
-                  <Icon name="shield-check" size={18} color="#fff" />
-                  <Text style={styles.primaryButtonText}>Save field verification</Text>
-                </TouchableOpacity>
-              </>
-            ) : null}
-          </View>
-        </>
-      ) : null}
-
-      {issue.assigned_staff_id && issue.status !== 'RESOLVED' ? (
-        <>
-          <Text style={styles.sectionTitle}>Progress work</Text>
-          <View style={styles.card}>
-            <TextInput
-              style={styles.noteInput}
-              placeholder="Add progress / repair / verification note…"
-              multiline
-              value={statusNote}
-              onChangeText={setStatusNote}
-            />
-            <View style={styles.wrapRow}>
-              {nextStatuses.map((next) => (
-                <TouchableOpacity
-                  key={next}
-                  style={[styles.statusButton, next === 'BLOCKED' && styles.blockedButton]}
-                  onPress={() => updateStatus(next)}
-                  disabled={actionLoading || (next === 'RESOLVED' && ['NOT_CHECKED', 'UNABLE_TO_VERIFY'].includes(issue.field_verification_status || 'NOT_CHECKED'))}
-                >
-                  <Text style={styles.statusButtonText}>{statusLabel(next)}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {issue.status === 'VERIFYING' && ['NOT_CHECKED', 'UNABLE_TO_VERIFY'].includes(issue.field_verification_status || 'NOT_CHECKED') ? (
-              <Text style={styles.warning}>Resolve is unavailable until a usable field-verification result is recorded.</Text>
-            ) : null}
-          </View>
-        </>
-      ) : null}
-
-      {issue.resolution_summary ? (
-        <>
-          <Text style={styles.sectionTitle}>Resolution</Text>
-          <View style={[styles.card, styles.resolutionCard]}>
-            <Text style={styles.resolutionText}>{issue.resolution_summary}</Text>
-            <Text style={styles.meta}>Resolved: {formatDateTime(issue.resolved_at)}</Text>
-          </View>
-        </>
-      ) : null}
-
-      <Text style={styles.sectionTitle}>Admin & engineer discussion</Text>
-      {issue.assigned_staff_id ? (
-        <View style={styles.card}>
-          <View style={styles.wrapRow}>
-            {['UPDATE', 'COMMENT', 'QUESTION'].map((kind) => (
-              <TouchableOpacity
-                key={kind}
-                style={[styles.kindButton, commentKind === kind && styles.kindButtonActive]}
-                onPress={() => setCommentKind(kind)}
-              >
-                <Text style={[styles.kindText, commentKind === kind && styles.kindTextActive]}>{kind}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TextInput
-            style={styles.commentInput}
-            placeholder="Write a progress update, answer, or question…"
-            multiline
-            value={comment}
-            onChangeText={setComment}
-          />
-          <TouchableOpacity style={styles.primaryButton} onPress={sendComment} disabled={actionLoading || !comment.trim()}>
-            <Icon name="send" size={18} color="#fff" />
-            <Text style={styles.primaryButtonText}>Send</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-
-      {(issue.activities || []).slice().reverse().map((activity) => (
-        <View key={activity.id} style={styles.activityCard}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.activityActor}>{activity.actor_name || activity.actor_staff_id || activity.actor_role || 'System'}</Text>
-            <Text style={styles.activityTime}>{formatDateTime(activity.created_at)}</Text>
-          </View>
-          <Text style={styles.activityType}>{activity.message_kind || activity.activity_type}</Text>
-          {activity.from_status || activity.to_status ? (
-            <Text style={styles.activityStatus}>{statusLabel(activity.from_status)} → {statusLabel(activity.to_status)}</Text>
-          ) : null}
-          {activity.message ? <Text style={styles.activityMessage}>{activity.message}</Text> : null}
-          {activity.proximity ? (
-            <Text style={styles.activityLocation}>{statusLabel(activity.proximity)}{activity.distance_to_issue_miles != null ? ` · ${Number(activity.distance_to_issue_miles).toFixed(3)} mi` : ''}</Text>
-          ) : null}
-        </View>
       ))}
 
-      <Text style={styles.sourceText}>Inspection: {issue.inspection_id}\nEvent: {issue.inspection_event_id}</Text>
+      {selectedIssue ? (
+        <>
+          <Text style={styles.sectionTitle}>Selected finding</Text>
+          <View style={styles.card}>
+            <Text style={styles.selectedTitle}>{selectedIssue.defect_type}</Text>
+            <Text style={styles.meta}>{selectedIssue.rail_side ? `${selectedIssue.rail_side} rail · ` : ''}{selectedIssue.confidence != null ? `${(selectedIssue.confidence * 100).toFixed(1)}% confidence` : 'confidence unavailable'}</Text>
+            <Text style={styles.meta}>AI priority: {label(selectedIssue.ai_priority)}</Text>
+            {eventContext.priority_reason ? <Text style={styles.bodyText}>{eventContext.priority_reason}</Text> : null}
+            {(eventContext.recommended_checks || []).length > 0 ? <><Text style={styles.subheading}>Recommended field checks</Text>{eventContext.recommended_checks.map((item, index) => <Text key={index} style={styles.checkText}>• {item}</Text>)}</> : null}
+            {eventContext.matched_area ? <View style={styles.clusterBox}><Text style={styles.clusterTitle}>Nearby defect cluster</Text><Text style={styles.bodyText}>{eventContext.matched_area.assessment || 'This finding belongs to an AI area of attention.'}</Text></View> : null}
+          </View>
+
+          <Text style={styles.sectionTitle}>Location evidence</Text>
+          <View style={styles.card}>
+            <Text style={styles.meta}>Last proximity: {label(selectedIssue.last_location_proximity)}</Text>
+            <Text style={styles.meta}>Last distance: {selectedIssue.last_location_distance_miles != null ? `${Number(selectedIssue.last_location_distance_miles).toFixed(3)} mi` : '—'}</Text>
+            <Text style={styles.meta}>On-site verified: {selectedIssue.location_verified_at ? 'Yes' : 'No'}</Text>
+            {assigned ? <TouchableOpacity style={styles.locationButton} onPress={checkLocation} disabled={busy}><Icon name="crosshairs-gps" size={18} color="#fff" /><Text style={styles.primaryButtonText}>Check my current location</Text></TouchableOpacity> : null}
+            {selectedIssue.latitude != null && selectedIssue.longitude != null ? <TouchableOpacity style={styles.mapButton} onPress={openMap}><Icon name="map-marker-path" size={18} color="#0f766e" /><Text style={styles.mapButtonText}>Open defect in OpenStreetMap</Text></TouchableOpacity> : null}
+            {locationResult ? <View style={styles.locationResult}><Text style={styles.locationResultTitle}>{label(locationResult.proximity)}</Text><Text style={styles.locationResultText}>{Number(locationResult.distance_miles).toFixed(3)} mi from AI location</Text></View> : null}
+          </View>
+
+          <Text style={styles.sectionTitle}>Field verification</Text>
+          <View style={styles.card}>
+            <Text style={styles.helper}>This answers whether the physical track condition confirms the AI finding. It is separate from the repair result.</Text>
+            <View style={styles.wrapRow}>{VERIFICATION_OPTIONS.map(([value, title]) => <TouchableOpacity key={value} style={[styles.choiceButton, verificationStatus === value && styles.choiceButtonActive]} onPress={() => setVerificationStatus(value)}><Text style={[styles.choiceText, verificationStatus === value && styles.choiceTextActive]}>{title}</Text></TouchableOpacity>)}</View>
+            <TextInput style={styles.noteInput} multiline placeholder="Describe what you physically observed…" value={verificationNote} onChangeText={setVerificationNote} />
+            {assigned && inspectionCase.status !== 'COMPLETED' ? <TouchableOpacity style={styles.primaryButton} onPress={saveVerification} disabled={busy}><Text style={styles.primaryButtonText}>Save field verification</Text></TouchableOpacity> : null}
+          </View>
+
+          <Text style={styles.sectionTitle}>Maintenance outcome</Text>
+          <View style={styles.card}>
+            <Text style={styles.helper}>Confirmed findings need a final maintenance disposition before the case can be completed.</Text>
+            <View style={styles.wrapRow}>{MAINTENANCE_OPTIONS.map(([value, title]) => <TouchableOpacity key={value} style={[styles.choiceButton, maintenanceStatus === value && styles.choiceButtonActive]} onPress={() => setMaintenanceStatus(value)}><Text style={[styles.choiceText, maintenanceStatus === value && styles.choiceTextActive]}>{title}</Text></TouchableOpacity>)}</View>
+            <TextInput style={styles.noteInput} multiline placeholder="Repair, no-action, or follow-up note…" value={maintenanceNote} onChangeText={setMaintenanceNote} />
+            {assigned && inspectionCase.status !== 'COMPLETED' ? <TouchableOpacity style={styles.primaryButton} onPress={() => saveMaintenance()} disabled={busy}><Text style={styles.primaryButtonText}>Save maintenance outcome</Text></TouchableOpacity> : null}
+          </View>
+
+          {assigned && inspectionCase.status !== 'COMPLETED' ? <View style={styles.card}><Text style={styles.subheading}>Finding-specific note</Text><TextInput style={styles.noteInput} multiline placeholder="Add a note or answer about this finding…" value={findingComment} onChangeText={setFindingComment} /><TouchableOpacity style={styles.primaryButton} onPress={sendFindingComment} disabled={busy || !findingComment.trim()}><Text style={styles.primaryButtonText}>Add finding note</Text></TouchableOpacity></View> : null}
+        </>
+      ) : null}
+
+      <Text style={styles.sectionTitle}>Case conversation & activity</Text>
+      {assigned ? <View style={styles.card}><TextInput style={styles.noteInput} multiline placeholder="Update admin about the whole inspection case…" value={caseComment} onChangeText={setCaseComment} /><TouchableOpacity style={styles.primaryButton} onPress={sendCaseComment} disabled={busy || !caseComment.trim()}><Icon name="send" size={18} color="#fff" /><Text style={styles.primaryButtonText}>Send case update</Text></TouchableOpacity></View> : null}
+      {[...(inspectionCase.activities || [])].reverse().map((activity) => <View key={activity.id} style={styles.activityCard}><View style={styles.rowBetween}><Text style={styles.activityActor}>{activity.actor_name || activity.actor_staff_id || 'System'}</Text><Text style={styles.activityTime}>{formatDate(activity.created_at)}</Text></View><Text style={styles.activityType}>{label(activity.activity_type)}{activity.issue_defect_type ? ` · ${activity.issue_defect_type}` : ''}</Text>{activity.message ? <Text style={styles.activityMessage}>{activity.message}</Text> : null}{activity.from_status && activity.to_status ? <Text style={styles.activityStatus}>{label(activity.from_status)} → {label(activity.to_status)}</Text> : null}</View>)}
     </ScrollView>
   );
 };
@@ -492,50 +357,53 @@ const styles = StyleSheet.create({
   iconButton: { width: 42, height: 42, borderRadius: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', alignItems: 'center', justifyContent: 'center' },
   headerText: { flex: 1 },
   eyebrow: { fontSize: 11, fontWeight: '800', letterSpacing: 1, color: '#059669' },
-  title: { fontSize: 24, fontWeight: '800', color: '#0f172a', marginTop: 3 },
+  title: { fontSize: 23, fontWeight: '800', color: '#0f172a', marginTop: 3 },
   sectionTitle: { fontSize: 17, fontWeight: '800', color: '#1e293b', marginTop: 20, marginBottom: 9 },
-  card: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 16, padding: 15 },
+  card: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 16, padding: 15, marginBottom: 8 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   badge: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999 },
   badgeText: { fontSize: 10, fontWeight: '800' },
   priority: { fontSize: 11, fontWeight: '700', color: '#92400e', flexShrink: 1 },
   meta: { color: '#64748b', fontSize: 12, marginTop: 6 },
-  goodText: { color: '#047857', fontSize: 12, fontWeight: '700', marginTop: 7 },
-  warning: { color: '#b45309', lineHeight: 19 },
-  helper: { color: '#64748b', fontSize: 11, lineHeight: 17, marginTop: 9 },
+  bodyText: { fontSize: 12, color: '#475569', lineHeight: 18, marginTop: 8 },
+  helper: { color: '#64748b', fontSize: 11, lineHeight: 17, marginBottom: 9 },
+  subheading: { fontSize: 13, fontWeight: '800', color: '#334155', marginTop: 4, marginBottom: 6 },
+  selectedTitle: { fontSize: 20, fontWeight: '800', color: '#0f172a' },
+  checkText: { fontSize: 12, color: '#334155', lineHeight: 19, marginBottom: 4 },
+  progressTrack: { height: 7, backgroundColor: '#e2e8f0', borderRadius: 999, marginTop: 12, overflow: 'hidden' },
+  progressFill: { height: 7, backgroundColor: '#10b981' },
   primaryButton: { marginTop: 12, backgroundColor: '#0f766e', borderRadius: 11, paddingVertical: 11, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   primaryButtonText: { color: '#fff', fontWeight: '800' },
+  noteInput: { minHeight: 82, borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, padding: 10, color: '#0f172a', textAlignVertical: 'top', marginTop: 10 },
+  wrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 8 },
+  statusButton: { backgroundColor: '#2563eb', borderRadius: 9, paddingVertical: 9, paddingHorizontal: 11, marginTop: 6 },
+  blockedButton: { backgroundColor: '#4b5563' },
+  statusButtonText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  findingRow: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 13, padding: 11, marginBottom: 8, flexDirection: 'row', gap: 10 },
+  findingRowActive: { borderColor: '#10b981', backgroundColor: '#ecfdf5' },
+  findingIndex: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#e2e8f0', alignItems: 'center', justifyContent: 'center' },
+  findingIndexDone: { backgroundColor: '#d1fae5' },
+  findingIndexText: { fontWeight: '800', color: '#334155', fontSize: 11 },
+  findingTitle: { fontWeight: '800', color: '#0f172a' },
+  findingMeta: { color: '#64748b', fontSize: 11, marginTop: 3 },
+  clusterBox: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 10, padding: 10, marginTop: 10 },
+  clusterTitle: { fontSize: 13, fontWeight: '800', color: '#92400e' },
   locationButton: { marginTop: 12, backgroundColor: '#059669', borderRadius: 11, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   mapButton: { marginTop: 8, borderWidth: 1, borderColor: '#0f766e', backgroundColor: '#f0fdfa', borderRadius: 11, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   mapButtonText: { color: '#0f766e', fontWeight: '800' },
   locationResult: { backgroundColor: '#ecfdf5', borderRadius: 10, padding: 10, marginTop: 10 },
   locationResultTitle: { color: '#047857', fontWeight: '800' },
   locationResultText: { color: '#065f46', fontSize: 12, marginTop: 2 },
-  subheading: { fontSize: 13, fontWeight: '800', color: '#334155', marginTop: 4, marginBottom: 6 },
-  aiText: { fontSize: 12, color: '#475569', lineHeight: 18, backgroundColor: '#f8fafc', borderRadius: 9, padding: 9, marginBottom: 12 },
-  checkText: { fontSize: 12, color: '#334155', lineHeight: 19, marginBottom: 5 },
-  clusterBox: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 10, padding: 10, marginBottom: 12 },
-  clusterTitle: { fontSize: 13, fontWeight: '800', color: '#92400e', marginBottom: 5 },
-  noteInput: { minHeight: 82, borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, padding: 10, color: '#0f172a', textAlignVertical: 'top' },
-  wrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  statusButton: { backgroundColor: '#2563eb', borderRadius: 9, paddingVertical: 9, paddingHorizontal: 11, marginTop: 10 },
-  blockedButton: { backgroundColor: '#4b5563' },
-  statusButtonText: { color: '#fff', fontSize: 11, fontWeight: '800' },
-  resolutionCard: { borderColor: '#a7f3d0', backgroundColor: '#ecfdf5' },
-  resolutionText: { color: '#065f46', lineHeight: 19, fontWeight: '600' },
-  kindButton: { borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 999, paddingVertical: 6, paddingHorizontal: 10 },
-  kindButtonActive: { backgroundColor: '#0f766e', borderColor: '#0f766e' },
-  kindText: { fontSize: 10, fontWeight: '800', color: '#475569' },
-  kindTextActive: { color: '#fff' },
-  commentInput: { minHeight: 82, marginTop: 10, borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, padding: 10, color: '#0f172a', textAlignVertical: 'top' },
+  choiceButton: { borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 999, paddingVertical: 7, paddingHorizontal: 10 },
+  choiceButtonActive: { backgroundColor: '#0f766e', borderColor: '#0f766e' },
+  choiceText: { fontSize: 10, fontWeight: '700', color: '#475569' },
+  choiceTextActive: { color: '#fff' },
   activityCard: { backgroundColor: '#fff', borderLeftWidth: 3, borderLeftColor: '#94a3b8', borderRadius: 12, padding: 12, marginTop: 8 },
   activityActor: { color: '#0f172a', fontSize: 12, fontWeight: '800', flex: 1 },
   activityTime: { color: '#94a3b8', fontSize: 9 },
   activityType: { color: '#0f766e', fontSize: 10, fontWeight: '800', marginTop: 4 },
   activityStatus: { color: '#475569', fontSize: 11, marginTop: 5 },
   activityMessage: { color: '#334155', fontSize: 13, lineHeight: 19, marginTop: 6 },
-  activityLocation: { color: '#2563eb', fontSize: 11, marginTop: 6 },
-  sourceText: { color: '#94a3b8', fontSize: 9, marginTop: 18 },
 });
 
 export default TrackIssueDetailScreen;

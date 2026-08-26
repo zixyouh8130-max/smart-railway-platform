@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, joinedload
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..core.database import get_db
 from ..core.dependencies import (
@@ -17,24 +17,22 @@ from ..core.dependencies import (
     get_current_track_engineer,
 )
 from ..models.staff import Staff, StaffRole, StaffStatus
-from ..models.track_issue import TrackIssue, TrackIssueActivity
-from ..models.user import User
+from ..models.track_issue import TrackInspectionCase, TrackIssue, TrackCaseActivity
 from ..schemas.track_issue import (
-    TrackIssueAssignmentRequest,
-    TrackIssueCommentRequest,
-    TrackIssueDetailResponse,
+    TrackCaseAssignmentRequest,
+    TrackCaseCommentRequest,
+    TrackCaseDetailResponse,
+    TrackCaseResponse,
+    TrackCaseStatus,
+    TrackCaseStatusRequest,
     TrackIssueFieldVerificationRequest,
     TrackIssueLocationCheckRequest,
     TrackIssueLocationCheckResponse,
+    TrackIssueMaintenanceRequest,
     TrackIssueResponse,
-    TrackIssueStatus,
-    TrackIssueStatusRequest,
     TrackIssueSyncResponse,
 )
-from .inspection import (
-    inspection_events_collection,
-    inspections_collection,
-)
+from .inspection import inspection_events_collection, inspections_collection
 
 
 router = APIRouter()
@@ -46,20 +44,31 @@ APPROACHING_RADIUS_MILES = 1.0
 MAX_RELIABLE_GPS_ACCURACY_METERS = 100.0
 MAX_ON_SITE_RADIUS_MILES = 0.10
 
-ENGINEER_TRANSITIONS = {
+CASE_ENGINEER_TRANSITIONS = {
     "OPEN": {"ACKNOWLEDGED", "BLOCKED"},
-    "ACKNOWLEDGED": {"INSPECTING", "BLOCKED"},
-    "INSPECTING": {"REPAIRING", "VERIFYING", "BLOCKED"},
-    "REPAIRING": {"VERIFYING", "BLOCKED"},
-    "VERIFYING": {"RESOLVED", "REPAIRING", "BLOCKED"},
-    "BLOCKED": {"ACKNOWLEDGED", "INSPECTING"},
-    "REOPENED": {"ACKNOWLEDGED", "INSPECTING", "BLOCKED"},
-    "RESOLVED": set(),
+    "ACKNOWLEDGED": {"IN_PROGRESS", "BLOCKED"},
+    "IN_PROGRESS": {"VERIFYING", "BLOCKED"},
+    "VERIFYING": {"COMPLETED", "IN_PROGRESS", "BLOCKED"},
+    "BLOCKED": {"ACKNOWLEDGED", "IN_PROGRESS"},
+    "REOPENED": {"IN_PROGRESS", "BLOCKED"},
+    "COMPLETED": set(),
 }
+
+MAINTENANCE_TRANSITIONS = {
+    "PENDING": {"NO_ACTION_REQUIRED", "REPAIR_REQUIRED", "FOLLOW_UP_REQUIRED"},
+    "REPAIR_REQUIRED": {"REPAIR_IN_PROGRESS", "NO_ACTION_REQUIRED", "FOLLOW_UP_REQUIRED"},
+    "REPAIR_IN_PROGRESS": {"REPAIR_COMPLETED", "FOLLOW_UP_REQUIRED"},
+    "REPAIR_COMPLETED": {"FOLLOW_UP_REQUIRED"},
+    "NO_ACTION_REQUIRED": {"FOLLOW_UP_REQUIRED"},
+    "FOLLOW_UP_REQUIRED": {"REPAIR_REQUIRED", "REPAIR_IN_PROGRESS", "NO_ACTION_REQUIRED"},
+}
+
+FINAL_MAINTENANCE_STATUSES = {"NO_ACTION_REQUIRED", "REPAIR_COMPLETED"}
+VALID_FIELD_RESULTS_FOR_COMPLETION = {"CONFIRMED", "PARTIALLY_CONFIRMED", "NOT_CONFIRMED"}
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Generic helpers
 # ---------------------------------------------------------------------------
 
 def _utcnow() -> datetime:
@@ -75,18 +84,15 @@ def _as_uuid(value: Any) -> Optional[UUID]:
         return None
 
 
-
-
 def _json_safe_snapshot(value: Any) -> Any:
-    """Convert Mongo/Python values into data PostgreSQL JSONB can store."""
     if isinstance(value, ObjectId):
         return str(value)
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, dict):
-        return {str(key): _json_safe_snapshot(item) for key, item in value.items()}
+        return {str(k): _json_safe_snapshot(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_json_safe_snapshot(item) for item in value]
+        return [_json_safe_snapshot(v) for v in value]
     return value
 
 
@@ -98,6 +104,7 @@ def _optional_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
 
+
 def _actor_user_id(current_user: dict) -> Optional[UUID]:
     return _as_uuid(current_user.get("sub"))
 
@@ -107,27 +114,17 @@ def _actor_staff_id(current_user: dict) -> Optional[UUID]:
 
 
 def _is_admin(current_user: dict) -> bool:
-    return current_user.get("actor_type") == "ADMIN" or current_user.get("role") in {
-        "ADMIN",
-        "SUPER_ADMIN",
-    }
+    return current_user.get("actor_type") == "ADMIN" or current_user.get("role") in {"ADMIN", "SUPER_ADMIN"}
 
 
 def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     radius_miles = 3958.7613
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-
-    a = (
-        math.sin(delta_phi / 2) ** 2
-        + math.cos(phi1)
-        * math.cos(phi2)
-        * math.sin(delta_lambda / 2) ** 2
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return radius_miles * c
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
+    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    return radius_miles * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def _proximity_for_distance(distance_miles: float, effective_on_site_radius: float) -> str:
@@ -140,183 +137,39 @@ def _proximity_for_distance(distance_miles: float, effective_on_site_radius: flo
     return "FAR"
 
 
-def _activity_to_dict(activity: TrackIssueActivity) -> Dict[str, Any]:
-    actor_name = None
-    actor_role = None
-    actor_staff_code = None
-
-    if activity.actor_user:
-        actor_name = activity.actor_user.full_name
-        actor_role = (
-            activity.actor_user.role.value
-            if hasattr(activity.actor_user.role, "value")
-            else str(activity.actor_user.role)
-        )
-
-    if activity.actor_staff:
-        actor_staff_code = activity.actor_staff.staff_id
-        actor_role = (
-            activity.actor_staff.role.value
-            if hasattr(activity.actor_staff.role, "value")
-            else str(activity.actor_staff.role)
-        )
-        if activity.actor_staff.user:
-            actor_name = activity.actor_staff.user.full_name
-
-    return {
-        "id": activity.id,
-        "activity_type": activity.activity_type,
-        "message_kind": activity.message_kind,
-        "message": activity.message,
-        "from_status": activity.from_status,
-        "to_status": activity.to_status,
-        "latitude": activity.latitude,
-        "longitude": activity.longitude,
-        "distance_to_issue_miles": activity.distance_to_issue_miles,
-        "proximity": activity.proximity,
-        "extra_data": activity.extra_data,
-        "parent_activity_id": activity.parent_activity_id,
-        "actor_name": actor_name,
-        "actor_role": actor_role,
-        "actor_staff_id": actor_staff_code,
-        "created_at": activity.created_at,
-    }
-
-
-def _issue_to_dict(
-    issue: TrackIssue,
-    *,
-    include_detail: bool = False,
-    distance_to_engineer_miles: Optional[float] = None,
-) -> Dict[str, Any]:
-    assigned_name = None
-    assigned_code = None
-
-    if issue.assigned_staff:
-        assigned_code = issue.assigned_staff.staff_id
-        if issue.assigned_staff.user:
-            assigned_name = issue.assigned_staff.user.full_name
-
-    payload: Dict[str, Any] = {
-        "id": issue.id,
-        "inspection_id": issue.inspection_id,
-        "inspection_event_id": issue.inspection_event_id,
-        "run_id": issue.run_id,
-        "defect_type": issue.defect_type,
-        "confidence": issue.confidence,
-        "rail_side": issue.rail_side,
-        "latitude": issue.latitude,
-        "longitude": issue.longitude,
-        "distance_from_start_miles": issue.distance_from_start_miles,
-        "ai_priority": issue.ai_priority,
-        "status": issue.status,
-        "assigned_staff_id": issue.assigned_staff_id,
-        "assigned_staff_code": assigned_code,
-        "assigned_staff_name": assigned_name,
-        "last_location_checked_at": issue.last_location_checked_at,
-        "last_location_distance_miles": issue.last_location_distance_miles,
-        "last_location_proximity": issue.last_location_proximity,
-        "location_verified_at": issue.location_verified_at,
-        "field_verification_status": issue.field_verification_status,
-        "field_verification_note": issue.field_verification_note,
-        "field_verified_at": issue.field_verified_at,
-        "field_verified_by_staff_id": issue.field_verified_by_staff_id,
-        "field_verified_by_staff_code": (
-            issue.field_verified_by_staff.staff_id
-            if getattr(issue, "field_verified_by_staff", None)
-            else None
-        ),
-        "resolution_summary": issue.resolution_summary,
-        "resolved_at": issue.resolved_at,
-        "created_at": issue.created_at,
-        "updated_at": issue.updated_at,
-        "distance_to_engineer_miles": distance_to_engineer_miles,
-    }
-
-    if include_detail:
-        payload["ai_snapshot"] = issue.ai_snapshot
-        payload["media_snapshot"] = issue.media_snapshot
-        payload["activities"] = [
-            _activity_to_dict(item)
-            for item in issue.activities
-        ]
-
-    return payload
-
-
-def _load_issue(db: Session, issue_id: UUID) -> TrackIssue:
-    issue = (
-        db.query(TrackIssue)
-        .options(
-            joinedload(TrackIssue.assigned_staff).joinedload(Staff.user),
-            joinedload(TrackIssue.field_verified_by_staff),
-            joinedload(TrackIssue.activities).joinedload(TrackIssueActivity.actor_user),
-            joinedload(TrackIssue.activities)
-            .joinedload(TrackIssueActivity.actor_staff)
-            .joinedload(Staff.user),
-        )
-        .filter(TrackIssue.id == issue_id)
-        .first()
+def _issue_complete(issue: TrackIssue) -> bool:
+    return (
+        issue.field_verification_status in VALID_FIELD_RESULTS_FOR_COMPLETION
+        and issue.maintenance_status in FINAL_MAINTENANCE_STATUSES
     )
-    if not issue:
-        raise HTTPException(status_code=404, detail="Track issue not found")
-    return issue
 
 
-def _ensure_engineer_can_access(issue: TrackIssue, current_user: dict) -> None:
-    if _is_admin(current_user):
-        return
+def _case_completion_problems(case: TrackInspectionCase) -> List[str]:
+    problems: List[str] = []
+    if not case.issues:
+        problems.append("The inspection case has no defect checklist items.")
+        return problems
 
-    staff_id = _actor_staff_id(current_user)
-    if not staff_id:
-        raise HTTPException(status_code=403, detail="Track Engineer profile required")
+    unchecked = [i for i in case.issues if i.field_verification_status == "NOT_CHECKED"]
+    unable = [i for i in case.issues if i.field_verification_status == "UNABLE_TO_VERIFY"]
+    follow_up = [i for i in case.issues if i.maintenance_status == "FOLLOW_UP_REQUIRED"]
+    incomplete = [i for i in case.issues if not _issue_complete(i)]
 
-    # Engineers may inspect an unassigned issue so they can verify/claim it.
-    # Once assigned, only the assigned engineer can access it.
-    if issue.assigned_staff_id not in {None, staff_id}:
-        raise HTTPException(status_code=403, detail="This issue is assigned to another engineer")
+    if unchecked:
+        problems.append(f"{len(unchecked)} finding(s) still need field verification.")
+    if unable:
+        problems.append(f"{len(unable)} finding(s) could not be verified and require follow-up.")
+    if follow_up:
+        problems.append(f"{len(follow_up)} finding(s) are marked for follow-up.")
+    remaining = [i for i in incomplete if i not in unchecked and i not in unable and i not in follow_up]
+    if remaining:
+        problems.append(f"{len(remaining)} finding(s) still need a final maintenance outcome.")
+    return problems
 
 
-def _add_activity(
-    db: Session,
-    issue: TrackIssue,
-    current_user: dict,
-    *,
-    activity_type: str,
-    message: Optional[str] = None,
-    message_kind: Optional[str] = None,
-    from_status: Optional[str] = None,
-    to_status: Optional[str] = None,
-    latitude: Optional[float] = None,
-    longitude: Optional[float] = None,
-    distance_to_issue_miles: Optional[float] = None,
-    proximity: Optional[str] = None,
-    extra_data: Optional[dict] = None,
-    parent_activity_id: Optional[UUID] = None,
-) -> TrackIssueActivity:
-    # Every workflow activity, including a comment-only activity, should make
-    # the parent issue visibly recent in admin/engineer queues.
-    issue.updated_at = _utcnow()
-
-    activity = TrackIssueActivity(
-        issue_id=issue.id,
-        actor_user_id=_actor_user_id(current_user),
-        actor_staff_id=_actor_staff_id(current_user),
-        activity_type=activity_type,
-        message=message,
-        message_kind=message_kind,
-        from_status=from_status,
-        to_status=to_status,
-        latitude=latitude,
-        longitude=longitude,
-        distance_to_issue_miles=distance_to_issue_miles,
-        proximity=proximity,
-        extra_data=extra_data,
-        parent_activity_id=parent_activity_id,
-    )
-    db.add(activity)
-    return activity
-
+# ---------------------------------------------------------------------------
+# AI mapping helpers
+# ---------------------------------------------------------------------------
 
 def _event_distance_m(event: dict) -> Optional[float]:
     gps = event.get("gps") or {}
@@ -334,7 +187,7 @@ def _same_defect_type(left: Any, right: Any) -> bool:
 
 
 def _derive_event_ai_context(inspection: dict, event: dict) -> Dict[str, Any]:
-    """Map inspection-level AI advice back to this specific defect event."""
+    """Map inspection-wide AI advisory back to one concrete checklist finding."""
     visual = event.get("supplementary_visual_review") or {}
     advisory = inspection.get("ai_advisory") or {}
     event_distance_m = _event_distance_m(event)
@@ -353,11 +206,7 @@ def _derive_event_ai_context(inspection: dict, event: dict) -> Dict[str, Any]:
         item_distance = _optional_float(item.get("route_distance_m"))
         rail_matches = not item.get("rail_side") or str(item.get("rail_side")).strip().casefold() == event_rail
         defect_matches = not item.get("defect_type") or _same_defect_type(item.get("defect_type"), event_defect)
-        distance_matches = (
-            item_distance is None
-            or event_distance_m is None
-            or abs(item_distance - event_distance_m) <= 0.75
-        )
+        distance_matches = item_distance is None or event_distance_m is None or abs(item_distance - event_distance_m) <= 0.75
         if rail_matches and defect_matches and distance_matches:
             return {
                 "issue_priority": str(item.get("priority") or "priority_inspection"),
@@ -409,78 +258,283 @@ def _derive_event_ai_context(inspection: dict, event: dict) -> Dict[str, Any]:
     }
 
 
-def _priority_from_source(inspection: dict, event: dict) -> Optional[str]:
-    return _derive_event_ai_context(inspection, event).get("issue_priority")
-
-
-def _build_ai_snapshot(inspection: dict, event: dict) -> Dict[str, Any]:
-    """Freeze event evidence plus inspection context for human field review."""
-    event_context = _derive_event_ai_context(inspection, event)
+def _build_case_ai_snapshot(inspection: dict) -> Dict[str, Any]:
     advisory = inspection.get("ai_advisory") or {}
-    return _json_safe_snapshot(
-        {
-            "event_context": event_context,
-            "event_visual_review": event.get("supplementary_visual_review"),
-            "event_visual_reviewed_at": event.get("supplementary_visual_reviewed_at"),
-            "event_bounding_box": event.get("bounding_box"),
-            "event_detection_count": event.get("detection_count"),
-            "event_first_frame": event.get("first_frame"),
-            "event_last_frame": event.get("last_frame"),
-            "event_representative_frame": event.get("representative_frame"),
-            "event_start_timestamp": event.get("start_timestamp"),
-            "event_end_timestamp": event.get("end_timestamp"),
-            "event_representative_timestamp": event.get("representative_timestamp"),
-            "event_gps": event.get("gps"),
-            "inspection_context": {
-                "executive_summary": advisory.get("executive_summary"),
-                "overall_priority": advisory.get("overall_priority") or inspection.get("ai_overall_priority"),
-                "key_findings": advisory.get("key_findings") or [],
-                "recommended_actions": advisory.get("recommended_actions") or [],
-                "limitations": advisory.get("limitations") or [],
-                "trend_assessment": advisory.get("trend_assessment"),
-                "possible_contributing_factors": advisory.get("possible_contributing_factors") or [],
-                "defect_type_assessments": advisory.get("defect_type_assessments") or [],
-            },
-            "inspection_advisory": advisory,
-            "inspection_spatial_summary": inspection.get("ai_spatial_summary"),
-            "supplementary_visual_summary": inspection.get("supplementary_visual_summary"),
-            "ai_model": inspection.get("ai_model"),
-            "ai_overall_priority": inspection.get("ai_overall_priority"),
-            "ai_advisory_generated_at": inspection.get("ai_advisory_generated_at"),
-            "route": inspection.get("route"),
-        }
-    )
+    return _json_safe_snapshot({
+        "executive_summary": advisory.get("executive_summary"),
+        "overall_priority": advisory.get("overall_priority") or inspection.get("ai_overall_priority"),
+        "key_findings": advisory.get("key_findings") or [],
+        "areas_of_attention": advisory.get("areas_of_attention") or [],
+        "recommended_actions": advisory.get("recommended_actions") or [],
+        "limitations": advisory.get("limitations") or [],
+        "trend_assessment": advisory.get("trend_assessment"),
+        "defect_type_assessments": advisory.get("defect_type_assessments") or [],
+        "possible_contributing_factors": advisory.get("possible_contributing_factors") or [],
+        "individual_high_priority_events": advisory.get("individual_high_priority_events") or [],
+        "inspection_spatial_summary": inspection.get("ai_spatial_summary"),
+        "supplementary_visual_summary": inspection.get("supplementary_visual_summary"),
+        "ai_model": inspection.get("ai_model"),
+        "ai_advisory_generated_at": inspection.get("ai_advisory_generated_at"),
+        "route": inspection.get("route"),
+        "raw_advisory": advisory,
+    })
+
+
+def _build_issue_ai_snapshot(inspection: dict, event: dict) -> Dict[str, Any]:
+    """Store event-only evidence; inspection-wide advisory lives once on the parent case."""
+    context = _derive_event_ai_context(inspection, event)
+    return _json_safe_snapshot({
+        "event_context": context,
+        "event_visual_review": event.get("supplementary_visual_review"),
+        "event_visual_reviewed_at": event.get("supplementary_visual_reviewed_at"),
+        "event_bounding_box": event.get("bounding_box"),
+        "event_detection_count": event.get("detection_count"),
+        "event_first_frame": event.get("first_frame"),
+        "event_last_frame": event.get("last_frame"),
+        "event_representative_frame": event.get("representative_frame"),
+        "event_start_timestamp": event.get("start_timestamp"),
+        "event_end_timestamp": event.get("end_timestamp"),
+        "event_representative_timestamp": event.get("representative_timestamp"),
+        "event_gps": event.get("gps"),
+    })
 
 
 # ---------------------------------------------------------------------------
-# Admin overview / import from AI inspections
+# ORM serialization / loading
+# ---------------------------------------------------------------------------
+
+def _activity_to_dict(activity: TrackCaseActivity) -> Dict[str, Any]:
+    actor_name = None
+    actor_role = None
+    actor_staff_code = None
+    if activity.actor_user:
+        actor_name = activity.actor_user.full_name
+        actor_role = getattr(activity.actor_user.role, "value", str(activity.actor_user.role))
+    if activity.actor_staff:
+        actor_staff_code = activity.actor_staff.staff_id
+        actor_role = getattr(activity.actor_staff.role, "value", str(activity.actor_staff.role))
+        if activity.actor_staff.user:
+            actor_name = activity.actor_staff.user.full_name
+    return {
+        "id": activity.id,
+        "issue_id": activity.issue_id,
+        "issue_defect_type": activity.issue.defect_type if activity.issue else None,
+        "activity_type": activity.activity_type,
+        "message_kind": activity.message_kind,
+        "message": activity.message,
+        "from_status": activity.from_status,
+        "to_status": activity.to_status,
+        "latitude": activity.latitude,
+        "longitude": activity.longitude,
+        "distance_to_issue_miles": activity.distance_to_issue_miles,
+        "proximity": activity.proximity,
+        "extra_data": activity.extra_data,
+        "parent_activity_id": activity.parent_activity_id,
+        "actor_name": actor_name,
+        "actor_role": actor_role,
+        "actor_staff_id": actor_staff_code,
+        "created_at": activity.created_at,
+    }
+
+
+def _issue_to_dict(issue: TrackIssue) -> Dict[str, Any]:
+    return {
+        "id": issue.id,
+        "case_id": issue.case_id,
+        "inspection_event_id": issue.inspection_event_id,
+        "defect_type": issue.defect_type,
+        "confidence": issue.confidence,
+        "rail_side": issue.rail_side,
+        "latitude": issue.latitude,
+        "longitude": issue.longitude,
+        "distance_from_start_miles": issue.distance_from_start_miles,
+        "ai_priority": issue.ai_priority,
+        "ai_snapshot": issue.ai_snapshot,
+        "media_snapshot": issue.media_snapshot,
+        "field_verification_status": issue.field_verification_status,
+        "field_verification_note": issue.field_verification_note,
+        "field_verified_at": issue.field_verified_at,
+        "field_verified_by_staff_id": issue.field_verified_by_staff_id,
+        "field_verified_by_staff_code": issue.field_verified_by_staff.staff_id if issue.field_verified_by_staff else None,
+        "maintenance_status": issue.maintenance_status,
+        "maintenance_note": issue.maintenance_note,
+        "repair_started_at": issue.repair_started_at,
+        "repair_completed_at": issue.repair_completed_at,
+        "last_location_checked_at": issue.last_location_checked_at,
+        "last_location_distance_miles": issue.last_location_distance_miles,
+        "last_location_proximity": issue.last_location_proximity,
+        "location_verified_at": issue.location_verified_at,
+        "checklist_complete": _issue_complete(issue),
+        "created_at": issue.created_at,
+        "updated_at": issue.updated_at,
+    }
+
+
+def _case_to_dict(
+    case: TrackInspectionCase,
+    *,
+    include_detail: bool = False,
+    distance_to_engineer_miles: Optional[float] = None,
+    nearest_issue_id: Optional[UUID] = None,
+) -> Dict[str, Any]:
+    assigned_code = None
+    assigned_name = None
+    if case.assigned_staff:
+        assigned_code = case.assigned_staff.staff_id
+        if case.assigned_staff.user:
+            assigned_name = case.assigned_staff.user.full_name
+
+    issues = list(case.issues or [])
+    total = len(issues)
+    checked = sum(1 for i in issues if i.field_verification_status != "NOT_CHECKED")
+    completed = sum(1 for i in issues if _issue_complete(i))
+    repair_required = sum(1 for i in issues if i.maintenance_status in {"REPAIR_REQUIRED", "REPAIR_IN_PROGRESS", "REPAIR_COMPLETED"})
+    repair_completed = sum(1 for i in issues if i.maintenance_status == "REPAIR_COMPLETED")
+    false_positive = sum(1 for i in issues if i.field_verification_status == "NOT_CONFIRMED")
+    follow_up = sum(1 for i in issues if i.field_verification_status == "UNABLE_TO_VERIFY" or i.maintenance_status == "FOLLOW_UP_REQUIRED")
+
+    payload: Dict[str, Any] = {
+        "id": case.id,
+        "inspection_id": case.inspection_id,
+        "run_id": case.run_id,
+        "status": case.status,
+        "ai_overall_priority": case.ai_overall_priority,
+        "assigned_staff_id": case.assigned_staff_id,
+        "assigned_staff_code": assigned_code,
+        "assigned_staff_name": assigned_name,
+        "total_findings": total,
+        "checked_findings": checked,
+        "completed_findings": completed,
+        "repair_required_count": repair_required,
+        "repair_completed_count": repair_completed,
+        "false_positive_count": false_positive,
+        "follow_up_count": follow_up,
+        "progress_percent": round((completed / total) * 100, 1) if total else 0.0,
+        "acknowledged_at": case.acknowledged_at,
+        "started_at": case.started_at,
+        "verifying_at": case.verifying_at,
+        "completed_at": case.completed_at,
+        "blocked_reason": case.blocked_reason,
+        "completion_summary": case.completion_summary,
+        "created_at": case.created_at,
+        "updated_at": case.updated_at,
+        "distance_to_engineer_miles": distance_to_engineer_miles,
+        "nearest_issue_id": nearest_issue_id,
+    }
+    if include_detail:
+        payload["ai_snapshot"] = case.ai_snapshot
+        payload["media_snapshot"] = case.media_snapshot
+        payload["issues"] = [_issue_to_dict(i) for i in issues]
+        payload["activities"] = [_activity_to_dict(a) for a in case.activities]
+    return payload
+
+
+def _case_query(db: Session):
+    return db.query(TrackInspectionCase).options(
+        joinedload(TrackInspectionCase.assigned_staff).joinedload(Staff.user),
+        selectinload(TrackInspectionCase.issues).joinedload(TrackIssue.field_verified_by_staff),
+        selectinload(TrackInspectionCase.activities).joinedload(TrackCaseActivity.actor_user),
+        selectinload(TrackInspectionCase.activities).joinedload(TrackCaseActivity.issue),
+        selectinload(TrackInspectionCase.activities).joinedload(TrackCaseActivity.actor_staff).joinedload(Staff.user),
+    )
+
+
+def _load_case(db: Session, case_id: UUID) -> TrackInspectionCase:
+    case = _case_query(db).filter(TrackInspectionCase.id == case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Inspection maintenance case not found")
+    return case
+
+
+def _load_case_issue(case: TrackInspectionCase, issue_id: UUID) -> TrackIssue:
+    for issue in case.issues:
+        if issue.id == issue_id:
+            return issue
+    raise HTTPException(status_code=404, detail="Checklist finding not found in this inspection case")
+
+
+def _ensure_engineer_can_view_case(case: TrackInspectionCase, current_user: dict) -> None:
+    if _is_admin(current_user):
+        return
+    staff_id = _actor_staff_id(current_user)
+    if not staff_id:
+        raise HTTPException(status_code=403, detail="Track Engineer profile required")
+    if case.assigned_staff_id not in {None, staff_id}:
+        raise HTTPException(status_code=403, detail="This inspection case is assigned to another engineer")
+
+
+def _ensure_assigned_engineer(case: TrackInspectionCase, current_user: dict) -> UUID:
+    staff_id = _actor_staff_id(current_user)
+    if not staff_id:
+        raise HTTPException(status_code=403, detail="Track Engineer profile required")
+    if case.assigned_staff_id != staff_id:
+        raise HTTPException(status_code=403, detail="This inspection case must be assigned to you before field work can be recorded")
+    return staff_id
+
+
+def _touch_case(case: TrackInspectionCase) -> None:
+    case.updated_at = _utcnow()
+
+
+def _add_activity(
+    db: Session,
+    case: TrackInspectionCase,
+    current_user: dict,
+    *,
+    activity_type: str,
+    issue: Optional[TrackIssue] = None,
+    message: Optional[str] = None,
+    message_kind: Optional[str] = None,
+    from_status: Optional[str] = None,
+    to_status: Optional[str] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+    distance_to_issue_miles: Optional[float] = None,
+    proximity: Optional[str] = None,
+    extra_data: Optional[dict] = None,
+    parent_activity_id: Optional[UUID] = None,
+) -> TrackCaseActivity:
+    _touch_case(case)
+    activity = TrackCaseActivity(
+        case_id=case.id,
+        issue_id=issue.id if issue else None,
+        actor_user_id=_actor_user_id(current_user),
+        actor_staff_id=_actor_staff_id(current_user),
+        activity_type=activity_type,
+        message=message,
+        message_kind=message_kind,
+        from_status=from_status,
+        to_status=to_status,
+        latitude=latitude,
+        longitude=longitude,
+        distance_to_issue_miles=distance_to_issue_miles,
+        proximity=proximity,
+        extra_data=extra_data,
+        parent_activity_id=parent_activity_id,
+    )
+    db.add(activity)
+    return activity
+
+
+# ---------------------------------------------------------------------------
+# Admin overview / AI sync
 # ---------------------------------------------------------------------------
 
 @router.get("/statistics", dependencies=[Depends(get_current_admin_user)])
-async def get_track_issue_statistics(db: Session = Depends(get_db)):
-    rows = (
-        db.query(TrackIssue.status, func.count(TrackIssue.id))
-        .group_by(TrackIssue.status)
-        .all()
-    )
-    by_status = {status_name: count for status_name, count in rows}
-    verification_rows = (
-        db.query(TrackIssue.field_verification_status, func.count(TrackIssue.id))
-        .group_by(TrackIssue.field_verification_status)
-        .all()
-    )
-    by_verification = {name: count for name, count in verification_rows}
+async def get_case_statistics(db: Session = Depends(get_db)):
+    cases = _case_query(db).all()
+    all_issues = [issue for case in cases for issue in case.issues]
     return {
-        "total": sum(by_status.values()),
-        "by_status": by_status,
-        "by_verification": by_verification,
-        "needs_field_verification": by_verification.get("NOT_CHECKED", 0),
-        "open_work": sum(
-            count
-            for status_name, count in by_status.items()
-            if status_name not in {"RESOLVED"}
-        ),
-        "resolved": by_status.get("RESOLVED", 0),
+        "total_cases": len(cases),
+        "open_cases": sum(1 for c in cases if c.status in {"OPEN", "ACKNOWLEDGED", "IN_PROGRESS", "VERIFYING", "REOPENED"}),
+        "blocked_cases": sum(1 for c in cases if c.status == "BLOCKED"),
+        "completed_cases": sum(1 for c in cases if c.status == "COMPLETED"),
+        "unassigned_cases": sum(1 for c in cases if c.assigned_staff_id is None and c.status != "COMPLETED"),
+        "total_findings": len(all_issues),
+        "needs_field_check": sum(1 for i in all_issues if i.field_verification_status == "NOT_CHECKED"),
+        "confirmed_findings": sum(1 for i in all_issues if i.field_verification_status == "CONFIRMED"),
+        "false_positive_findings": sum(1 for i in all_issues if i.field_verification_status == "NOT_CONFIRMED"),
+        "follow_up_findings": sum(1 for i in all_issues if i.field_verification_status == "UNABLE_TO_VERIFY" or i.maintenance_status == "FOLLOW_UP_REQUIRED"),
     }
 
 
@@ -489,12 +543,11 @@ async def get_track_issue_statistics(db: Session = Depends(get_db)):
     response_model=TrackIssueSyncResponse,
     dependencies=[Depends(get_current_admin_user)],
 )
-async def sync_inspection_issues(
+async def sync_inspection_case(
     inspection_id: str,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin_user),
 ):
-    """Create/update maintenance work items from every AI defect event."""
     if not ObjectId.is_valid(inspection_id):
         raise HTTPException(status_code=400, detail="Invalid inspection ID")
 
@@ -503,473 +556,286 @@ async def sync_inspection_issues(
         raise HTTPException(status_code=404, detail="Inspection not found")
 
     events = await (
-        inspection_events_collection
-        .find({"inspection_id": inspection_id})
+        inspection_events_collection.find({"inspection_id": inspection_id})
         .sort([("rail_side", 1), ("start_timestamp", 1)])
         .to_list(length=10000)
     )
+    if not events:
+        raise HTTPException(status_code=400, detail="This inspection has no AI defect events to create a maintenance checklist")
 
-    created = 0
-    updated = 0
+    run_id = inspection.get("run_id")
+    run_id_value = str(run_id) if run_id not in (None, "") else None
+    advisory = inspection.get("ai_advisory") or {}
+    overall_priority = advisory.get("overall_priority") or inspection.get("ai_overall_priority") or "unassessed"
+
+    case = _case_query(db).filter(TrackInspectionCase.inspection_id == inspection_id).first()
+    case_created = case is None
 
     try:
+        if case is None:
+            case = TrackInspectionCase(
+                inspection_id=inspection_id,
+                run_id=run_id_value,
+                status="OPEN",
+                ai_overall_priority=str(overall_priority),
+                ai_snapshot=_build_case_ai_snapshot(inspection),
+                media_snapshot=_json_safe_snapshot(inspection.get("media") or {}),
+                created_by_user_id=_actor_user_id(current_user),
+            )
+            db.add(case)
+            db.flush()
+            _add_activity(
+                db,
+                case,
+                current_user,
+                activity_type="CASE_CREATED_FROM_AI",
+                message=f"Inspection maintenance case created with {len(events)} AI findings.",
+                extra_data={"inspection_id": inspection_id, "total_events": len(events)},
+            )
+        else:
+            # AI re-sync refreshes inspection context only; assignment and human progress remain untouched.
+            case.run_id = run_id_value
+            case.ai_overall_priority = str(overall_priority)
+            case.ai_snapshot = _build_case_ai_snapshot(inspection)
+            case.media_snapshot = _json_safe_snapshot(inspection.get("media") or {})
+            _touch_case(case)
+
+        created = 0
+        updated = 0
         for event in events:
             event_id = str(event.get("_id"))
             gps = event.get("gps") or {}
+            distance_m = _event_distance_m(event)
+            distance_miles = distance_m * MILES_PER_METER if distance_m is not None else None
+            defect_type = str(event.get("defect_type") or event.get("type") or event.get("class_name") or "Unknown defect")
+            context = _derive_event_ai_context(inspection, event)
 
-            distance_meters = (
-                gps.get("distance_from_start_m")
-                if gps.get("distance_from_start_m") is not None
-                else event.get("distance_from_start_m")
-            )
-            distance_miles = (
-                float(distance_meters) * MILES_PER_METER
-                if distance_meters is not None
-                else None
-            )
+            issue = next((i for i in case.issues if i.inspection_event_id == event_id), None)
+            source_fields = {
+                "defect_type": defect_type,
+                "confidence": _optional_float(event.get("confidence") if event.get("confidence") is not None else event.get("score")),
+                "rail_side": str(event.get("rail_side")) if event.get("rail_side") not in (None, "") else None,
+                "latitude": _optional_float(gps.get("latitude") if gps.get("latitude") is not None else event.get("latitude")),
+                "longitude": _optional_float(gps.get("longitude") if gps.get("longitude") is not None else event.get("longitude")),
+                "distance_from_start_miles": distance_miles,
+                "ai_priority": str(context.get("issue_priority") or "unassessed"),
+                "ai_snapshot": _build_issue_ai_snapshot(inspection, event),
+                "media_snapshot": _json_safe_snapshot({"event_media": event.get("media") or {}}),
+            }
 
-            # Prepare every AI/source field before the first database flush.
-            # TrackIssue.defect_type is NOT NULL, so a partially populated
-            # object must never be flushed.
-            run_id = inspection.get("run_id")
-            run_id_value = str(run_id) if run_id not in (None, "") else None
-
-            defect_type_value = str(
-                event.get("defect_type")
-                or event.get("type")
-                or event.get("class_name")
-                or "Unknown defect"
-            )
-
-            confidence_value = _optional_float(
-                event.get("confidence")
-                if event.get("confidence") is not None
-                else event.get("score")
-            )
-
-            rail_side_value = (
-                str(event.get("rail_side"))
-                if event.get("rail_side") not in (None, "")
-                else None
-            )
-
-            latitude_value = _optional_float(
-                gps.get("latitude")
-                if gps.get("latitude") is not None
-                else event.get("latitude")
-            )
-            longitude_value = _optional_float(
-                gps.get("longitude")
-                if gps.get("longitude") is not None
-                else event.get("longitude")
-            )
-
-            ai_priority_value = _priority_from_source(inspection, event)
-            ai_snapshot_value = _build_ai_snapshot(inspection, event)
-            media_snapshot_value = _json_safe_snapshot({
-                "event_media": event.get("media") or {},
-                "inspection_media": inspection.get("media") or {},
-            })
-
-            issue = (
-                db.query(TrackIssue)
-                .filter(
-                    TrackIssue.inspection_id == inspection_id,
-                    TrackIssue.inspection_event_id == event_id,
-                )
-                .first()
-            )
-
-            is_new = issue is None
-
-            if is_new:
-                issue = TrackIssue(
-                    inspection_id=inspection_id,
-                    inspection_event_id=event_id,
-                    run_id=run_id_value,
-                    defect_type=defect_type_value,
-                    confidence=confidence_value,
-                    rail_side=rail_side_value,
-                    latitude=latitude_value,
-                    longitude=longitude_value,
-                    distance_from_start_miles=distance_miles,
-                    ai_priority=ai_priority_value,
-                    ai_snapshot=ai_snapshot_value,
-                    media_snapshot=media_snapshot_value,
-                    created_by_user_id=_actor_user_id(current_user),
-                    status="OPEN",
-                )
+            if issue is None:
+                issue = TrackIssue(case_id=case.id, inspection_event_id=event_id, **source_fields)
                 db.add(issue)
-
-                # Flush only after all NOT NULL/source fields are populated.
-                # This also generates issue.id for the activity row.
                 db.flush()
-
                 _add_activity(
                     db,
-                    issue,
+                    case,
                     current_user,
-                    activity_type="CREATED_FROM_AI",
-                    message="Maintenance issue created from AI inspection finding.",
-                    extra_data={
-                        "inspection_id": inspection_id,
-                        "inspection_event_id": event_id,
-                        "defect_type": defect_type_value,
-                    },
+                    issue=issue,
+                    activity_type="FINDING_CREATED_FROM_AI",
+                    message=f"AI checklist finding created: {defect_type}.",
+                    extra_data={"inspection_event_id": event_id, "ai_priority": source_fields["ai_priority"]},
                 )
                 created += 1
             else:
-                # Re-sync refreshes AI/source metadata only. Human workflow
-                # state is intentionally preserved.
-                issue.run_id = run_id_value
-                issue.defect_type = defect_type_value
-                issue.confidence = confidence_value
-                issue.rail_side = rail_side_value
-                issue.latitude = latitude_value
-                issue.longitude = longitude_value
-                issue.distance_from_start_miles = distance_miles
-                issue.ai_priority = ai_priority_value
-                issue.ai_snapshot = ai_snapshot_value
-                issue.media_snapshot = media_snapshot_value
+                for key, value in source_fields.items():
+                    setattr(issue, key, value)
                 updated += 1
 
         db.commit()
+        case = _load_case(db, case.id)
+        return TrackIssueSyncResponse(
+            inspection_id=inspection_id,
+            case_id=case.id,
+            case_created=case_created,
+            issues_created=created,
+            issues_updated=updated,
+            total_events=len(events),
+        )
     except Exception:
         db.rollback()
         raise
 
-    return TrackIssueSyncResponse(
-        inspection_id=inspection_id,
-        created=created,
-        updated=updated,
-        total_events=len(events),
-    )
 
-
-@router.get(
-    "",
-    response_model=List[TrackIssueResponse],
-    dependencies=[Depends(get_current_admin_user)],
-)
-async def list_track_issues(
-    issue_status: Optional[TrackIssueStatus] = Query(None, alias="status"),
-    assigned_staff_id: Optional[UUID] = None,
-    inspection_id: Optional[str] = None,
-    query: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=500),
-    db: Session = Depends(get_db),
-):
-    q = (
-        db.query(TrackIssue)
-        .options(joinedload(TrackIssue.assigned_staff).joinedload(Staff.user))
-    )
-
-    if issue_status:
-        q = q.filter(TrackIssue.status == issue_status.value)
-    if assigned_staff_id:
-        q = q.filter(TrackIssue.assigned_staff_id == assigned_staff_id)
-    if inspection_id:
-        q = q.filter(TrackIssue.inspection_id == inspection_id)
-    if query:
-        search = f"%{query.strip()}%"
-        q = q.filter(
-            or_(
-                TrackIssue.defect_type.ilike(search),
-                TrackIssue.run_id.ilike(search),
-                TrackIssue.ai_priority.ilike(search),
-            )
-        )
-
-    issues = q.order_by(TrackIssue.updated_at.desc()).limit(limit).all()
-    return [_issue_to_dict(issue) for issue in issues]
-
-
-@router.get(
-    "/engineers",
-    dependencies=[Depends(get_current_admin_user)],
-)
+@router.get("/engineers", dependencies=[Depends(get_current_admin_user)])
 async def list_track_engineers(db: Session = Depends(get_db)):
     engineers = (
         db.query(Staff)
         .options(joinedload(Staff.user))
-        .filter(
-            Staff.role == StaffRole.TRACK_ENGINEER,
-            Staff.status != StaffStatus.INACTIVE,
-        )
+        .filter(Staff.role == StaffRole.TRACK_ENGINEER, Staff.status == StaffStatus.ACTIVE)
         .order_by(Staff.staff_id)
         .all()
     )
-
     return [
         {
-            "id": str(staff.id),
-            "staff_id": staff.staff_id,
-            "name": staff.user.full_name if staff.user else staff.staff_id,
-            "status": staff.status.value if hasattr(staff.status, "value") else str(staff.status),
-            "is_available": staff.is_available,
+            "id": item.id,
+            "staff_id": item.staff_id,
+            "name": item.user.full_name if item.user else item.staff_id,
+            "is_available": item.is_available,
         }
-        for staff in engineers
+        for item in engineers
     ]
 
 
-# ---------------------------------------------------------------------------
-# Track Engineer workspace
-# ---------------------------------------------------------------------------
-
-@router.get(
-    "/mine",
-    response_model=List[TrackIssueResponse],
-    dependencies=[Depends(get_current_track_engineer)],
-)
-async def get_my_track_issues(
-    include_resolved: bool = False,
+@router.get("/mine", response_model=List[TrackCaseResponse])
+async def get_my_cases(
+    include_completed: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_track_engineer),
 ):
     staff_id = _actor_staff_id(current_user)
-    q = (
-        db.query(TrackIssue)
-        .options(joinedload(TrackIssue.assigned_staff).joinedload(Staff.user))
-        .filter(TrackIssue.assigned_staff_id == staff_id)
-    )
-    if not include_resolved:
-        q = q.filter(TrackIssue.status != "RESOLVED")
-
-    issues = q.order_by(TrackIssue.updated_at.desc()).all()
-    return [_issue_to_dict(issue) for issue in issues]
+    query = _case_query(db).filter(TrackInspectionCase.assigned_staff_id == staff_id)
+    if not include_completed:
+        query = query.filter(TrackInspectionCase.status != "COMPLETED")
+    cases = query.order_by(TrackInspectionCase.updated_at.desc()).all()
+    return [_case_to_dict(c) for c in cases]
 
 
-@router.get(
-    "/nearby",
-    response_model=List[TrackIssueResponse],
-    dependencies=[Depends(get_current_track_engineer)],
-)
-async def get_nearby_track_issues(
+@router.get("/nearby", response_model=List[TrackCaseResponse])
+async def get_nearby_cases(
     latitude: float = Query(..., ge=-90, le=90),
     longitude: float = Query(..., ge=-180, le=180),
     radius_miles: float = Query(5.0, gt=0, le=50),
-    include_assigned_to_me: bool = True,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_track_engineer),
 ):
     staff_id = _actor_staff_id(current_user)
-
-    # Cheap SQL bounding-box prefilter before the precise Haversine check.
-    # This keeps field lookup fast without introducing a PostGIS dependency.
-    lat_delta = radius_miles / 69.0
-    cos_latitude = max(abs(math.cos(math.radians(latitude))), 0.01)
-    lon_delta = radius_miles / (69.0 * cos_latitude)
-
-    q = (
-        db.query(TrackIssue)
-        .options(joinedload(TrackIssue.assigned_staff).joinedload(Staff.user))
+    candidates = (
+        _case_query(db)
         .filter(
-            TrackIssue.status != "RESOLVED",
-            TrackIssue.latitude.isnot(None),
-            TrackIssue.longitude.isnot(None),
-            TrackIssue.latitude.between(latitude - lat_delta, latitude + lat_delta),
-            TrackIssue.longitude.between(longitude - lon_delta, longitude + lon_delta),
+            TrackInspectionCase.status != "COMPLETED",
+            or_(TrackInspectionCase.assigned_staff_id.is_(None), TrackInspectionCase.assigned_staff_id == staff_id),
         )
+        .all()
     )
-
-    if include_assigned_to_me:
-        q = q.filter(
-            or_(
-                TrackIssue.assigned_staff_id.is_(None),
-                TrackIssue.assigned_staff_id == staff_id,
-            )
-        )
-    else:
-        q = q.filter(TrackIssue.assigned_staff_id.is_(None))
-
-    matches = []
-    for issue in q.all():
-        distance = _haversine_miles(
-            latitude,
-            longitude,
-            float(issue.latitude),
-            float(issue.longitude),
-        )
-        if distance <= radius_miles:
-            matches.append((distance, issue))
-
-    matches.sort(key=lambda item: item[0])
-    return [
-        _issue_to_dict(issue, distance_to_engineer_miles=distance)
-        for distance, issue in matches[:100]
-    ]
+    results = []
+    for case in candidates:
+        nearest_distance = None
+        nearest_issue_id = None
+        for issue in case.issues:
+            if issue.latitude is None or issue.longitude is None:
+                continue
+            distance = _haversine_miles(latitude, longitude, issue.latitude, issue.longitude)
+            if nearest_distance is None or distance < nearest_distance:
+                nearest_distance = distance
+                nearest_issue_id = issue.id
+        if nearest_distance is not None and nearest_distance <= radius_miles:
+            results.append(_case_to_dict(case, distance_to_engineer_miles=round(nearest_distance, 4), nearest_issue_id=nearest_issue_id))
+    results.sort(key=lambda item: item["distance_to_engineer_miles"])
+    return results
 
 
-@router.post(
-    "/{issue_id}/claim",
-    response_model=TrackIssueDetailResponse,
-    dependencies=[Depends(get_current_track_engineer)],
-)
-async def claim_track_issue(
-    issue_id: UUID,
+@router.get("", response_model=List[TrackCaseResponse], dependencies=[Depends(get_current_admin_user)])
+async def list_cases(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    assigned_staff_id: Optional[UUID] = None,
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = _case_query(db)
+    if status_filter:
+        query = query.filter(TrackInspectionCase.status == status_filter)
+    if assigned_staff_id:
+        query = query.filter(TrackInspectionCase.assigned_staff_id == assigned_staff_id)
+    if q:
+        token = f"%{q.strip()}%"
+        query = query.filter(or_(TrackInspectionCase.inspection_id.ilike(token), TrackInspectionCase.run_id.ilike(token)))
+    cases = query.order_by(TrackInspectionCase.updated_at.desc()).all()
+    return [_case_to_dict(c) for c in cases]
+
+
+# ---------------------------------------------------------------------------
+# Case ownership / detail
+# ---------------------------------------------------------------------------
+
+@router.post("/{case_id}/claim", response_model=TrackCaseDetailResponse)
+async def claim_case(
+    case_id: UUID,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_track_engineer),
 ):
     staff_id = _actor_staff_id(current_user)
-
-    try:
-        issue = (
-            db.query(TrackIssue)
-            .filter(TrackIssue.id == issue_id)
-            .with_for_update()
-            .first()
-        )
-        if not issue:
-            raise HTTPException(status_code=404, detail="Track issue not found")
-        if issue.status == "RESOLVED":
-            raise HTTPException(status_code=409, detail="Resolved issues cannot be claimed")
-        if issue.assigned_staff_id and issue.assigned_staff_id != staff_id:
-            raise HTTPException(status_code=409, detail="Issue was already claimed by another engineer")
-
-        if issue.assigned_staff_id is None:
-            issue.assigned_staff_id = staff_id
-            _add_activity(
-                db,
-                issue,
-                current_user,
-                activity_type="ASSIGNMENT",
-                message="Issue claimed by Track Engineer.",
-                extra_data={"action": "CLAIM"},
-            )
-
-        db.commit()
-        return _issue_to_dict(_load_issue(db, issue_id), include_detail=True)
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception:
-        db.rollback()
-        raise
+    case = db.query(TrackInspectionCase).filter(TrackInspectionCase.id == case_id).with_for_update().first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Inspection maintenance case not found")
+    if case.status == "COMPLETED":
+        raise HTTPException(status_code=409, detail="Completed cases must be reopened by an admin before they can be claimed")
+    if case.assigned_staff_id not in {None, staff_id}:
+        raise HTTPException(status_code=409, detail="Another Track Engineer already claimed this inspection case")
+    if case.assigned_staff_id is None:
+        case.assigned_staff_id = staff_id
+        _add_activity(db, case, current_user, activity_type="CASE_CLAIMED", message="Track Engineer claimed the complete inspection case.")
+    db.commit()
+    return _case_to_dict(_load_case(db, case_id), include_detail=True)
 
 
-# ---------------------------------------------------------------------------
-# Shared issue detail/actions: Admin + Track Engineer
-# ---------------------------------------------------------------------------
-
-@router.get(
-    "/{issue_id}",
-    response_model=TrackIssueDetailResponse,
-)
-async def get_track_issue(
-    issue_id: UUID,
+@router.get("/{case_id}", response_model=TrackCaseDetailResponse)
+async def get_case(
+    case_id: UUID,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin_or_track_engineer),
 ):
-    issue = _load_issue(db, issue_id)
-    _ensure_engineer_can_access(issue, current_user)
-    return _issue_to_dict(issue, include_detail=True)
+    case = _load_case(db, case_id)
+    _ensure_engineer_can_view_case(case, current_user)
+    return _case_to_dict(case, include_detail=True)
 
 
-@router.patch(
-    "/{issue_id}/assign",
-    response_model=TrackIssueDetailResponse,
-    dependencies=[Depends(get_current_admin_user)],
-)
-async def assign_track_issue(
-    issue_id: UUID,
-    assignment: TrackIssueAssignmentRequest,
+@router.patch("/{case_id}/assign", response_model=TrackCaseDetailResponse, dependencies=[Depends(get_current_admin_user)])
+async def assign_case(
+    case_id: UUID,
+    payload: TrackCaseAssignmentRequest,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin_user),
 ):
-    issue = _load_issue(db, issue_id)
+    case = _load_case(db, case_id)
+    if case.status == "COMPLETED" and payload.staff_id is not None:
+        raise HTTPException(status_code=409, detail="Reopen the completed case before assigning more field work")
 
-    if issue.status == "RESOLVED" and assignment.staff_id:
-        raise HTTPException(
-            status_code=409,
-            detail="Reopen the resolved issue before assigning an engineer",
-        )
-
-    target_staff = None
-    if assignment.staff_id:
-        target_staff = (
+    previous = case.assigned_staff_id
+    if payload.staff_id is not None:
+        engineer = (
             db.query(Staff)
-            .options(joinedload(Staff.user))
-            .filter(Staff.id == assignment.staff_id)
+            .filter(Staff.id == payload.staff_id, Staff.role == StaffRole.TRACK_ENGINEER, Staff.status == StaffStatus.ACTIVE)
             .first()
         )
-        if not target_staff:
-            raise HTTPException(status_code=404, detail="Track Engineer not found")
-        if target_staff.role != StaffRole.TRACK_ENGINEER:
-            raise HTTPException(status_code=400, detail="Staff member is not a Track Engineer")
-        if target_staff.status == StaffStatus.INACTIVE:
-            raise HTTPException(status_code=400, detail="Track Engineer profile is inactive")
-
-    old_staff_id = issue.assigned_staff_id
-    issue.assigned_staff_id = target_staff.id if target_staff else None
-
+        if not engineer:
+            raise HTTPException(status_code=400, detail="Selected staff member is not an active Track Engineer")
+    case.assigned_staff_id = payload.staff_id
     _add_activity(
         db,
-        issue,
+        case,
         current_user,
-        activity_type="ASSIGNMENT",
-        message=(
-            assignment.note
-            or (
-                f"Assigned to {target_staff.staff_id}."
-                if target_staff
-                else "Engineer assignment removed."
-            )
-        ),
-        extra_data={
-            "previous_staff_id": str(old_staff_id) if old_staff_id else None,
-            "assigned_staff_id": str(target_staff.id) if target_staff else None,
-            "assigned_staff_code": target_staff.staff_id if target_staff else None,
-        },
+        activity_type="CASE_ASSIGNED" if payload.staff_id else "CASE_UNASSIGNED",
+        message=payload.note or ("Inspection case assigned to Track Engineer." if payload.staff_id else "Inspection case unassigned."),
+        extra_data={"previous_staff_id": str(previous) if previous else None, "new_staff_id": str(payload.staff_id) if payload.staff_id else None},
     )
-
     db.commit()
-    return _issue_to_dict(_load_issue(db, issue_id), include_detail=True)
+    return _case_to_dict(_load_case(db, case_id), include_detail=True)
 
 
-@router.post(
-    "/{issue_id}/location-check",
-    response_model=TrackIssueLocationCheckResponse,
-    dependencies=[Depends(get_current_track_engineer)],
-)
-async def check_engineer_location(
+# ---------------------------------------------------------------------------
+# Field checklist operations
+# ---------------------------------------------------------------------------
+
+@router.post("/{case_id}/issues/{issue_id}/location-check", response_model=TrackIssueLocationCheckResponse)
+async def check_issue_location(
+    case_id: UUID,
     issue_id: UUID,
     location: TrackIssueLocationCheckRequest,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_track_engineer),
 ):
-    issue = _load_issue(db, issue_id)
-    _ensure_engineer_can_access(issue, current_user)
-
+    case = _load_case(db, case_id)
+    _ensure_assigned_engineer(case, current_user)
+    issue = _load_case_issue(case, issue_id)
     if issue.latitude is None or issue.longitude is None:
-        raise HTTPException(
-            status_code=400,
-            detail="This AI finding has no GPS coordinates to verify against",
-        )
+        raise HTTPException(status_code=400, detail="This AI finding has no GPS coordinates")
 
-    distance = _haversine_miles(
-        location.latitude,
-        location.longitude,
-        float(issue.latitude),
-        float(issue.longitude),
-    )
-
+    distance = _haversine_miles(location.latitude, location.longitude, issue.latitude, issue.longitude)
     accuracy_miles = (location.accuracy_meters or 0.0) * MILES_PER_METER
-    effective_on_site_radius = min(
-        MAX_ON_SITE_RADIUS_MILES,
-        max(
-            DEFAULT_ON_SITE_RADIUS_MILES,
-            accuracy_miles * 1.5,
-        ),
-    )
-    gps_reliable = (
-        location.accuracy_meters is None
-        or location.accuracy_meters <= MAX_RELIABLE_GPS_ACCURACY_METERS
-    )
-    proximity = (
-        _proximity_for_distance(distance, effective_on_site_radius)
-        if gps_reliable
-        else "GPS_UNCERTAIN"
-    )
+    effective_on_site_radius = min(MAX_ON_SITE_RADIUS_MILES, max(DEFAULT_ON_SITE_RADIUS_MILES, accuracy_miles * 1.5))
+    gps_reliable = location.accuracy_meters is None or location.accuracy_meters <= MAX_RELIABLE_GPS_ACCURACY_METERS
+    proximity = _proximity_for_distance(distance, effective_on_site_radius) if gps_reliable else "GPS_UNCERTAIN"
     checked_at = _utcnow()
 
     issue.last_location_checked_at = checked_at
@@ -980,28 +846,20 @@ async def check_engineer_location(
 
     _add_activity(
         db,
-        issue,
+        case,
         current_user,
+        issue=issue,
         activity_type="LOCATION_CHECK",
-        message=(
-            "Engineer location verified on site."
-            if proximity == "ON_SITE"
-            else f"Engineer location check: {proximity.lower()}."
-        ),
+        message="Engineer compared current GPS position with this AI finding.",
         latitude=location.latitude,
         longitude=location.longitude,
         distance_to_issue_miles=distance,
         proximity=proximity,
-        extra_data={
-            "accuracy_meters": location.accuracy_meters,
-            "effective_on_site_radius_miles": effective_on_site_radius,
-            "gps_reliable": gps_reliable,
-        },
+        extra_data={"accuracy_meters": location.accuracy_meters, "gps_reliable": gps_reliable, "effective_on_site_radius_miles": effective_on_site_radius},
     )
-
     db.commit()
-
     return TrackIssueLocationCheckResponse(
+        case_id=case.id,
         issue_id=issue.id,
         distance_miles=round(distance, 4),
         proximity=proximity,
@@ -1009,191 +867,248 @@ async def check_engineer_location(
         effective_on_site_radius_miles=round(effective_on_site_radius, 4),
         gps_accuracy_meters=location.accuracy_meters,
         gps_reliable=gps_reliable,
-        issue_latitude=float(issue.latitude),
-        issue_longitude=float(issue.longitude),
+        issue_latitude=issue.latitude,
+        issue_longitude=issue.longitude,
         checked_at=checked_at,
     )
 
 
-@router.patch(
-    "/{issue_id}/field-verification",
-    response_model=TrackIssueDetailResponse,
-)
-async def update_field_verification(
+@router.patch("/{case_id}/issues/{issue_id}/field-verification", response_model=TrackCaseDetailResponse)
+async def verify_issue_in_field(
+    case_id: UUID,
     issue_id: UUID,
-    verification: TrackIssueFieldVerificationRequest,
+    payload: TrackIssueFieldVerificationRequest,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_track_engineer),
 ):
-    issue = _load_issue(db, issue_id)
-    _ensure_engineer_can_access(issue, current_user)
+    case = _load_case(db, case_id)
+    staff_id = _ensure_assigned_engineer(case, current_user)
+    if case.status == "COMPLETED":
+        raise HTTPException(status_code=409, detail="Completed cases must be reopened before field verification changes")
+    if payload.verification_status.value == "NOT_CHECKED":
+        raise HTTPException(status_code=400, detail="Choose an actual field-verification result")
 
-    staff_id = _actor_staff_id(current_user)
-    if issue.assigned_staff_id != staff_id:
-        raise HTTPException(status_code=409, detail="Claim or receive assignment before field verification")
-    if issue.status not in {"INSPECTING", "REPAIRING", "VERIFYING", "BLOCKED"}:
-        raise HTTPException(
-            status_code=409,
-            detail="Field verification is available once physical inspection has started",
-        )
-
-    previous = issue.field_verification_status or "NOT_CHECKED"
-    new_value = verification.verification_status.value
-    issue.field_verification_status = new_value
-    issue.field_verification_note = verification.note.strip()
+    issue = _load_case_issue(case, issue_id)
+    old_result = issue.field_verification_status
+    issue.field_verification_status = payload.verification_status.value
+    issue.field_verification_note = payload.note.strip()
     issue.field_verified_at = _utcnow()
     issue.field_verified_by_staff_id = staff_id
 
+    # Practical defaults: a rejected AI finding needs no repair; an unverifiable
+    # finding automatically becomes follow-up work. Confirmed findings still
+    # require the engineer to choose the maintenance disposition.
+    if issue.field_verification_status == "NOT_CONFIRMED":
+        issue.maintenance_status = "NO_ACTION_REQUIRED"
+        issue.maintenance_note = "AI finding was not confirmed during field inspection; no repair required."
+        issue.repair_started_at = None
+        issue.repair_completed_at = None
+    elif issue.field_verification_status == "UNABLE_TO_VERIFY":
+        issue.maintenance_status = "FOLLOW_UP_REQUIRED"
+        issue.maintenance_note = payload.note.strip()
+        issue.repair_started_at = None
+        issue.repair_completed_at = None
+    elif old_result in {"NOT_CONFIRMED", "UNABLE_TO_VERIFY"} and issue.maintenance_status in {"NO_ACTION_REQUIRED", "FOLLOW_UP_REQUIRED"}:
+        issue.maintenance_status = "PENDING"
+        issue.maintenance_note = None
+        issue.repair_started_at = None
+        issue.repair_completed_at = None
+
+    if case.status in {"ACKNOWLEDGED", "REOPENED"}:
+        case.status = "IN_PROGRESS"
+        case.started_at = case.started_at or _utcnow()
+
     _add_activity(
         db,
-        issue,
+        case,
         current_user,
+        issue=issue,
         activity_type="FIELD_VERIFICATION",
-        message=verification.note.strip(),
-        message_kind="UPDATE",
-        extra_data={
-            "previous_verification": previous,
-            "verification_status": new_value,
-            "ai_defect_type": issue.defect_type,
-            "ai_confidence": issue.confidence,
-        },
+        message=payload.note.strip(),
+        extra_data={"from": old_result, "verification_status": issue.field_verification_status},
     )
     db.commit()
-    return _issue_to_dict(_load_issue(db, issue_id), include_detail=True)
+    return _case_to_dict(_load_case(db, case_id), include_detail=True)
 
 
-@router.patch(
-    "/{issue_id}/status",
-    response_model=TrackIssueDetailResponse,
-)
-async def update_track_issue_status(
+@router.patch("/{case_id}/issues/{issue_id}/maintenance", response_model=TrackCaseDetailResponse)
+async def update_issue_maintenance(
+    case_id: UUID,
     issue_id: UUID,
-    status_update: TrackIssueStatusRequest,
+    payload: TrackIssueMaintenanceRequest,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin_or_track_engineer),
 ):
-    issue = _load_issue(db, issue_id)
-    _ensure_engineer_can_access(issue, current_user)
+    case = _load_case(db, case_id)
+    if not _is_admin(current_user):
+        _ensure_assigned_engineer(case, current_user)
+    issue = _load_case_issue(case, issue_id)
+    if case.status == "COMPLETED":
+        raise HTTPException(status_code=409, detail="Reopen the case before changing a completed checklist item")
 
-    requested = status_update.status.value
-    current = issue.status
+    target = payload.maintenance_status.value
+    current = issue.maintenance_status
+    if issue.field_verification_status == "NOT_CHECKED" and not (_is_admin(current_user) and target == "FOLLOW_UP_REQUIRED"):
+        raise HTTPException(status_code=409, detail="Field-verify this AI finding before choosing a maintenance outcome")
+    if issue.field_verification_status == "NOT_CONFIRMED" and target not in {"NO_ACTION_REQUIRED", "FOLLOW_UP_REQUIRED"}:
+        raise HTTPException(status_code=409, detail="A not-confirmed AI finding cannot be marked for repair unless the field verification result is changed")
+    if issue.field_verification_status == "UNABLE_TO_VERIFY" and target != "FOLLOW_UP_REQUIRED":
+        raise HTTPException(status_code=409, detail="An unverifiable finding must remain follow-up work until it is field-verified")
 
-    if requested == current:
-        return _issue_to_dict(issue, include_detail=True)
+    allowed = MAINTENANCE_TRANSITIONS.get(current, set())
+    if target != current and target not in allowed and not _is_admin(current_user):
+        raise HTTPException(status_code=409, detail=f"Maintenance transition {current} → {target} is not allowed")
 
-    admin = _is_admin(current_user)
+    if target in {"NO_ACTION_REQUIRED", "REPAIR_COMPLETED", "FOLLOW_UP_REQUIRED"} and not (payload.note or "").strip():
+        raise HTTPException(status_code=400, detail="A note is required for this maintenance outcome")
 
-    if requested == "REOPENED" and current != "RESOLVED":
-        raise HTTPException(
-            status_code=409,
-            detail="Only a resolved issue can be reopened",
-        )
+    issue.maintenance_status = target
+    if payload.note is not None:
+        issue.maintenance_note = payload.note.strip()
+    if target == "REPAIR_IN_PROGRESS":
+        issue.repair_started_at = issue.repair_started_at or _utcnow()
+    if target == "REPAIR_COMPLETED":
+        issue.repair_started_at = issue.repair_started_at or _utcnow()
+        issue.repair_completed_at = _utcnow()
+    elif target in {"REPAIR_REQUIRED", "FOLLOW_UP_REQUIRED"}:
+        issue.repair_completed_at = None
 
-    if admin and current == "RESOLVED" and requested != "REOPENED":
-        raise HTTPException(
-            status_code=409,
-            detail="Use REOPENED before moving a resolved issue back into active work",
-        )
-
-    if not admin:
-        staff_id = _actor_staff_id(current_user)
-        if issue.assigned_staff_id != staff_id:
-            raise HTTPException(status_code=409, detail="Claim or receive assignment before updating status")
-        if requested == "REOPENED":
-            raise HTTPException(status_code=403, detail="Only admin can reopen a resolved issue")
-        if requested not in ENGINEER_TRANSITIONS.get(current, set()):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Invalid engineer transition: {current} -> {requested}",
-            )
-
-    if requested == "RESOLVED" and issue.field_verification_status == "NOT_CHECKED":
-        raise HTTPException(
-            status_code=409,
-            detail="Record a field verification result before resolving this issue",
-        )
-    if requested == "RESOLVED" and issue.field_verification_status == "UNABLE_TO_VERIFY":
-        raise HTTPException(
-            status_code=409,
-            detail="An issue that could not be field-verified cannot be resolved; continue inspection or mark it blocked",
-        )
-
-    if requested in {"BLOCKED", "REOPENED", "RESOLVED"} and not (status_update.note or "").strip():
-        reason_name = {
-            "BLOCKED": "block reason",
-            "REOPENED": "reopen reason",
-            "RESOLVED": "resolution note",
-        }[requested]
-        raise HTTPException(
-            status_code=400,
-            detail=f"A {reason_name} is required for {requested}",
-        )
-
-    issue.status = requested
-
-    if requested == "RESOLVED":
-        issue.resolution_summary = status_update.note.strip()
-        issue.resolved_at = _utcnow()
-    elif requested == "REOPENED":
-        issue.resolved_at = None
-        issue.resolution_summary = None
-        issue.field_verification_status = "NOT_CHECKED"
-        issue.field_verification_note = None
-        issue.field_verified_at = None
-        issue.field_verified_by_staff_id = None
+    if case.status in {"ACKNOWLEDGED", "REOPENED"}:
+        case.status = "IN_PROGRESS"
+        case.started_at = case.started_at or _utcnow()
 
     _add_activity(
         db,
-        issue,
+        case,
         current_user,
-        activity_type="STATUS_CHANGE",
-        message=status_update.note,
-        message_kind="UPDATE" if status_update.note else None,
+        issue=issue,
+        activity_type="MAINTENANCE_STATUS",
+        message=payload.note,
         from_status=current,
-        to_status=requested,
+        to_status=target,
     )
-
     db.commit()
-    return _issue_to_dict(_load_issue(db, issue_id), include_detail=True)
+    return _case_to_dict(_load_case(db, case_id), include_detail=True)
 
 
-@router.post(
-    "/{issue_id}/comments",
-    response_model=TrackIssueDetailResponse,
-)
-async def add_track_issue_comment(
-    issue_id: UUID,
-    comment: TrackIssueCommentRequest,
+# ---------------------------------------------------------------------------
+# Case lifecycle / communication
+# ---------------------------------------------------------------------------
+
+@router.patch("/{case_id}/status", response_model=TrackCaseDetailResponse)
+async def update_case_status(
+    case_id: UUID,
+    payload: TrackCaseStatusRequest,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin_or_track_engineer),
 ):
-    issue = _load_issue(db, issue_id)
-    _ensure_engineer_can_access(issue, current_user)
+    case = _load_case(db, case_id)
+    target = payload.status.value
+    current = case.status
 
-    if not _is_admin(current_user) and issue.assigned_staff_id != _actor_staff_id(current_user):
-        raise HTTPException(status_code=409, detail="Claim or receive assignment before commenting")
+    if not _is_admin(current_user):
+        _ensure_assigned_engineer(case, current_user)
+        if target == "REOPENED":
+            raise HTTPException(status_code=403, detail="Only an admin can reopen a completed inspection case")
+        if target != current and target not in CASE_ENGINEER_TRANSITIONS.get(current, set()):
+            raise HTTPException(status_code=409, detail=f"Case transition {current} → {target} is not allowed")
+    else:
+        if current == "COMPLETED" and target != "REOPENED":
+            raise HTTPException(status_code=409, detail="Use REOPENED before changing a completed case")
 
-    if comment.parent_activity_id:
-        parent_exists = (
-            db.query(TrackIssueActivity)
-            .filter(
-                TrackIssueActivity.id == comment.parent_activity_id,
-                TrackIssueActivity.issue_id == issue.id,
-            )
-            .first()
-        )
-        if not parent_exists:
-            raise HTTPException(status_code=400, detail="Reply target does not belong to this issue")
+    note = (payload.note or "").strip()
+    if target == "BLOCKED" and not note:
+        raise HTTPException(status_code=400, detail="Explain why this inspection case is blocked")
+    if target == "REOPENED" and not note:
+        raise HTTPException(status_code=400, detail="An admin reason is required to reopen the case")
+
+    if target in {"VERIFYING", "COMPLETED"}:
+        problems = _case_completion_problems(case)
+        if problems:
+            raise HTTPException(status_code=409, detail={"message": "The checklist is not ready for final case verification.", "problems": problems})
+    if target == "COMPLETED" and not note:
+        raise HTTPException(status_code=400, detail="A completion summary is required")
+
+    case.status = target
+    now = _utcnow()
+    if target == "ACKNOWLEDGED":
+        case.acknowledged_at = case.acknowledged_at or now
+    elif target == "IN_PROGRESS":
+        case.started_at = case.started_at or now
+        case.blocked_reason = None
+    elif target == "VERIFYING":
+        case.verifying_at = now
+    elif target == "COMPLETED":
+        case.completed_at = now
+        case.completion_summary = note
+        case.blocked_reason = None
+    elif target == "BLOCKED":
+        case.blocked_reason = note
+    elif target == "REOPENED":
+        case.completed_at = None
+        case.verifying_at = None
+        case.completion_summary = None
+        case.blocked_reason = None
 
     _add_activity(
         db,
-        issue,
+        case,
         current_user,
-        activity_type="COMMENT",
-        message=comment.message.strip(),
-        message_kind=comment.message_kind.value,
-        parent_activity_id=comment.parent_activity_id,
+        activity_type="CASE_STATUS",
+        message=note or None,
+        from_status=current,
+        to_status=target,
     )
-
     db.commit()
-    return _issue_to_dict(_load_issue(db, issue_id), include_detail=True)
+    return _case_to_dict(_load_case(db, case_id), include_detail=True)
+
+
+@router.post("/{case_id}/comments", response_model=TrackCaseDetailResponse)
+async def add_case_comment(
+    case_id: UUID,
+    payload: TrackCaseCommentRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin_or_track_engineer),
+):
+    case = _load_case(db, case_id)
+    _ensure_engineer_can_view_case(case, current_user)
+    if not _is_admin(current_user):
+        _ensure_assigned_engineer(case, current_user)
+    _add_activity(
+        db,
+        case,
+        current_user,
+        activity_type="CASE_MESSAGE",
+        message_kind=payload.message_kind.value,
+        message=payload.message.strip(),
+        parent_activity_id=payload.parent_activity_id,
+    )
+    db.commit()
+    return _case_to_dict(_load_case(db, case_id), include_detail=True)
+
+
+@router.post("/{case_id}/issues/{issue_id}/comments", response_model=TrackCaseDetailResponse)
+async def add_issue_comment(
+    case_id: UUID,
+    issue_id: UUID,
+    payload: TrackCaseCommentRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin_or_track_engineer),
+):
+    case = _load_case(db, case_id)
+    _ensure_engineer_can_view_case(case, current_user)
+    if not _is_admin(current_user):
+        _ensure_assigned_engineer(case, current_user)
+    issue = _load_case_issue(case, issue_id)
+    _add_activity(
+        db,
+        case,
+        current_user,
+        issue=issue,
+        activity_type="FINDING_MESSAGE",
+        message_kind=payload.message_kind.value,
+        message=payload.message.strip(),
+        parent_activity_id=payload.parent_activity_id,
+    )
+    db.commit()
+    return _case_to_dict(_load_case(db, case_id), include_detail=True)

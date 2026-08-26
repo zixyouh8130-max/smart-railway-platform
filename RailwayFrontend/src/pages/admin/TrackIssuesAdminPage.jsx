@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  Bot,
   CheckCircle2,
+  ClipboardCheck,
   MessageSquare,
   RefreshCw,
   Search,
@@ -15,44 +15,29 @@ import Card from '@/components/ui/card';
 import { inspectionApi } from '@/api/inspectionAPI';
 import trackIssuesApi from '@/api/trackIssues';
 import AIReviewPanel from '@/components/TrackIssues/AIReviewPanel';
+import InspectionCaseAIReview from '@/components/TrackIssues/InspectionCaseAIReview';
 
-const STATUSES = [
-  'OPEN',
-  'ACKNOWLEDGED',
-  'INSPECTING',
-  'REPAIRING',
-  'VERIFYING',
-  'BLOCKED',
-  'REOPENED',
-  'RESOLVED',
-];
-
+const STATUSES = ['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS', 'VERIFYING', 'BLOCKED', 'REOPENED', 'COMPLETED'];
+const humanize = (value) => String(value || '—').replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 const statusClass = (status) => ({
   OPEN: 'bg-red-50 text-red-700 border-red-200',
   ACKNOWLEDGED: 'bg-blue-50 text-blue-700 border-blue-200',
-  INSPECTING: 'bg-cyan-50 text-cyan-700 border-cyan-200',
-  REPAIRING: 'bg-amber-50 text-amber-800 border-amber-200',
+  IN_PROGRESS: 'bg-cyan-50 text-cyan-700 border-cyan-200',
   VERIFYING: 'bg-purple-50 text-purple-700 border-purple-200',
-  RESOLVED: 'bg-green-50 text-green-700 border-green-200',
+  COMPLETED: 'bg-green-50 text-green-700 border-green-200',
   BLOCKED: 'bg-gray-100 text-gray-700 border-gray-300',
   REOPENED: 'bg-orange-50 text-orange-700 border-orange-200',
 }[status] || 'bg-gray-50 text-gray-700 border-gray-200');
 
-const inspectionLabel = (inspection) =>
-  inspection?.run_id || inspection?.gpx_name || inspection?.video_name || inspection?.id || 'Inspection';
-
-const formatDate = (value) => {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-};
+const inspectionLabel = (inspection) => inspection?.run_id || inspection?.gpx_name || inspection?.video_name || inspection?.id || 'Inspection';
 
 const TrackIssuesAdminPage = () => {
-  const [issues, setIssues] = useState([]);
+  const [cases, setCases] = useState([]);
   const [engineers, setEngineers] = useState([]);
   const [inspections, setInspections] = useState([]);
   const [stats, setStats] = useState(null);
-  const [selectedIssue, setSelectedIssue] = useState(null);
+  const [selectedCase, setSelectedCase] = useState(null);
+  const [selectedFindingId, setSelectedFindingId] = useState(null);
   const [selectedInspection, setSelectedInspection] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [engineerFilter, setEngineerFilter] = useState('ALL');
@@ -60,6 +45,7 @@ const TrackIssuesAdminPage = () => {
   const [comment, setComment] = useState('');
   const [commentKind, setCommentKind] = useState('COMMENT');
   const [adminStatusNote, setAdminStatusNote] = useState('');
+  const [findingComment, setFindingComment] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -69,39 +55,33 @@ const TrackIssuesAdminPage = () => {
     setLoading(true);
     try {
       setError('');
-      const [issueData, engineerData, inspectionData, statData] = await Promise.all([
-        trackIssuesApi.list(),
+      const [caseData, engineerData, inspectionData, statData] = await Promise.all([
+        trackIssuesApi.getCases(),
         trackIssuesApi.getEngineers(),
         inspectionApi.getInspections(50, 0),
         trackIssuesApi.getStatistics(),
       ]);
-      setIssues(issueData || []);
+      setCases(caseData || []);
       setEngineers(engineerData || []);
       setInspections(inspectionData || []);
       setStats(statData || null);
-      if (!selectedInspection && inspectionData?.length) {
-        setSelectedInspection(inspectionData[0].id);
-      }
+      if (!selectedInspection && inspectionData?.length) setSelectedInspection(inspectionData[0].id);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to load maintenance issues.');
-    } finally {
-      setLoading(false);
-    }
+      setError(err.response?.data?.detail || 'Failed to load inspection maintenance cases.');
+    } finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
-  const openIssue = async (id) => {
+  const openCase = async (id) => {
+    setBusy(true);
     try {
-      setBusy(true);
-      setSelectedIssue(await trackIssuesApi.getById(id));
+      const detail = await trackIssuesApi.getById(id);
+      setSelectedCase(detail);
+      setSelectedFindingId(detail.issues?.[0]?.id || null);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to load issue details.');
-    } finally {
-      setBusy(false);
-    }
+      setError(err.response?.data?.detail || 'Failed to load inspection case.');
+    } finally { setBusy(false); }
   };
 
   const syncInspection = async () => {
@@ -109,246 +89,186 @@ const TrackIssuesAdminPage = () => {
     setBusy(true);
     try {
       const result = await trackIssuesApi.syncInspection(selectedInspection);
-      setSuccess(`AI findings synced: ${result.created} created, ${result.updated} refreshed.`);
+      setSuccess(`Inspection case synced: ${result.issues_created} findings created, ${result.issues_updated} refreshed.`);
       await load();
+      await openCase(result.case_id);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to sync AI inspection findings.');
-    } finally {
-      setBusy(false);
-    }
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : JSON.stringify(detail || 'Failed to sync inspection.'));
+    } finally { setBusy(false); }
   };
 
   const assign = async (staffId) => {
-    if (!selectedIssue) return;
+    if (!selectedCase) return;
+    setBusy(true);
     try {
-      setBusy(true);
-      const detail = await trackIssuesApi.assign(selectedIssue.id, staffId || null);
-      setSelectedIssue(detail);
+      setSelectedCase(await trackIssuesApi.assign(selectedCase.id, staffId || null));
       await load();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Could not update engineer assignment.');
-    } finally {
-      setBusy(false);
-    }
+      setError(err.response?.data?.detail || 'Could not update case assignment.');
+    } finally { setBusy(false); }
   };
 
   const updateStatus = async (status) => {
-    if (!selectedIssue) return;
-    if (['BLOCKED', 'REOPENED', 'RESOLVED'].includes(status) && !adminStatusNote.trim()) {
-      setError(
-        status === 'RESOLVED'
-          ? 'A resolution note is required to resolve an issue.'
-          : 'Add a reason before applying this status.'
-      );
+    if (!selectedCase) return;
+    if (['BLOCKED', 'REOPENED', 'COMPLETED'].includes(status) && !adminStatusNote.trim()) {
+      setError('Add a reason / summary before applying this case status.');
       return;
     }
+    setBusy(true);
     try {
-      setBusy(true);
-      const detail = await trackIssuesApi.updateStatus(selectedIssue.id, status, adminStatusNote.trim() || null);
-      setSelectedIssue(detail);
+      setSelectedCase(await trackIssuesApi.updateStatus(selectedCase.id, status, adminStatusNote.trim() || null));
       setAdminStatusNote('');
       await load();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Could not update status.');
-    } finally {
-      setBusy(false);
-    }
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : detail?.message || JSON.stringify(detail || 'Could not update case status.'));
+    } finally { setBusy(false); }
   };
 
   const addComment = async () => {
-    if (!selectedIssue || !comment.trim()) return;
+    if (!selectedCase || !comment.trim()) return;
+    setBusy(true);
     try {
-      setBusy(true);
-      const detail = await trackIssuesApi.addComment(selectedIssue.id, comment.trim(), commentKind);
-      setSelectedIssue(detail);
+      setSelectedCase(await trackIssuesApi.addCaseComment(selectedCase.id, comment.trim(), commentKind));
       setComment('');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Could not post comment.');
-    } finally {
-      setBusy(false);
-    }
+      setError(err.response?.data?.detail || 'Could not post case message.');
+    } finally { setBusy(false); }
+  };
+
+  const addFindingComment = async () => {
+    if (!selectedCase || !selectedFindingId || !findingComment.trim()) return;
+    setBusy(true);
+    try {
+      setSelectedCase(await trackIssuesApi.addIssueComment(selectedCase.id, selectedFindingId, findingComment.trim(), 'QUESTION'));
+      setFindingComment('');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not post finding-specific question.');
+    } finally { setBusy(false); }
   };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return issues.filter((issue) => {
-      if (statusFilter !== 'ALL' && issue.status !== statusFilter) return false;
-      if (engineerFilter === 'UNASSIGNED' && issue.assigned_staff_id) return false;
-      if (engineerFilter !== 'ALL' && engineerFilter !== 'UNASSIGNED' && issue.assigned_staff_id !== engineerFilter) return false;
+    return cases.filter((item) => {
+      if (statusFilter !== 'ALL' && item.status !== statusFilter) return false;
+      if (engineerFilter === 'UNASSIGNED' && item.assigned_staff_id) return false;
+      if (engineerFilter !== 'ALL' && engineerFilter !== 'UNASSIGNED' && item.assigned_staff_id !== engineerFilter) return false;
       if (!q) return true;
-      return [issue.defect_type, issue.run_id, issue.ai_priority, issue.assigned_staff_name, issue.assigned_staff_code]
+      return [item.inspection_id, item.run_id, item.status, item.ai_overall_priority, item.assigned_staff_name, item.assigned_staff_code]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q));
     });
-  }, [issues, statusFilter, engineerFilter, search]);
+  }, [cases, statusFilter, engineerFilter, search]);
+
+  const selectedFinding = selectedCase?.issues?.find((item) => item.id === selectedFindingId) || null;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+    <div className="max-w-[1500px] mx-auto space-y-5 pb-16">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <div className="text-sm font-semibold text-emerald-700 flex items-center gap-2"><Wrench className="w-4 h-4" /> Maintenance Control</div>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">Track Issues</h1>
-          <p className="text-sm text-gray-500 mt-1">Turn AI inspection findings into accountable engineering work and follow each repair to resolution.</p>
+          <h1 className="text-2xl font-bold text-gray-900">Track Inspection Maintenance</h1>
+          <p className="text-sm text-gray-500 mt-1">Assign one Track Engineer to a complete AI inspection case and monitor every defect checklist outcome.</p>
         </div>
-        <Button variant="outline" onClick={load} icon={<RefreshCw className="w-4 h-4" />}>Refresh</Button>
+        <Button variant="outline" onClick={load}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
       </div>
 
-      {error && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">{error}</div>}
-      {success && <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700">{success}</div>}
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{typeof error === 'string' ? error : JSON.stringify(error)}</div>}
+      {success && <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{success}</div>}
+
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+        {[
+          ['Cases', stats?.total_cases ?? 0, ClipboardCheck],
+          ['Open work', stats?.open_cases ?? 0, Wrench],
+          ['Unassigned', stats?.unassigned_cases ?? 0, UserRoundCog],
+          ['Needs field check', stats?.needs_field_check ?? 0, AlertTriangle],
+          ['Follow-up findings', stats?.follow_up_findings ?? 0, MessageSquare],
+          ['Completed', stats?.completed_cases ?? 0, CheckCircle2],
+        ].map(([label, value, Icon]) => (
+          <Card key={label} padding="p-4" hover={false}><Icon className="w-5 h-5 text-emerald-600" /><p className="text-2xl font-bold mt-2">{value}</p><p className="text-xs text-gray-500">{label}</p></Card>
+        ))}
+      </div>
 
       <Card padding="p-4" hover={false}>
         <div className="flex flex-col lg:flex-row gap-3 lg:items-end">
           <div className="flex-1">
-            <label className="text-xs font-semibold text-gray-500 uppercase">Import / refresh AI findings</label>
-            <select value={selectedInspection} onChange={(event) => setSelectedInspection(event.target.value)} className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 bg-white">
-              <option value="">Select inspection</option>
-              {inspections.map((inspection) => (
-                <option key={inspection.id} value={inspection.id}>{inspectionLabel(inspection)} · {inspection.defect_count ?? inspection.inspection_events ?? 0} finding(s)</option>
-              ))}
+            <label className="text-xs font-semibold text-gray-600">AI inspection</label>
+            <select value={selectedInspection} onChange={(e) => setSelectedInspection(e.target.value)} className="mt-1 w-full border rounded-xl px-3 py-2 bg-white text-sm">
+              {inspections.map((inspection) => <option key={inspection.id} value={inspection.id}>{inspectionLabel(inspection)}</option>)}
             </select>
           </div>
-          <Button onClick={syncInspection} disabled={!selectedInspection || busy} icon={<Bot className="w-4 h-4" />}>Sync AI findings</Button>
+          <Button onClick={syncInspection} disabled={busy || !selectedInspection}>Sync / create maintenance case</Button>
         </div>
-        <p className="mt-2 text-xs text-gray-500">Syncing updates AI/GPS snapshots only. Existing engineer assignment, progress, comments and resolution state are preserved.</p>
       </Card>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          ['Total issues', stats?.total ?? issues.length, AlertTriangle],
-          ['Open work', stats?.open_work ?? issues.filter((item) => item.status !== 'RESOLVED').length, Wrench],
-          ['Needs field check', stats?.needs_field_verification ?? 0, UserRoundCog],
-          ['Resolved', stats?.resolved ?? 0, CheckCircle2],
-        ].map(([label, value, Icon]) => (
-          <Card key={label} padding="p-4" hover={false}>
-            <Icon className="w-5 h-5 text-blue-600" />
-            <p className="text-2xl font-bold text-gray-900 mt-2">{value}</p>
-            <p className="text-xs text-gray-500">{label}</p>
-          </Card>
-        ))}
-      </div>
-
-      <div className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.8fr)] gap-5 items-start">
-        <Card padding="p-0" hover={false}>
-          <div className="p-4 border-b border-gray-100 grid md:grid-cols-3 gap-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search issues…" className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm" />
-            </div>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white">
-              <option value="ALL">All stages</option>
-              {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-            </select>
-            <select value={engineerFilter} onChange={(event) => setEngineerFilter(event.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white">
-              <option value="ALL">All engineers</option>
-              <option value="UNASSIGNED">Unassigned</option>
-              {engineers.map((engineer) => <option key={engineer.id} value={engineer.id}>{engineer.name} ({engineer.staff_id})</option>)}
-            </select>
+      <div className="grid xl:grid-cols-[0.9fr_1.6fr] gap-5">
+        <Card padding="p-4" hover={false}>
+          <div className="grid md:grid-cols-3 xl:grid-cols-1 gap-2 mb-3">
+            <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search cases…" className="w-full pl-9 pr-3 py-2 border rounded-xl text-sm" /></div>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border rounded-xl px-3 py-2 text-sm"><option value="ALL">All statuses</option>{STATUSES.map((s) => <option key={s}>{s}</option>)}</select>
+            <select value={engineerFilter} onChange={(e) => setEngineerFilter(e.target.value)} className="border rounded-xl px-3 py-2 text-sm"><option value="ALL">All engineers</option><option value="UNASSIGNED">Unassigned</option>{engineers.map((e) => <option key={e.id} value={e.id}>{e.name} ({e.staff_id})</option>)}</select>
           </div>
 
-          <div className="divide-y divide-gray-100 max-h-[720px] overflow-auto">
-            {loading ? (
-              <div className="p-10 text-center text-gray-500">Loading issues…</div>
-            ) : filtered.length === 0 ? (
-              <div className="p-10 text-center text-gray-500">No maintenance issues match the filters.</div>
-            ) : filtered.map((issue) => (
-              <button key={issue.id} onClick={() => openIssue(issue.id)} className={`w-full text-left p-4 hover:bg-blue-50/50 transition ${selectedIssue?.id === issue.id ? 'bg-blue-50' : ''}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap gap-2 items-center">
-                      <span className={`px-2 py-0.5 rounded-full border text-xs font-semibold ${statusClass(issue.status)}`}>{issue.status}</span>
-                      {issue.ai_priority && <span className="text-xs text-gray-500">AI {String(issue.ai_priority).replaceAll('_', ' ')}</span>}
-                      <span className="text-xs text-gray-400">Field {String(issue.field_verification_status || 'NOT_CHECKED').replaceAll('_', ' ')}</span>
-                    </div>
-                    <p className="font-semibold text-gray-900 mt-2">{issue.defect_type}</p>
-                    <p className="text-xs text-gray-500 mt-1">{issue.assigned_staff_name || issue.assigned_staff_code || 'Unassigned'} · {issue.run_id || issue.inspection_id.slice(0, 10)}</p>
-                  </div>
-                  {issue.last_location_proximity && <span className="text-xs text-gray-500">{issue.last_location_proximity}</span>}
-                </div>
+          <div className="space-y-2 max-h-[760px] overflow-auto">
+            {loading ? <p className="text-sm text-gray-500 py-8 text-center">Loading…</p> : filtered.map((item) => (
+              <button type="button" key={item.id} onClick={() => openCase(item.id)} className={`w-full text-left border rounded-xl p-3 ${selectedCase?.id === item.id ? 'border-emerald-400 bg-emerald-50/40' : 'border-gray-200 hover:bg-gray-50'}`}>
+                <div className="flex flex-wrap gap-2"><span className={`px-2 py-0.5 rounded-full border text-[10px] ${statusClass(item.status)}`}>{humanize(item.status)}</span><span className="text-[10px] text-gray-500">{humanize(item.ai_overall_priority)}</span></div>
+                <p className="font-semibold text-gray-900 mt-2">Inspection case</p>
+                <p className="text-xs text-gray-500 break-all">{item.inspection_id}</p>
+                <p className="text-xs text-gray-600 mt-1">{item.completed_findings}/{item.total_findings} completed · {item.assigned_staff_name || 'Unassigned'}</p>
+                <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${item.progress_percent || 0}%` }} /></div>
               </button>
             ))}
           </div>
         </Card>
 
-        <Card padding="p-5" hover={false} className="lg:sticky lg:top-20">
-          {!selectedIssue ? (
-            <div className="py-16 text-center text-gray-500">
-              <AlertTriangle className="w-12 h-12 text-gray-300 mx-auto" />
-              <p className="mt-3">Select an issue to review engineering progress.</p>
-            </div>
+        <div className="space-y-5">
+          {!selectedCase ? (
+            <Card padding="p-10" hover={false} className="text-center"><ClipboardCheck className="w-12 h-12 text-gray-300 mx-auto" /><p className="mt-3 text-gray-600">Select an inspection case to review its engineer and defect checklist.</p></Card>
           ) : (
-            <div className="space-y-5 max-h-[78vh] overflow-auto pr-1">
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${statusClass(selectedIssue.status)}`}>{selectedIssue.status}</span>
-                  <span className="text-xs text-gray-400">Updated {formatDate(selectedIssue.updated_at)}</span>
+            <>
+              <Card padding="p-5" hover={false}>
+                <div className="flex flex-col lg:flex-row justify-between gap-4">
+                  <div><span className={`px-2 py-1 rounded-full border text-xs ${statusClass(selectedCase.status)}`}>{humanize(selectedCase.status)}</span><h2 className="text-xl font-bold mt-2">Inspection Case</h2><p className="text-xs text-gray-500 break-all">{selectedCase.inspection_id}</p></div>
+                  <div className="min-w-64"><label className="text-xs font-semibold text-gray-600">Assigned Track Engineer</label><select value={selectedCase.assigned_staff_id || ''} onChange={(e) => assign(e.target.value || null)} className="mt-1 w-full border rounded-xl px-3 py-2 text-sm"><option value="">Unassigned</option>{engineers.map((e) => <option key={e.id} value={e.id}>{e.name} ({e.staff_id})</option>)}</select></div>
                 </div>
-                <h2 className="text-xl font-bold text-gray-900 mt-2">{selectedIssue.defect_type}</h2>
-                <p className="text-sm text-gray-500 mt-1">Confidence {selectedIssue.confidence != null ? `${(selectedIssue.confidence * 100).toFixed(1)}%` : '—'} · {selectedIssue.rail_side || 'rail side unknown'}</p>
-              </div>
+                <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-2">{[['Findings', selectedCase.total_findings], ['Checked', selectedCase.checked_findings], ['Completed', selectedCase.completed_findings], ['False positive', selectedCase.false_positive_count], ['Follow-up', selectedCase.follow_up_count]].map(([label, value]) => <div key={label} className="bg-gray-50 rounded-xl p-3"><p className="text-xl font-bold">{value}</p><p className="text-xs text-gray-500">{label}</p></div>)}</div>
+              </Card>
 
-              <div className="border border-gray-200 rounded-xl p-3">
-                <label className="text-xs font-semibold text-gray-500 uppercase">Assigned Track Engineer</label>
-                <select value={selectedIssue.assigned_staff_id || ''} onChange={(event) => assign(event.target.value)} disabled={busy} className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 bg-white text-sm">
-                  <option value="">Unassigned</option>
-                  {engineers.map((engineer) => <option key={engineer.id} value={engineer.id}>{engineer.name} ({engineer.staff_id})</option>)}
-                </select>
-              </div>
+              <Card padding="p-5" hover={false}><InspectionCaseAIReview inspectionCase={selectedCase} /></Card>
 
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="bg-gray-50 rounded-xl p-3"><span className="text-xs text-gray-500">Location check</span><p className="font-semibold mt-1">{selectedIssue.last_location_proximity || 'Not checked'}</p></div>
-                <div className="bg-gray-50 rounded-xl p-3"><span className="text-xs text-gray-500">Distance</span><p className="font-semibold mt-1">{selectedIssue.last_location_distance_miles != null ? `${Number(selectedIssue.last_location_distance_miles).toFixed(3)} mi` : '—'}</p></div>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase">Admin stage override / reopen</label>
-                <textarea value={adminStatusNote} onChange={(event) => setAdminStatusNote(event.target.value)} rows={2} placeholder="Reason / resolution note…" className="mt-1 w-full border border-gray-200 rounded-xl p-2 text-sm" />
-                <select value={selectedIssue.status} onChange={(event) => updateStatus(event.target.value)} disabled={busy} className="mt-2 w-full border border-gray-200 rounded-xl px-3 py-2 bg-white text-sm">
-                  {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <AIReviewPanel issue={selectedIssue} compact />
-              </div>
-
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="font-semibold text-emerald-900">Field verification</h3>
-                  <span className="text-xs font-semibold text-emerald-700">{String(selectedIssue.field_verification_status || 'NOT_CHECKED').replaceAll('_', ' ')}</span>
+              <Card padding="p-5" hover={false}>
+                <h3 className="font-bold">Case administration</h3>
+                <div className="mt-3 grid md:grid-cols-[200px_1fr_auto] gap-2">
+                  <select value={selectedCase.status} onChange={(e) => updateStatus(e.target.value)} className="border rounded-xl px-3 py-2 text-sm">{STATUSES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}</select>
+                  <input value={adminStatusNote} onChange={(e) => setAdminStatusNote(e.target.value)} placeholder="Reason / override note / completion summary…" className="border rounded-xl px-3 py-2 text-sm" />
+                  <span className="text-xs text-gray-400 self-center">Status changes are audited</span>
                 </div>
-                {selectedIssue.field_verification_note ? (
-                  <p className="text-sm text-gray-700 mt-2 whitespace-pre-wrap">{selectedIssue.field_verification_note}</p>
-                ) : (
-                  <p className="text-sm text-gray-500 mt-2">Engineer has not recorded a physical verification result yet.</p>
-                )}
-                {selectedIssue.field_verified_at && <p className="text-xs text-gray-400 mt-2">Recorded {formatDate(selectedIssue.field_verified_at)}{selectedIssue.field_verified_by_staff_code ? ` by ${selectedIssue.field_verified_by_staff_code}` : ''}</p>}
-              </div>
+              </Card>
 
-              <div>
-                <div className="flex items-center gap-2 mb-2"><MessageSquare className="w-4 h-4 text-blue-600" /><h3 className="font-semibold">Progress conversation</h3></div>
-                <div className="space-y-2 max-h-64 overflow-auto">
-                  {[...(selectedIssue.activities || [])].reverse().map((activity) => (
-                    <div key={activity.id} className="border border-gray-200 rounded-lg p-2.5 text-sm">
-                      <div className="flex justify-between gap-2"><strong>{activity.actor_name || 'System'}</strong><span className="text-xs text-gray-400">{formatDate(activity.created_at)}</span></div>
-                      {activity.message_kind && <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700">{activity.message_kind}</span>}
-                      {activity.from_status && <p className="text-xs text-gray-500 mt-1">{activity.from_status} → {activity.to_status}</p>}
-                      {activity.message && <p className="mt-1 whitespace-pre-wrap">{activity.message}</p>}
-                    </div>
-                  ))}
+              <Card padding="p-5" hover={false}>
+                <h3 className="font-bold">Defect checklist</h3>
+                <div className="mt-3 grid lg:grid-cols-[0.9fr_1.1fr] gap-4">
+                  <div className="space-y-2 max-h-[600px] overflow-auto">
+                    {(selectedCase.issues || []).map((item) => (
+                      <button key={item.id} type="button" onClick={() => setSelectedFindingId(item.id)} className={`w-full text-left rounded-xl border p-3 ${selectedFindingId === item.id ? 'border-emerald-400 bg-emerald-50/40' : 'border-gray-200'}`}>
+                        <div className="flex justify-between gap-2"><p className="font-semibold">{item.defect_type}</p><span>{item.checklist_complete ? '✓' : '•'}</span></div>
+                        <p className="text-xs text-gray-500 mt-1">{humanize(item.ai_priority)} · {humanize(item.field_verification_status)} · {humanize(item.maintenance_status)}</p>
+                      </button>
+                    ))}
+                  </div>
+                  <div>{selectedFinding ? <><AIReviewPanel issue={selectedFinding} compact /><div className="mt-4 rounded-xl border p-3"><p className="font-semibold">Human outcome</p><p className="text-sm mt-2">Field: {humanize(selectedFinding.field_verification_status)}</p>{selectedFinding.field_verification_note && <p className="text-sm text-gray-600 mt-1">{selectedFinding.field_verification_note}</p>}<p className="text-sm mt-2">Maintenance: {humanize(selectedFinding.maintenance_status)}</p>{selectedFinding.maintenance_note && <p className="text-sm text-gray-600 mt-1">{selectedFinding.maintenance_note}</p>}</div><div className="mt-3 flex gap-2"><input value={findingComment} onChange={(e) => setFindingComment(e.target.value)} placeholder="Ask engineer about this finding…" className="flex-1 border rounded-xl px-3 py-2 text-sm" /><Button onClick={addFindingComment} disabled={!findingComment.trim() || busy}>Ask</Button></div></> : <p className="text-sm text-gray-500">Select a finding.</p>}</div>
                 </div>
-                <div className="mt-3 grid grid-cols-[120px_1fr] gap-2">
-                  <select value={commentKind} onChange={(event) => setCommentKind(event.target.value)} className="border border-gray-200 rounded-lg px-2 text-sm bg-white">
-                    <option value="COMMENT">Comment</option>
-                    <option value="QUESTION">Question</option>
-                    <option value="SUGGESTION">Suggestion</option>
-                  </select>
-                  <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={2} placeholder="Ask a question, suggest an action, or leave a note…" className="border border-gray-200 rounded-lg p-2 text-sm" />
-                </div>
-                <Button className="mt-2 w-full" disabled={busy || !comment.trim()} onClick={addComment}>Post to engineer</Button>
-              </div>
-            </div>
+              </Card>
+
+              <Card padding="p-5" hover={false}>
+                <h3 className="font-bold flex items-center gap-2"><MessageSquare className="w-4 h-4" />Case conversation & audit</h3>
+                <div className="mt-3 space-y-3 max-h-80 overflow-auto">{[...(selectedCase.activities || [])].reverse().map((a) => <div key={a.id} className="border-l-2 pl-3"><div className="text-xs text-gray-500 flex flex-wrap gap-2"><strong className="text-gray-700">{a.actor_name || a.actor_staff_id || 'System'}</strong><span>{humanize(a.activity_type)}</span>{a.issue_defect_type && <span className="text-emerald-700">Finding: {a.issue_defect_type}</span>}<span>{new Date(a.created_at).toLocaleString()}</span></div>{a.message && <p className="text-sm mt-1 text-gray-700">{a.message}</p>}</div>)}</div>
+                <div className="mt-4 grid sm:grid-cols-[150px_1fr_auto] gap-2"><select value={commentKind} onChange={(e) => setCommentKind(e.target.value)} className="border rounded-xl px-3 py-2 text-sm"><option value="COMMENT">Comment</option><option value="QUESTION">Question</option><option value="SUGGESTION">Suggestion</option></select><input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Message the assigned engineer about the whole case…" className="border rounded-xl px-3 py-2 text-sm" /><Button onClick={addComment} disabled={!comment.trim() || busy}>Send</Button></div>
+              </Card>
+            </>
           )}
-        </Card>
+        </div>
       </div>
     </div>
   );
