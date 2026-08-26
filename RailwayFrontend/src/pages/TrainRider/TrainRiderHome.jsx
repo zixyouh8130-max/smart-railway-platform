@@ -1,6 +1,6 @@
 // pages/TrainRider/TrainRiderHome.jsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import {
   Train, Clock, MapPin, Navigation, AlertTriangle,
   Play, Map, Calendar, ChevronRight, Bell, BellRing,
@@ -18,6 +18,12 @@ const ALERT_THRESHOLD = 15; // Alert when 15 minutes or less to departure
 
 const TrainRiderHome = () => {
   const navigate = useNavigate();
+  const outletContext = useOutletContext() || {};
+  const {
+    setUser: setSharedUser,
+    setStaffInfo: setSharedStaffInfo,
+    setCurrentAssignment: setSharedCurrentAssignment,
+  } = outletContext;
   const [user, setUser] = useState(null);
   const [staffInfo, setStaffInfo] = useState(null);
   const [todaySchedule, setTodaySchedule] = useState(null);
@@ -41,9 +47,11 @@ const TrainRiderHome = () => {
     try {
       const userResponse = await api.get('/auth/me');
       setUser(userResponse.data);
+      setSharedUser?.(userResponse.data);
 
       if (userResponse.data.staff) {
         setStaffInfo(userResponse.data.staff);
+        setSharedStaffInfo?.(userResponse.data.staff);
 
         // Get today's assignment
         const staffId = userResponse.data.staff.staff_id;
@@ -52,6 +60,7 @@ const TrainRiderHome = () => {
         if (assignmentResponse.data) {
           const newSchedule = assignmentResponse.data;
           setTodaySchedule(newSchedule);
+          setSharedCurrentAssignment?.(newSchedule);
           setLastUpdated(new Date());
 
           // Update journey status
@@ -68,8 +77,14 @@ const TrainRiderHome = () => {
           });
         } else {
           setTodaySchedule(null);
+          setSharedCurrentAssignment?.(null);
           setJourneyActive(false);
         }
+      } else {
+        setStaffInfo(null);
+        setSharedStaffInfo?.(null);
+        setTodaySchedule(null);
+        setSharedCurrentAssignment?.(null);
       }
     } catch (err) {
       console.error('Failed to fetch schedule:', err);
@@ -78,7 +93,7 @@ const TrainRiderHome = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [setSharedUser, setSharedStaffInfo, setSharedCurrentAssignment]);
 
   // 🆕 Initial load + polling
   useEffect(() => {
@@ -142,29 +157,72 @@ const TrainRiderHome = () => {
   };
 
 
-const handleStartJourney = async () => {
-    try {
-      const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
+  const handleStartJourney = async () => {
+    if (!todaySchedule?.assignment_id) {
+      alert('No active assignment was found. Please refresh and try again.');
+      return;
+    }
 
+    const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
+
+    try {
       console.log('🚂 Starting journey...');
       console.log('  - assignment_id:', todaySchedule.assignment_id);
       console.log('  - device_id:', deviceId);
 
-      // ✅ Send device_id in the request body
       const response = await api.post(
         `/staff/assignments/${todaySchedule.assignment_id}/start-journey`,
-        { device_id: deviceId }  // Body payload
+        { device_id: deviceId }
       );
 
       console.log('✅ Journey started:', response.data);
 
+      // Keep a usable ACTIVE assignment immediately, even if the refresh below
+      // briefly fails after the backend has already started the journey.
+      let refreshedAssignment = {
+        ...todaySchedule,
+        status: response.data?.status || 'ACTIVE',
+        schedule_id: response.data?.schedule_id ?? todaySchedule.schedule_id,
+      };
+
+      if (staffInfo?.staff_id) {
+        try {
+          const assignmentResponse = await api.get(
+            `/staff/assignments/current/${staffInfo.staff_id}`
+          );
+
+          if (assignmentResponse.data) {
+            refreshedAssignment = assignmentResponse.data;
+          }
+        } catch (refreshError) {
+          console.warn(
+            '⚠️ Journey started, but assignment refresh failed:',
+            refreshError
+          );
+        }
+      }
+
+      setTodaySchedule(refreshedAssignment);
+      setSharedCurrentAssignment?.(refreshedAssignment);
       setJourneyActive(true);
       setShowAlert(false);
+      setLastUpdated(new Date());
+
       navigate('/train-rider/tracking');
     } catch (err) {
       console.error('❌ Failed to start journey:', err);
-      console.error('Error response:', err.response?.data);
-      alert('Failed to start journey. Please try again.');
+      console.error(
+        'Error response:',
+        JSON.stringify(err.response?.data, null, 2)
+      );
+
+      const detail = err.response?.data?.detail;
+      const message =
+        typeof detail === 'string'
+          ? detail
+          : detail?.message || 'Failed to start journey. Please try again.';
+
+      alert(message);
     }
   };
 

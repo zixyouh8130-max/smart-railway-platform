@@ -13,7 +13,14 @@ import locationTrackingApi from '@/api/locationTracking';
 import { formatRailwayTime } from '@/utils/railwayDateTime';
 
 const LiveTrackingPage = () => {
-  const { user, staffInfo, currentAssignment, connectionStatus, batteryLevel } = useOutletContext();
+  const outletContext = useOutletContext() || {};
+  const {
+    user = null,
+    staffInfo = null,
+    currentAssignment = null,
+    connectionStatus = 'online',
+    batteryLevel = null,
+  } = outletContext;
   const [gpsData, setGpsData] = useState({
     latitude: null,
     longitude: null,
@@ -180,7 +187,7 @@ const LiveTrackingPage = () => {
     setGpsData({
       latitude,
       longitude,
-      speed: speed ? Math.round(speed * 2.2369362920544) : null,
+      speed: speed != null ? Math.round(speed * 2.2369362920544) : null,
       accuracy: Math.round(accuracy),
       lastUpdate: new Date()
     });
@@ -195,7 +202,7 @@ const LiveTrackingPage = () => {
         device_id: deviceId,
         latitude,
         longitude,
-        speed: speed ? Math.round(speed * 2.2369362920544) : null,
+        speed: speed != null ? Math.round(speed * 2.2369362920544) : null,
         accuracy: Math.round(accuracy)
       });
 
