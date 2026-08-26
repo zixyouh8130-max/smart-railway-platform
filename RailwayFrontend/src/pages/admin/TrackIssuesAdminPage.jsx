@@ -14,6 +14,7 @@ import Button from '@/components/ui/button';
 import Card from '@/components/ui/card';
 import { inspectionApi } from '@/api/inspectionAPI';
 import trackIssuesApi from '@/api/trackIssues';
+import AIReviewPanel from '@/components/TrackIssues/AIReviewPanel';
 
 const STATUSES = [
   'OPEN',
@@ -215,7 +216,7 @@ const TrackIssuesAdminPage = () => {
         {[
           ['Total issues', stats?.total ?? issues.length, AlertTriangle],
           ['Open work', stats?.open_work ?? issues.filter((item) => item.status !== 'RESOLVED').length, Wrench],
-          ['Repairing', stats?.by_status?.REPAIRING ?? 0, UserRoundCog],
+          ['Needs field check', stats?.needs_field_verification ?? 0, UserRoundCog],
           ['Resolved', stats?.resolved ?? 0, CheckCircle2],
         ].map(([label, value, Icon]) => (
           <Card key={label} padding="p-4" hover={false}>
@@ -256,6 +257,7 @@ const TrackIssuesAdminPage = () => {
                     <div className="flex flex-wrap gap-2 items-center">
                       <span className={`px-2 py-0.5 rounded-full border text-xs font-semibold ${statusClass(issue.status)}`}>{issue.status}</span>
                       {issue.ai_priority && <span className="text-xs text-gray-500">AI {String(issue.ai_priority).replaceAll('_', ' ')}</span>}
+                      <span className="text-xs text-gray-400">Field {String(issue.field_verification_status || 'NOT_CHECKED').replaceAll('_', ' ')}</span>
                     </div>
                     <p className="font-semibold text-gray-900 mt-2">{issue.defect_type}</p>
                     <p className="text-xs text-gray-500 mt-1">{issue.assigned_staff_name || issue.assigned_staff_code || 'Unassigned'} · {issue.run_id || issue.inspection_id.slice(0, 10)}</p>
@@ -306,8 +308,20 @@ const TrackIssuesAdminPage = () => {
               </div>
 
               <div>
-                <div className="flex items-center gap-2 mb-2"><Bot className="w-4 h-4 text-purple-600" /><h3 className="font-semibold">AI review available to engineer</h3></div>
-                <pre className="bg-purple-50 border border-purple-100 rounded-xl p-3 text-xs whitespace-pre-wrap break-words max-h-52 overflow-auto">{JSON.stringify(selectedIssue.ai_snapshot?.event_visual_review || selectedIssue.ai_snapshot?.inspection_advisory || {}, null, 2)}</pre>
+                <AIReviewPanel issue={selectedIssue} compact />
+              </div>
+
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-semibold text-emerald-900">Field verification</h3>
+                  <span className="text-xs font-semibold text-emerald-700">{String(selectedIssue.field_verification_status || 'NOT_CHECKED').replaceAll('_', ' ')}</span>
+                </div>
+                {selectedIssue.field_verification_note ? (
+                  <p className="text-sm text-gray-700 mt-2 whitespace-pre-wrap">{selectedIssue.field_verification_note}</p>
+                ) : (
+                  <p className="text-sm text-gray-500 mt-2">Engineer has not recorded a physical verification result yet.</p>
+                )}
+                {selectedIssue.field_verified_at && <p className="text-xs text-gray-400 mt-2">Recorded {formatDate(selectedIssue.field_verified_at)}{selectedIssue.field_verified_by_staff_code ? ` by ${selectedIssue.field_verified_by_staff_code}` : ''}</p>}
               </div>
 
               <div>

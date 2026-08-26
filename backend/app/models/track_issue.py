@@ -81,6 +81,18 @@ class TrackIssue(Base):
         nullable=True,
     )
 
+    field_verification_status: Mapped[str] = mapped_column(
+        String(30), default="NOT_CHECKED", nullable=False, index=True
+    )
+    field_verification_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    field_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    field_verified_by_staff_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("staff.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     resolution_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -97,6 +109,7 @@ class TrackIssue(Base):
     )
 
     assigned_staff = relationship("Staff", foreign_keys=[assigned_staff_id])
+    field_verified_by_staff = relationship("Staff", foreign_keys=[field_verified_by_staff_id])
     created_by_user = relationship("User", foreign_keys=[created_by_user_id])
     activities = relationship(
         "TrackIssueActivity",

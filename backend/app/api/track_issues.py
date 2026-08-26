@@ -23,6 +23,7 @@ from ..schemas.track_issue import (
     TrackIssueAssignmentRequest,
     TrackIssueCommentRequest,
     TrackIssueDetailResponse,
+    TrackIssueFieldVerificationRequest,
     TrackIssueLocationCheckRequest,
     TrackIssueLocationCheckResponse,
     TrackIssueResponse,
@@ -216,6 +217,15 @@ def _issue_to_dict(
         "last_location_distance_miles": issue.last_location_distance_miles,
         "last_location_proximity": issue.last_location_proximity,
         "location_verified_at": issue.location_verified_at,
+        "field_verification_status": issue.field_verification_status,
+        "field_verification_note": issue.field_verification_note,
+        "field_verified_at": issue.field_verified_at,
+        "field_verified_by_staff_id": issue.field_verified_by_staff_id,
+        "field_verified_by_staff_code": (
+            issue.field_verified_by_staff.staff_id
+            if getattr(issue, "field_verified_by_staff", None)
+            else None
+        ),
         "resolution_summary": issue.resolution_summary,
         "resolved_at": issue.resolved_at,
         "created_at": issue.created_at,
@@ -239,6 +249,7 @@ def _load_issue(db: Session, issue_id: UUID) -> TrackIssue:
         db.query(TrackIssue)
         .options(
             joinedload(TrackIssue.assigned_staff).joinedload(Staff.user),
+            joinedload(TrackIssue.field_verified_by_staff),
             joinedload(TrackIssue.activities).joinedload(TrackIssueActivity.actor_user),
             joinedload(TrackIssue.activities)
             .joinedload(TrackIssueActivity.actor_staff)
@@ -307,24 +318,108 @@ def _add_activity(
     return activity
 
 
-def _priority_from_source(inspection: dict, event: dict) -> Optional[str]:
+def _event_distance_m(event: dict) -> Optional[float]:
+    gps = event.get("gps") or {}
+    return _optional_float(
+        gps.get("distance_from_start_m")
+        if gps.get("distance_from_start_m") is not None
+        else event.get("distance_from_start_m")
+    )
+
+
+def _same_defect_type(left: Any, right: Any) -> bool:
+    if left in (None, "") or right in (None, ""):
+        return False
+    return str(left).strip().casefold() == str(right).strip().casefold()
+
+
+def _derive_event_ai_context(inspection: dict, event: dict) -> Dict[str, Any]:
+    """Map inspection-level AI advice back to this specific defect event."""
     visual = event.get("supplementary_visual_review") or {}
     advisory = inspection.get("ai_advisory") or {}
+    event_distance_m = _event_distance_m(event)
+    event_rail = str(event.get("rail_side") or "").strip().casefold()
+    event_defect = event.get("defect_type") or event.get("type") or event.get("class_name")
 
-    value = (
-        visual.get("priority")
-        or visual.get("severity")
-        or event.get("priority")
-        or inspection.get("ai_overall_priority")
-        or advisory.get("overall_priority")
-    )
-    return str(value) if value not in (None, "") else None
+    if visual.get("priority"):
+        return {
+            "issue_priority": str(visual.get("priority")),
+            "priority_source": "event_visual_review",
+            "priority_reason": visual.get("assessment") or visual.get("summary"),
+            "recommended_checks": visual.get("recommended_checks") or [],
+        }
+
+    for item in advisory.get("individual_high_priority_events") or []:
+        item_distance = _optional_float(item.get("route_distance_m"))
+        rail_matches = not item.get("rail_side") or str(item.get("rail_side")).strip().casefold() == event_rail
+        defect_matches = not item.get("defect_type") or _same_defect_type(item.get("defect_type"), event_defect)
+        distance_matches = (
+            item_distance is None
+            or event_distance_m is None
+            or abs(item_distance - event_distance_m) <= 0.75
+        )
+        if rail_matches and defect_matches and distance_matches:
+            return {
+                "issue_priority": str(item.get("priority") or "priority_inspection"),
+                "priority_source": "individual_high_priority_event",
+                "priority_reason": item.get("assessment"),
+                "recommended_checks": item.get("recommended_checks") or [],
+                "matched_high_priority_event": item,
+            }
+
+    if event_distance_m is not None:
+        for area in advisory.get("areas_of_attention") or []:
+            start_m = _optional_float(area.get("start_distance_m"))
+            end_m = _optional_float(area.get("end_distance_m"))
+            area_rail = str(area.get("rail_side") or "").strip().casefold()
+            if start_m is None or end_m is None:
+                continue
+            if area_rail and event_rail and area_rail != event_rail:
+                continue
+            if min(start_m, end_m) <= event_distance_m <= max(start_m, end_m):
+                return {
+                    "issue_priority": str(area.get("priority") or "monitor"),
+                    "priority_source": "area_of_attention",
+                    "priority_reason": area.get("assessment"),
+                    "recommended_checks": area.get("recommended_checks") or [],
+                    "matched_area": area,
+                }
+
+    if event.get("priority"):
+        return {
+            "issue_priority": str(event.get("priority")),
+            "priority_source": "event",
+            "priority_reason": None,
+            "recommended_checks": visual.get("recommended_checks") or [],
+        }
+
+    if visual.get("severity"):
+        return {
+            "issue_priority": str(visual.get("severity")),
+            "priority_source": "event_visual_severity",
+            "priority_reason": visual.get("assessment") or visual.get("summary"),
+            "recommended_checks": visual.get("recommended_checks") or [],
+        }
+
+    return {
+        "issue_priority": "unassessed",
+        "priority_source": "no_event_specific_priority",
+        "priority_reason": "No event-specific or spatial priority was provided by the AI review.",
+        "recommended_checks": [],
+    }
+
+
+def _priority_from_source(inspection: dict, event: dict) -> Optional[str]:
+    return _derive_event_ai_context(inspection, event).get("issue_priority")
 
 
 def _build_ai_snapshot(inspection: dict, event: dict) -> Dict[str, Any]:
-    """Freeze the AI evidence an engineer needs without coupling workflow state to MongoDB."""
+    """Freeze event evidence plus inspection context for human field review."""
+    event_context = _derive_event_ai_context(inspection, event)
+    advisory = inspection.get("ai_advisory") or {}
     return _json_safe_snapshot(
         {
+            "event_context": event_context,
             "event_visual_review": event.get("supplementary_visual_review"),
             "event_visual_reviewed_at": event.get("supplementary_visual_reviewed_at"),
             "event_bounding_box": event.get("bounding_box"),
@@ -336,7 +431,17 @@ def _build_ai_snapshot(inspection: dict, event: dict) -> Dict[str, Any]:
             "event_end_timestamp": event.get("end_timestamp"),
             "event_representative_timestamp": event.get("representative_timestamp"),
             "event_gps": event.get("gps"),
-            "inspection_advisory": inspection.get("ai_advisory"),
+            "inspection_context": {
+                "executive_summary": advisory.get("executive_summary"),
+                "overall_priority": advisory.get("overall_priority") or inspection.get("ai_overall_priority"),
+                "key_findings": advisory.get("key_findings") or [],
+                "recommended_actions": advisory.get("recommended_actions") or [],
+                "limitations": advisory.get("limitations") or [],
+                "trend_assessment": advisory.get("trend_assessment"),
+                "possible_contributing_factors": advisory.get("possible_contributing_factors") or [],
+                "defect_type_assessments": advisory.get("defect_type_assessments") or [],
+            },
+            "inspection_advisory": advisory,
             "inspection_spatial_summary": inspection.get("ai_spatial_summary"),
             "supplementary_visual_summary": inspection.get("supplementary_visual_summary"),
             "ai_model": inspection.get("ai_model"),
@@ -359,9 +464,17 @@ async def get_track_issue_statistics(db: Session = Depends(get_db)):
         .all()
     )
     by_status = {status_name: count for status_name, count in rows}
+    verification_rows = (
+        db.query(TrackIssue.field_verification_status, func.count(TrackIssue.id))
+        .group_by(TrackIssue.field_verification_status)
+        .all()
+    )
+    by_verification = {name: count for name, count in verification_rows}
     return {
         "total": sum(by_status.values()),
         "by_status": by_status,
+        "by_verification": by_verification,
+        "needs_field_verification": by_verification.get("NOT_CHECKED", 0),
         "open_work": sum(
             count
             for status_name, count in by_status.items()
@@ -903,6 +1016,53 @@ async def check_engineer_location(
 
 
 @router.patch(
+    "/{issue_id}/field-verification",
+    response_model=TrackIssueDetailResponse,
+)
+async def update_field_verification(
+    issue_id: UUID,
+    verification: TrackIssueFieldVerificationRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_track_engineer),
+):
+    issue = _load_issue(db, issue_id)
+    _ensure_engineer_can_access(issue, current_user)
+
+    staff_id = _actor_staff_id(current_user)
+    if issue.assigned_staff_id != staff_id:
+        raise HTTPException(status_code=409, detail="Claim or receive assignment before field verification")
+    if issue.status not in {"INSPECTING", "REPAIRING", "VERIFYING", "BLOCKED"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Field verification is available once physical inspection has started",
+        )
+
+    previous = issue.field_verification_status or "NOT_CHECKED"
+    new_value = verification.verification_status.value
+    issue.field_verification_status = new_value
+    issue.field_verification_note = verification.note.strip()
+    issue.field_verified_at = _utcnow()
+    issue.field_verified_by_staff_id = staff_id
+
+    _add_activity(
+        db,
+        issue,
+        current_user,
+        activity_type="FIELD_VERIFICATION",
+        message=verification.note.strip(),
+        message_kind="UPDATE",
+        extra_data={
+            "previous_verification": previous,
+            "verification_status": new_value,
+            "ai_defect_type": issue.defect_type,
+            "ai_confidence": issue.confidence,
+        },
+    )
+    db.commit()
+    return _issue_to_dict(_load_issue(db, issue_id), include_detail=True)
+
+
+@router.patch(
     "/{issue_id}/status",
     response_model=TrackIssueDetailResponse,
 )
@@ -947,6 +1107,17 @@ async def update_track_issue_status(
                 detail=f"Invalid engineer transition: {current} -> {requested}",
             )
 
+    if requested == "RESOLVED" and issue.field_verification_status == "NOT_CHECKED":
+        raise HTTPException(
+            status_code=409,
+            detail="Record a field verification result before resolving this issue",
+        )
+    if requested == "RESOLVED" and issue.field_verification_status == "UNABLE_TO_VERIFY":
+        raise HTTPException(
+            status_code=409,
+            detail="An issue that could not be field-verified cannot be resolved; continue inspection or mark it blocked",
+        )
+
     if requested in {"BLOCKED", "REOPENED", "RESOLVED"} and not (status_update.note or "").strip():
         reason_name = {
             "BLOCKED": "block reason",
@@ -966,6 +1137,10 @@ async def update_track_issue_status(
     elif requested == "REOPENED":
         issue.resolved_at = None
         issue.resolution_summary = None
+        issue.field_verification_status = "NOT_CHECKED"
+        issue.field_verification_note = None
+        issue.field_verified_at = None
+        issue.field_verified_by_staff_id = None
 
     _add_activity(
         db,

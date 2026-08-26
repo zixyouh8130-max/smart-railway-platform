@@ -43,6 +43,7 @@ const IssueCard = ({ issue, nearby, onOpen, onClaim }) => (
       {issue.rail_side ? `${issue.rail_side} rail · ` : ''}
       {issue.confidence != null ? `${(issue.confidence * 100).toFixed(1)}% confidence` : 'confidence unavailable'}
     </Text>
+    <Text style={styles.issueMeta}>Field: {String(issue.field_verification_status || 'NOT_CHECKED').replace(/_/g, ' ')}</Text>
     {issue.distance_from_start_miles != null ? (
       <Text style={styles.issueMeta}>Inspection position: {Number(issue.distance_from_start_miles).toFixed(2)} mi</Text>
     ) : null}

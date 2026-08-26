@@ -24,6 +24,7 @@ import 'leaflet/dist/leaflet.css';
 import Button from '@/components/ui/button';
 import Card from '@/components/ui/card';
 import trackIssuesApi from '@/api/trackIssues';
+import AIReviewPanel from '@/components/TrackIssues/AIReviewPanel';
 
 const STATUS_LABELS = {
   OPEN: 'Open',
@@ -102,6 +103,8 @@ const TrackEngineerIssuePage = () => {
   const [comment, setComment] = useState('');
   const [commentKind, setCommentKind] = useState('UPDATE');
   const [currentLocation, setCurrentLocation] = useState(null);
+  const [verificationStatus, setVerificationStatus] = useState('CONFIRMED');
+  const [verificationNote, setVerificationNote] = useState('');
 
   const load = async () => {
     try {
@@ -198,6 +201,28 @@ const TrackEngineerIssuePage = () => {
     }
   };
 
+  const saveFieldVerification = async () => {
+    if (!verificationNote.trim()) {
+      setError('Describe what you physically observed before saving field verification.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const data = await trackIssuesApi.updateFieldVerification(
+        issueId,
+        verificationStatus,
+        verificationNote.trim()
+      );
+      setIssue(data);
+      setVerificationNote('');
+      setError('');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not save field verification.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const addComment = async () => {
     if (!comment.trim()) return;
     setBusy(true);
@@ -239,8 +264,6 @@ const TrackEngineerIssuePage = () => {
   }
 
   const [proximityLabel, proximityClass] = proximityMeta[issue.last_location_proximity] || ['Not checked', 'bg-gray-50 text-gray-600 border-gray-200'];
-  const visualReview = issue.ai_snapshot?.event_visual_review;
-  const advisory = issue.ai_snapshot?.inspection_advisory;
 
   return (
     <div className="max-w-7xl mx-auto pb-24 space-y-5">
@@ -323,25 +346,7 @@ const TrackEngineerIssuePage = () => {
           </Card>
 
           <Card padding="p-5" hover={false}>
-            <div className="flex items-center gap-2 mb-3">
-              <Bot className="w-5 h-5 text-purple-600" />
-              <h2 className="font-bold text-gray-900">AI review</h2>
-            </div>
-            <div className="flex flex-wrap gap-3 mb-3 text-xs text-gray-500">
-              {issue.ai_snapshot?.event_representative_frame != null && <span>Representative frame: <strong>{issue.ai_snapshot.event_representative_frame}</strong></span>}
-              {issue.ai_snapshot?.event_representative_timestamp != null && <span>Video time: <strong>{Number(issue.ai_snapshot.event_representative_timestamp).toFixed(2)} s</strong></span>}
-              {issue.ai_snapshot?.event_detection_count != null && <span>Detections: <strong>{issue.ai_snapshot.event_detection_count}</strong></span>}
-            </div>
-            <div className="grid lg:grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase text-gray-500 mb-2">Finding-specific visual review</p>
-                <pre className="text-xs whitespace-pre-wrap break-words bg-purple-50 border border-purple-100 rounded-xl p-3 max-h-72 overflow-auto">{pretty(visualReview)}</pre>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase text-gray-500 mb-2">Inspection maintenance advisory</p>
-                <pre className="text-xs whitespace-pre-wrap break-words bg-blue-50 border border-blue-100 rounded-xl p-3 max-h-72 overflow-auto">{pretty(advisory)}</pre>
-              </div>
-            </div>
+            <AIReviewPanel issue={issue} />
           </Card>
 
           <Card padding="p-5" hover={false}>
@@ -399,6 +404,34 @@ const TrackEngineerIssuePage = () => {
             </Card>
           )}
 
+          {issue.assigned_staff_id && (
+            <Card padding="p-5" hover={false}>
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                <h2 className="font-bold text-gray-900">Field verification</h2>
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <p className="text-xs font-semibold uppercase text-gray-500">AI finding result</p>
+                <p className="font-semibold mt-1">{String(issue.field_verification_status || 'NOT_CHECKED').replaceAll('_', ' ')}</p>
+                {issue.field_verification_note && <p className="text-sm text-gray-600 mt-2 whitespace-pre-wrap">{issue.field_verification_note}</p>}
+                {issue.field_verified_at && <p className="text-xs text-gray-400 mt-2">Recorded {formatDate(issue.field_verified_at)}</p>}
+              </div>
+              {['INSPECTING', 'REPAIRING', 'VERIFYING', 'BLOCKED'].includes(issue.status) && issue.status !== 'RESOLVED' && (
+                <div className="mt-3 space-y-2">
+                  <select value={verificationStatus} onChange={(e) => setVerificationStatus(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white text-sm">
+                    <option value="CONFIRMED">Confirmed — AI finding is present</option>
+                    <option value="PARTIALLY_CONFIRMED">Partially confirmed</option>
+                    <option value="NOT_CONFIRMED">Not confirmed / false positive</option>
+                    <option value="UNABLE_TO_VERIFY">Unable to verify</option>
+                  </select>
+                  <textarea value={verificationNote} onChange={(e) => setVerificationNote(e.target.value)} rows={3} placeholder="Describe what you physically observed and any nearby component condition." className="w-full border border-gray-200 rounded-xl p-2 text-sm" />
+                  <Button className="w-full" disabled={busy || !verificationNote.trim()} onClick={saveFieldVerification}>Save verification</Button>
+                </div>
+              )}
+              {(issue.field_verification_status || 'NOT_CHECKED') === 'NOT_CHECKED' && <p className="text-xs text-amber-700 mt-2">Required before final resolution.</p>}
+            </Card>
+          )}
+
           <Card padding="p-5" hover={false}>
             <div className="flex items-center gap-2 mb-3">
               <Wrench className="w-5 h-5 text-amber-600" />
@@ -428,11 +461,20 @@ const TrackEngineerIssuePage = () => {
                 />
                 <div className="mt-3 space-y-2">
                   {(NEXT_ACTIONS[issue.status] || []).map(([status, label]) => (
-                    <Button key={status} className="w-full" variant={status === 'BLOCKED' ? 'outline' : 'primary'} disabled={busy} onClick={() => changeStatus(status)}>
+                    <Button
+                      key={status}
+                      className="w-full"
+                      variant={status === 'BLOCKED' ? 'outline' : 'primary'}
+                      disabled={busy || (status === 'RESOLVED' && ['NOT_CHECKED', 'UNABLE_TO_VERIFY'].includes(issue.field_verification_status || 'NOT_CHECKED'))}
+                      onClick={() => changeStatus(status)}
+                    >
                       {label}
                     </Button>
                   ))}
                 </div>
+                {issue.status === 'VERIFYING' && ['NOT_CHECKED', 'UNABLE_TO_VERIFY'].includes(issue.field_verification_status || 'NOT_CHECKED') && (
+                  <p className="text-xs text-amber-700 mt-2">Resolve becomes available after a usable field-verification result is recorded.</p>
+                )}
               </>
             )}
 

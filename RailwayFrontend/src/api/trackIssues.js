@@ -67,6 +67,14 @@ const trackIssuesApi = {
     return response.data;
   },
 
+  updateFieldVerification: async (issueId, verificationStatus, note) => {
+    const response = await api.patch(`/track-issues/${issueId}/field-verification`, {
+      verification_status: verificationStatus,
+      note,
+    });
+    return response.data;
+  },
+
   updateStatus: async (issueId, status, note = null) => {
     const response = await api.patch(`/track-issues/${issueId}/status`, {
       status,

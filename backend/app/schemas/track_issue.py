@@ -17,6 +17,14 @@ class TrackIssueStatus(str, Enum):
     REOPENED = "REOPENED"
 
 
+class TrackIssueFieldVerificationStatus(str, Enum):
+    NOT_CHECKED = "NOT_CHECKED"
+    CONFIRMED = "CONFIRMED"
+    PARTIALLY_CONFIRMED = "PARTIALLY_CONFIRMED"
+    NOT_CONFIRMED = "NOT_CONFIRMED"
+    UNABLE_TO_VERIFY = "UNABLE_TO_VERIFY"
+
+
 class TrackIssueMessageKind(str, Enum):
     COMMENT = "COMMENT"
     QUESTION = "QUESTION"
@@ -38,6 +46,11 @@ class TrackIssueCommentRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
     message_kind: TrackIssueMessageKind = TrackIssueMessageKind.COMMENT
     parent_activity_id: Optional[UUID] = None
+
+
+class TrackIssueFieldVerificationRequest(BaseModel):
+    verification_status: TrackIssueFieldVerificationStatus
+    note: str = Field(..., min_length=3, max_length=4000)
 
 
 class TrackIssueLocationCheckRequest(BaseModel):
@@ -85,6 +98,11 @@ class TrackIssueResponse(BaseModel):
     last_location_distance_miles: Optional[float] = None
     last_location_proximity: Optional[str] = None
     location_verified_at: Optional[datetime] = None
+    field_verification_status: TrackIssueFieldVerificationStatus = TrackIssueFieldVerificationStatus.NOT_CHECKED
+    field_verification_note: Optional[str] = None
+    field_verified_at: Optional[datetime] = None
+    field_verified_by_staff_id: Optional[UUID] = None
+    field_verified_by_staff_code: Optional[str] = None
     resolution_summary: Optional[str] = None
     resolved_at: Optional[datetime] = None
     created_at: datetime

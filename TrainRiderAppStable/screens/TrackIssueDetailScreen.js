@@ -71,6 +71,8 @@ const TrackIssueDetailScreen = () => {
   const [statusNote, setStatusNote] = useState('');
   const [comment, setComment] = useState('');
   const [commentKind, setCommentKind] = useState('UPDATE');
+  const [verificationStatus, setVerificationStatus] = useState('CONFIRMED');
+  const [verificationNote, setVerificationNote] = useState('');
 
   const load = useCallback(async (refresh = false) => {
     if (!issueId) return;
@@ -171,6 +173,23 @@ const TrackIssueDetailScreen = () => {
     }
   };
 
+  const saveFieldVerification = async () => {
+    if (!verificationNote.trim()) {
+      Alert.alert('Observation required', 'Describe what you physically observed before saving verification.');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const updated = await trackIssuesApi.updateFieldVerification(issueId, verificationStatus, verificationNote.trim());
+      setIssue(updated);
+      setVerificationNote('');
+    } catch (error) {
+      Alert.alert('Verification failed', error.response?.data?.detail || 'Please try again.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const updateStatus = async (nextStatus) => {
     if (['BLOCKED', 'RESOLVED'].includes(nextStatus) && !statusNote.trim()) {
       Alert.alert(
@@ -227,8 +246,11 @@ const TrackIssueDetailScreen = () => {
   }
 
   const aiSnapshot = issue.ai_snapshot || {};
-  const visualReview = aiSnapshot.event_visual_review;
-  const advisory = aiSnapshot.inspection_advisory;
+  const eventContext = aiSnapshot.event_context || {};
+  const inspectionContext = aiSnapshot.inspection_context || {};
+  const visualReview = aiSnapshot.event_visual_review || {};
+  const matchedArea = eventContext.matched_area || null;
+  const recommendedChecks = eventContext.recommended_checks || visualReview.recommended_checks || [];
 
   return (
     <ScrollView
@@ -297,21 +319,34 @@ const TrackIssueDetailScreen = () => {
         )}
       </View>
 
-      <Text style={styles.sectionTitle}>AI inspection review</Text>
+      <Text style={styles.sectionTitle}>AI decision support</Text>
       <View style={styles.card}>
-        <Text style={styles.subheading}>Finding review</Text>
-        {aiSnapshot.event_representative_frame != null ? <Text style={styles.meta}>Representative frame: {aiSnapshot.event_representative_frame}</Text> : null}
+        <View style={styles.rowBetween}>
+          <Text style={styles.subheading}>This defect</Text>
+          <Text style={styles.priority}>{statusLabel(issue.ai_priority || 'UNASSESSED')}</Text>
+        </View>
+        <Text style={styles.meta}>Confidence: {issue.confidence != null ? `${(Number(issue.confidence) * 100).toFixed(1)}%` : '—'}</Text>
+        <Text style={styles.meta}>Rail side: {issue.rail_side || '—'}</Text>
         {aiSnapshot.event_representative_timestamp != null ? <Text style={styles.meta}>Video time: {Number(aiSnapshot.event_representative_timestamp).toFixed(2)} s</Text> : null}
-        {aiSnapshot.event_detection_count != null ? <Text style={styles.meta}>Detections: {aiSnapshot.event_detection_count}</Text> : null}
-        <Text selectable style={styles.aiText}>{safeText(visualReview)}</Text>
-        <Text style={styles.subheading}>Inspection advisory</Text>
-        <Text selectable style={styles.aiText}>{safeText(advisory)}</Text>
-        {aiSnapshot.inspection_spatial_summary ? (
+        <Text style={styles.subheading}>Why AI assigned this priority</Text>
+        <Text style={styles.aiText}>{eventContext.priority_reason || visualReview.assessment || visualReview.summary || 'No event-specific explanation was provided.'}</Text>
+        {recommendedChecks.length > 0 ? (
           <>
-            <Text style={styles.subheading}>Spatial summary</Text>
-            <Text selectable style={styles.aiText}>{safeText(aiSnapshot.inspection_spatial_summary)}</Text>
+            <Text style={styles.subheading}>Recommended field checks</Text>
+            {recommendedChecks.map((item, index) => <Text key={index} style={styles.checkText}>• {item}</Text>)}
           </>
         ) : null}
+        {matchedArea ? (
+          <View style={styles.clusterBox}>
+            <Text style={styles.clusterTitle}>Nearby defect cluster</Text>
+            <Text style={styles.aiText}>{matchedArea.assessment || 'AI identified this event inside an area of attention.'}</Text>
+            <Text style={styles.meta}>{matchedArea.start_distance_m}–{matchedArea.end_distance_m} m · {matchedArea.rail_side || 'rail'} · {matchedArea.event_count || 0} events</Text>
+          </View>
+        ) : null}
+        <Text style={styles.subheading}>Whole inspection context</Text>
+        <Text style={styles.aiText}>{inspectionContext.executive_summary || 'No inspection summary available.'}</Text>
+        {(inspectionContext.limitations || []).map((item, index) => <Text key={`lim-${index}`} style={styles.helper}>• {item}</Text>)}
+        <Text style={styles.helper}>AI output is advisory. Field personnel must confirm the physical condition and determine the final maintenance action.</Text>
       </View>
 
       {!issue.assigned_staff_id && issue.status !== 'RESOLVED' ? (
@@ -323,6 +358,37 @@ const TrackIssueDetailScreen = () => {
               <Icon name="account-check" size={18} color="#fff" />
               <Text style={styles.primaryButtonText}>Claim this issue</Text>
             </TouchableOpacity>
+          </View>
+        </>
+      ) : null}
+
+      {issue.assigned_staff_id ? (
+        <>
+          <Text style={styles.sectionTitle}>Field verification</Text>
+          <View style={styles.card}>
+            <Text style={styles.subheading}>{statusLabel(issue.field_verification_status || 'NOT_CHECKED')}</Text>
+            {issue.field_verification_note ? <Text style={styles.aiText}>{issue.field_verification_note}</Text> : <Text style={styles.helper}>Record whether the AI finding is physically confirmed before final resolution.</Text>}
+            {['INSPECTING', 'REPAIRING', 'VERIFYING', 'BLOCKED'].includes(issue.status) && issue.status !== 'RESOLVED' ? (
+              <>
+                <View style={styles.wrapRow}>
+                  {[
+                    ['CONFIRMED', 'Confirmed'],
+                    ['PARTIALLY_CONFIRMED', 'Partial'],
+                    ['NOT_CONFIRMED', 'False positive'],
+                    ['UNABLE_TO_VERIFY', 'Unable'],
+                  ].map(([value, label]) => (
+                    <TouchableOpacity key={value} style={[styles.kindButton, verificationStatus === value && styles.kindButtonActive]} onPress={() => setVerificationStatus(value)}>
+                      <Text style={[styles.kindText, verificationStatus === value && styles.kindTextActive]}>{label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TextInput style={styles.commentInput} placeholder="What did you physically observe?" multiline value={verificationNote} onChangeText={setVerificationNote} />
+                <TouchableOpacity style={styles.primaryButton} onPress={saveFieldVerification} disabled={actionLoading || !verificationNote.trim()}>
+                  <Icon name="shield-check" size={18} color="#fff" />
+                  <Text style={styles.primaryButtonText}>Save field verification</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
           </View>
         </>
       ) : null}
@@ -344,12 +410,15 @@ const TrackIssueDetailScreen = () => {
                   key={next}
                   style={[styles.statusButton, next === 'BLOCKED' && styles.blockedButton]}
                   onPress={() => updateStatus(next)}
-                  disabled={actionLoading}
+                  disabled={actionLoading || (next === 'RESOLVED' && ['NOT_CHECKED', 'UNABLE_TO_VERIFY'].includes(issue.field_verification_status || 'NOT_CHECKED'))}
                 >
                   <Text style={styles.statusButtonText}>{statusLabel(next)}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+            {issue.status === 'VERIFYING' && ['NOT_CHECKED', 'UNABLE_TO_VERIFY'].includes(issue.field_verification_status || 'NOT_CHECKED') ? (
+              <Text style={styles.warning}>Resolve is unavailable until a usable field-verification result is recorded.</Text>
+            ) : null}
           </View>
         </>
       ) : null}
@@ -444,6 +513,9 @@ const styles = StyleSheet.create({
   locationResultText: { color: '#065f46', fontSize: 12, marginTop: 2 },
   subheading: { fontSize: 13, fontWeight: '800', color: '#334155', marginTop: 4, marginBottom: 6 },
   aiText: { fontSize: 12, color: '#475569', lineHeight: 18, backgroundColor: '#f8fafc', borderRadius: 9, padding: 9, marginBottom: 12 },
+  checkText: { fontSize: 12, color: '#334155', lineHeight: 19, marginBottom: 5 },
+  clusterBox: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 10, padding: 10, marginBottom: 12 },
+  clusterTitle: { fontSize: 13, fontWeight: '800', color: '#92400e', marginBottom: 5 },
   noteInput: { minHeight: 82, borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, padding: 10, color: '#0f172a', textAlignVertical: 'top' },
   wrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   statusButton: { backgroundColor: '#2563eb', borderRadius: 9, paddingVertical: 9, paddingHorizontal: 11, marginTop: 10 },
