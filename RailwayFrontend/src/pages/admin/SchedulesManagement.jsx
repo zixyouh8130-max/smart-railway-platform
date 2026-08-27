@@ -359,12 +359,36 @@ const SchedulesManagement = () => {
       if (data.status && data.status !== selectedSchedule.status) {
         updateData.status = data.status;
       }
-      if (data.hasOwnProperty('is_overnight')) {
+      if (data.hasOwnProperty('is_overnight') && Boolean(data.is_overnight) !== Boolean(selectedSchedule.is_overnight)) {
         updateData.is_overnight = data.is_overnight;
       }
       if (data.arrival_date) {
         const arrivalDateStr = data.arrival_date instanceof Date ? data.arrival_date.toISOString().split('T')[0] : data.arrival_date.split('T')[0];
-        updateData.arrival_date = arrivalDateStr;
+        const currentArrivalDate = selectedSchedule.arrival_date ? selectedSchedule.arrival_date.split('T')[0] : null;
+        if (arrivalDateStr !== currentArrivalDate) {
+          updateData.arrival_date = arrivalDateStr;
+        }
+      } else if (selectedSchedule.arrival_date && !data.is_overnight) {
+        updateData.arrival_date = null;
+      }
+
+      // Staff selections are part of the schedule edit. Preserve partial edits
+      // and let the backend merge them with roles that were not changed.
+      const normalizeId = value => value || '';
+      if (normalizeId(data.driver_id) !== normalizeId(selectedSchedule.driver_id)) {
+        updateData.driver_id = data.driver_id || null;
+      }
+      if (normalizeId(data.assistant_driver_id) !== normalizeId(selectedSchedule.assistant_driver_id)) {
+        updateData.assistant_driver_id = data.assistant_driver_id || null;
+      }
+      if (normalizeId(data.guard_id) !== normalizeId(selectedSchedule.guard_id)) {
+        updateData.guard_id = data.guard_id || null;
+      }
+
+      const currentCheckers = [...(selectedSchedule.ticket_checker_ids || [])].sort();
+      const nextCheckers = [...(data.ticket_checker_ids || [])].sort();
+      if (JSON.stringify(currentCheckers) !== JSON.stringify(nextCheckers)) {
+        updateData.ticket_checker_ids = nextCheckers;
       }
 
       if (Object.keys(updateData).length === 0) {

@@ -8,7 +8,7 @@ from datetime import datetime, timezone, date, time, timedelta
 from pydantic import BaseModel
 from ..core.database import get_db
 from ..core.railway_time import railway_now, railway_today
-from ..models import RouteStation, TrainStop, StationArrivalLog
+from ..models import RouteStation, TrainStop, StationArrivalLog, Station
 from ..models.train_rider_device import TrainRiderDevice
 from ..models.staff import Staff, StaffRole, StaffStatus
 from ..models.train_staff_assignment import TrainStaffAssignment, AssignmentStatus
@@ -313,16 +313,33 @@ async def get_current_assignment(
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
 
-    # Get today's active/scheduled assignment
+    # Schedule is authoritative for the service date. First return any ACTIVE
+    # assignment (including an overnight run that crossed midnight), then look
+    # for a planned assignment whose schedule departs today.
     today = railway_today()
-    assignment = db.query(TrainStaffAssignment).filter(
-        TrainStaffAssignment.staff_id == staff.id,
-        func.date(TrainStaffAssignment.assignment_date) == today,
-        TrainStaffAssignment.status.in_([
-            AssignmentStatus.SCHEDULED,
-            AssignmentStatus.ACTIVE
-        ])
-    ).first()
+    assignment = (
+        db.query(TrainStaffAssignment)
+        .filter(
+            TrainStaffAssignment.staff_id == staff.id,
+            TrainStaffAssignment.status == AssignmentStatus.ACTIVE,
+        )
+        .order_by(TrainStaffAssignment.start_time.desc())
+        .first()
+    )
+
+    if not assignment:
+        assignment = (
+            db.query(TrainStaffAssignment)
+            .join(Schedule, TrainStaffAssignment.schedule_id == Schedule.id)
+            .filter(
+                TrainStaffAssignment.staff_id == staff.id,
+                TrainStaffAssignment.status == AssignmentStatus.SCHEDULED,
+                Schedule.departure_date == today,
+                Schedule.status.in_(["SCHEDULED", "DELAYED"]),
+            )
+            .order_by(Schedule.departure_time.asc())
+            .first()
+        )
 
     if not assignment:
         return None
@@ -562,6 +579,38 @@ async def start_journey(
             )
         )
 
+    # Automatic station detection requires station coordinates. Fail before
+    # mutating runtime state so the rider gets a clear configuration error.
+    station_ids = [rs.station_id for rs in route_stations if rs.station_id]
+    station_map = {
+        station.id: station
+        for station in (
+            db.query(Station).filter(Station.id.in_(station_ids)).all()
+            if station_ids else []
+        )
+    }
+    missing_coordinate_stations = [
+        {"route_station_id": rs.id, "station_name": rs.station_name}
+        for rs in route_stations
+        if (
+            not rs.station_id
+            or rs.station_id not in station_map
+            or station_map[rs.station_id].latitude is None
+            or station_map[rs.station_id].longitude is None
+        )
+    ]
+    if missing_coordinate_stations:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "Automatic location tracking requires latitude/longitude "
+                    "for every station on the route."
+                ),
+                "stations": missing_coordinate_stations,
+            },
+        )
+
     current_time = railway_now()
 
     staff = (
@@ -572,6 +621,32 @@ async def start_journey(
 
     device = None
     device_id = request.device_id
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id is required to start tracking")
+    if device_id != token_staff_id:
+        raise HTTPException(
+            status_code=403,
+            detail="The tracking device ID must match the logged-in staff ID",
+        )
+
+    # One schedule has one authoritative live location reporter. This prevents
+    # two crew phones from racing station arrival/departure state.
+    active_schedule_device = (
+        db.query(TrainRiderDevice)
+        .filter(
+            TrainRiderDevice.schedule_id == schedule.id,
+            TrainRiderDevice.status == "ACTIVE",
+        )
+        .first()
+    )
+    if active_schedule_device and active_schedule_device.device_id != device_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Schedule #{schedule.id} is already being tracked by "
+                f"device {active_schedule_device.device_id}"
+            ),
+        )
 
     try:
         # ----------------------------------------------------
@@ -684,7 +759,7 @@ async def start_journey(
                     route_station_id=first_route_station.id,
                     train_stop_id=first_train_stop.id,
                     schedule_date=schedule.departure_date,
-                    arrival_time=current_time,
+                    arrival_time=None,
                     departure_time=current_time,
                     expected_arrival_time=first_train_stop.expected_arrival_time,
                     expected_departure_time=first_train_stop.expected_departure_time,

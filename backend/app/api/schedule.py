@@ -890,39 +890,52 @@ async def create_schedule(schedule_data: ScheduleCreate, db: Session = Depends(g
 
 @router.put("/{schedule_id}", response_model=ScheduleResponse, dependencies=[Depends(get_current_admin_user)])
 async def update_schedule(schedule_id: int, schedule_data: ScheduleUpdate, db: Session = Depends(get_db)):
-    """Update a schedule and its staff assignments"""
+    """Update a pre-departure schedule and keep staff assignments synchronized."""
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
-    # 🆕 Check if schedule is ACTIVE or COMPLETED
+    # Runtime rows become authoritative after departure. Planned schedule edits
+    # must stop once the run is active/completed or a tracker is active.
     if schedule.status in ["ACTIVE", "COMPLETED"]:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot update schedule with status '{schedule.status}'. Only SCHEDULED, DELAYED, or CANCELLED schedules can be updated."
+            detail=(
+                f"Cannot update schedule with status '{schedule.status}'. "
+                "Only SCHEDULED, DELAYED, or CANCELLED schedules can be updated."
+            ),
         )
 
-    # 🆕 Also check if any device is actively tracking this schedule
     active_device = db.query(TrainRiderDevice).filter(
         TrainRiderDevice.schedule_id == schedule_id,
-        TrainRiderDevice.status == "ACTIVE"
+        TrainRiderDevice.status == "ACTIVE",
     ).first()
-
     if active_device:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot update schedule while train is actively running. Device '{active_device.device_id}' is currently tracking this schedule."
+            detail=(
+                "Cannot update schedule while train is actively running. "
+                f"Device '{active_device.device_id}' is tracking this schedule."
+            ),
         )
 
     try:
-        update_data = schedule_data.model_dump(exclude_unset=True)
-        staff_data = {
-            'driver_id': update_data.pop('driver_id', None),
-            'assistant_driver_id': update_data.pop('assistant_driver_id', None),
-            'guard_id': update_data.pop('guard_id', None),
-            'ticket_checker_ids': update_data.pop('ticket_checker_ids', None),
+        raw_update = schedule_data.model_dump(exclude_unset=True)
+        explicitly_set = set(schedule_data.model_fields_set)
+
+        staff_fields = {
+            "driver_id",
+            "assistant_driver_id",
+            "guard_id",
+            "ticket_checker_ids",
         }
-        update_data = _clean_schedule_dict(update_data)
+        has_staff_updates = bool(explicitly_set & staff_fields)
+
+        incoming_staff = {
+            key: raw_update.pop(key, None)
+            for key in staff_fields
+        }
+        update_data = _clean_schedule_dict(raw_update)
 
         booking_exists = (
             db.query(Booking.id)
@@ -930,20 +943,19 @@ async def update_schedule(schedule_id: int, schedule_data: ScheduleUpdate, db: S
             .first()
             is not None
         )
-
-        identity_fields = {"train_id", "departure_date"}
-        if booking_exists and any(field in update_data for field in identity_fields):
+        if booking_exists and any(
+            field in update_data for field in {"train_id", "departure_date"}
+        ):
             raise HTTPException(
                 status_code=409,
                 detail=(
                     "Cannot change train or travel date because this schedule "
                     "already has booking history"
-                )
+                ),
             )
 
-        # 🔑 Check if train_id is being changed
         old_train_id = schedule.train_id
-        new_train_id = update_data.get('train_id', old_train_id)
+        new_train_id = update_data.get("train_id", old_train_id)
         train_changed = old_train_id != new_train_id
 
         if train_changed:
@@ -952,69 +964,125 @@ async def update_schedule(schedule_id: int, schedule_data: ScheduleUpdate, db: S
                 raise HTTPException(status_code=400, detail="New train not found")
             if new_train.route_id is None:
                 raise HTTPException(status_code=400, detail="New train has no assigned route")
-            # Schedule route identity follows the selected train.
             update_data["route_id"] = new_train.route_id
 
-        # Parse times if needed
-        if 'departure_time' in update_data and update_data['departure_time'] and isinstance(
-                update_data['departure_time'], str):
-            h, m = update_data['departure_time'].split(':')
-            update_data['departure_time'] = dt_time(int(h), int(m))
-        if 'arrival_time' in update_data and update_data['arrival_time'] and isinstance(update_data['arrival_time'],
-                                                                                        str):
-            h, m = update_data['arrival_time'].split(':')
-            update_data['arrival_time'] = dt_time(int(h), int(m))
+        for field in ("departure_time", "arrival_time"):
+            value = update_data.get(field)
+            if value and isinstance(value, str):
+                h, m = value.split(":")
+                update_data[field] = dt_time(int(h), int(m))
 
-        # Update schedule fields
-        for key, value in update_data.items():
-            if hasattr(schedule, key):
-                setattr(schedule, key, value)
+        # Work out the proposed plan BEFORE mutating ORM rows so staff conflict
+        # checks use the new date/time even when staff selections did not change.
+        proposed_date = update_data.get("departure_date", schedule.departure_date)
+        proposed_departure = update_data.get("departure_time", schedule.departure_time)
+        proposed_arrival = update_data.get("arrival_time", schedule.arrival_time)
+        proposed_overnight = update_data.get("is_overnight", schedule.is_overnight or False)
 
-        if schedule.is_overnight and not schedule.arrival_date:
-            schedule.arrival_date = schedule.departure_date + timedelta(days=1)
+        existing_staff = _get_staff_assignments_dict(db, schedule_id)
+        merged_staff = {
+            "driver_id": existing_staff["driver_id"],
+            "assistant_driver_id": existing_staff["assistant_driver_id"],
+            "guard_id": existing_staff["guard_id"],
+            "ticket_checker_ids": list(existing_staff["ticket_checker_ids"]),
+        }
 
-        # Update TrainRiderDevice if train changed
-        if train_changed:
-            print(f"🔄 Train changed from {old_train_id} to {new_train_id}")
-
-            devices = db.query(TrainRiderDevice).filter(
-                TrainRiderDevice.schedule_id == schedule_id
-            ).all()
-
-            for device in devices:
-                device.train_id = new_train_id
-                print(f"✅ Device {device.device_id} updated: train_id={new_train_id}")
-
-            staff_assignments = db.query(TrainStaffAssignment).filter(
-                TrainStaffAssignment.schedule_id == schedule_id
-            ).all()
-
-            for assignment in staff_assignments:
-                assignment.train_id = new_train_id
-                print(f"✅ Staff assignment {assignment.id} updated: train_id={new_train_id}")
-
-        # Handle staff updates
-        has_staff_updates = any(v is not None for v in staff_data.values())
         if has_staff_updates:
-            staff_to_validate = {k: v for k, v in staff_data.items() if v is not None and v != []}
+            for field in staff_fields:
+                if field not in explicitly_set:
+                    continue
+                value = incoming_staff.get(field)
+                if field == "ticket_checker_ids":
+                    merged_staff[field] = [v for v in (value or []) if v]
+                else:
+                    merged_staff[field] = value or None
+
+        # Revalidate whenever the plan OR staff changes. is_staff_available()
+        # excludes this schedule_id, so its current assignments don't conflict
+        # with themselves.
+        plan_changed = any(
+            field in update_data
+            for field in {
+                "train_id",
+                "departure_date",
+                "departure_time",
+                "arrival_time",
+                "is_overnight",
+            }
+        )
+        if has_staff_updates or plan_changed:
+            staff_to_validate = {
+                key: value
+                for key, value in merged_staff.items()
+                if value not in (None, "", [])
+            }
             if staff_to_validate:
                 staff_errors = _validate_staff_for_schedule(
                     db,
                     staff_to_validate,
-                    schedule.departure_date,
+                    proposed_date,
                     schedule_id=schedule_id,
-                    departure_time=schedule.departure_time,
-                    arrival_time=schedule.arrival_time,
-                    is_overnight=schedule.is_overnight,
+                    departure_time=proposed_departure,
+                    arrival_time=proposed_arrival,
+                    is_overnight=bool(proposed_overnight),
                 )
                 if staff_errors:
-                    raise HTTPException(status_code=400,
-                                        detail={"message": "Staff availability conflict", "errors": staff_errors})
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "message": "Staff availability conflict",
+                            "errors": staff_errors,
+                        },
+                    )
 
-            db.query(TrainStaffAssignment).filter(TrainStaffAssignment.schedule_id == schedule_id).delete()
+        for key, value in update_data.items():
+            if hasattr(schedule, key):
+                setattr(schedule, key, value)
+
+        if schedule.is_overnight:
+            # If departure date moved and the caller didn't explicitly provide a
+            # different arrival date, keep the overnight arrival date aligned.
+            if "arrival_date" not in update_data or update_data.get("arrival_date") is None:
+                schedule.arrival_date = schedule.departure_date + timedelta(days=1)
+        else:
+            schedule.arrival_date = None
+
+        if train_changed:
+            devices = db.query(TrainRiderDevice).filter(
+                TrainRiderDevice.schedule_id == schedule_id
+            ).all()
+            for device in devices:
+                device.train_id = schedule.train_id
+
+        if has_staff_updates:
+            # Pre-departure assignments are safe to replace as one set. Merged
+            # staff data preserves any role the admin did not edit.
+            db.query(TrainStaffAssignment).filter(
+                TrainStaffAssignment.schedule_id == schedule_id
+            ).delete(synchronize_session=False)
             db.flush()
-            if staff_to_validate:
-                _create_staff_assignments(db, schedule, staff_to_validate)
+            _create_staff_assignments(db, schedule, merged_staff)
+
+        # Schedule is the planning source of truth until departure. Keep all
+        # duplicate assignment metadata aligned even when staff did not change.
+        assignments = db.query(TrainStaffAssignment).filter(
+            TrainStaffAssignment.schedule_id == schedule_id
+        ).all()
+        planned_start = datetime.combine(
+            schedule.departure_date,
+            schedule.departure_time or dt_time.min,
+        )
+        planned_date = datetime.combine(schedule.departure_date, dt_time.min)
+
+        for assignment in assignments:
+            assignment.train_id = schedule.train_id
+            assignment.assignment_date = planned_date
+            assignment.start_time = planned_start
+            assignment.end_time = None
+            if schedule.status == "CANCELLED":
+                assignment.status = AssignmentStatus.CANCELLED
+            elif assignment.status == AssignmentStatus.CANCELLED:
+                assignment.status = AssignmentStatus.SCHEDULED
 
         db.commit()
         db.refresh(schedule)
@@ -1024,6 +1092,7 @@ async def update_schedule(schedule_id: int, schedule_data: ScheduleUpdate, db: S
         return ScheduleResponse(**response_dict)
 
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         db.rollback()

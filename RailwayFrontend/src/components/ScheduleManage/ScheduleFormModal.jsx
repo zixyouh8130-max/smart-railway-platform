@@ -75,7 +75,15 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
     if (formData.train_id && formData.departure_date && isOpen) {
       fetchAvailableStaff();
     }
-  }, [formData.train_id, formData.departure_date, isOpen]);
+  }, [
+    formData.train_id,
+    formData.departure_date,
+    formData.departure_time,
+    formData.arrival_time,
+    formData.is_overnight,
+    schedule?.id,
+    isOpen,
+  ]);
 
   const fetchAvailableStaff = async () => {
       if (!formData.train_id) return;
@@ -95,6 +103,10 @@ const ScheduleFormModal = ({ isOpen, onClose, onSubmit, schedule, trains, onDele
           }
           if (formData.is_overnight) {
               params.is_overnight = true;
+          }
+          if (schedule?.id) {
+              // Exclude this schedule from conflict checks while editing it.
+              params.schedule_id = schedule.id;
           }
 
           const response = await api.get(`/staff/available-for-train/${formData.train_id}`, {

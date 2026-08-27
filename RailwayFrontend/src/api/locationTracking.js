@@ -16,6 +16,18 @@ const locationTrackingApi = {
     }
   },
 
+
+  // Manual fallback: mark only the next expected station as arrived.
+  manualArrival: async (deviceId, arrivalData) => {
+    try {
+      const response = await api.post(`/tracking/manual-arrival/${deviceId}`, arrivalData);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Manual arrival error:', error);
+      throw error.response?.data || { detail: error.message };
+    }
+  },
+
   // Log departure from station
   logDeparture: async (deviceId, trainStopId, departureData = {}) => {
     try {

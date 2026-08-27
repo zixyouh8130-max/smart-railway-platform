@@ -30,7 +30,10 @@ class LocationTrackingService:
     - TrainRiderDevice = current live pointer.
     """
 
-    ARRIVAL_RADIUS_METERS = 3.0
+    # Phone GPS commonly varies by several metres. Use hysteresis so a noisy
+    # fix cannot flap ARRIVED/DEPARTED around one boundary.
+    ARRIVAL_RADIUS_METERS = 30.0
+    DEPARTURE_RADIUS_METERS = 50.0
 
     def __init__(self, db: Session):
         self.db = db
@@ -76,6 +79,26 @@ class LocationTrackingService:
         if not device:
             raise ValueError("Device not found")
         return device
+
+    def _assert_device_owner(
+        self,
+        device: TrainRiderDevice,
+        actor_staff_id: Optional[str]
+    ) -> None:
+        """Ensure the authenticated train crew member owns this staff device."""
+        if not actor_staff_id:
+            raise ValueError("Authenticated staff identity is required")
+
+        staff = (
+            self.db.query(Staff)
+            .filter(Staff.staff_id == actor_staff_id)
+            .first()
+        )
+        if not staff:
+            raise ValueError("Authenticated staff profile not found")
+
+        if device.staff_id != staff.id:
+            raise ValueError("This tracking device is not assigned to the logged-in staff member")
 
     def _get_schedule_for_device(self, device: TrainRiderDevice) -> Schedule:
         if not device.schedule_id:
@@ -207,9 +230,11 @@ class LocationTrackingService:
         accuracy: Optional[float] = None,
         manual_arrival: bool = False,
         route_station_id: Optional[int] = None,
-        train_stop_id: Optional[int] = None
+        train_stop_id: Optional[int] = None,
+        actor_staff_id: Optional[str] = None
     ) -> dict:
         device = self._get_device(device_id)
+        self._assert_device_owner(device, actor_staff_id)
         schedule = self._get_schedule_for_device(device)
 
         if schedule.status != "ACTIVE":
@@ -241,13 +266,23 @@ class LocationTrackingService:
                 "device_id": device_id,
                 "schedule_id": schedule.id,
                 "status": "updated",
-                "arrival_detected": False
+                "arrival_detected": False,
+                "arrival_radius_m": self.ARRIVAL_RADIUS_METERS,
+                "departure_radius_m": self.DEPARTURE_RADIUS_METERS
             }
 
             if manual_arrival:
                 if not route_station_id:
                     raise ValueError(
                         "route_station_id is required for manual arrival"
+                    )
+                if device.current_route_station_id is not None:
+                    raise ValueError(
+                        "Cannot mark another arrival until the current station has departed"
+                    )
+                if device.next_route_station_id != route_station_id:
+                    raise ValueError(
+                        "Manual arrival is allowed only for the next expected station"
                     )
 
                 result.update(
@@ -333,8 +368,10 @@ class LocationTrackingService:
                             coords[0],
                             coords[1]
                         )
+                        result["distance_to_station_m"] = round(distance, 1)
+                        result["proximity_station_name"] = current_rs.station_name
 
-                        if distance > self.ARRIVAL_RADIUS_METERS:
+                        if distance > self.DEPARTURE_RADIUS_METERS:
                             depart_result = self._auto_depart_from_station(
                                 device=device,
                                 schedule=schedule,
@@ -407,6 +444,8 @@ class LocationTrackingService:
             coords[0],
             coords[1]
         )
+        result["distance_to_station_m"] = round(distance, 1)
+        result["proximity_station_name"] = candidate.station_name
 
         if distance > self.ARRIVAL_RADIUS_METERS:
             return result
@@ -595,6 +634,69 @@ class LocationTrackingService:
     # Manual arrival/departure
     # ============================================================
 
+    def manual_arrival(
+        self,
+        device_id: str,
+        route_station_id: int,
+        train_stop_id: Optional[int] = None,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        actor_staff_id: Optional[str] = None
+    ) -> dict:
+        """Manual fallback for the next expected station only.
+
+        This creates station runtime state but deliberately does not fabricate a
+        LocationHistory GPS point when the browser has no fresh coordinate.
+        """
+        device = self._get_device(device_id)
+        self._assert_device_owner(device, actor_staff_id)
+        schedule = self._get_schedule_for_device(device)
+
+        if schedule.status != "ACTIVE":
+            raise ValueError(f"Schedule #{schedule.id} is not active")
+        if device.current_route_station_id is not None:
+            raise ValueError("Depart the current station before marking another arrival")
+        if device.next_route_station_id != route_station_id:
+            raise ValueError("Manual arrival is allowed only for the next expected station")
+
+        route_station = (
+            self.db.query(RouteStation)
+            .filter(
+                RouteStation.id == route_station_id,
+                RouteStation.route_id == schedule.route_id
+            )
+            .first()
+        )
+        if not route_station:
+            raise ValueError("Route station does not belong to the active schedule")
+
+        if latitude is None or longitude is None:
+            if device.current_latitude is not None and device.current_longitude is not None:
+                latitude = float(device.current_latitude)
+                longitude = float(device.current_longitude)
+            else:
+                coords = self._get_station_coordinates(route_station)
+                if not coords:
+                    raise ValueError(
+                        "No GPS fix or station coordinates are available for manual arrival"
+                    )
+                latitude, longitude = coords
+
+        try:
+            result = self._handle_manual_arrival(
+                device=device,
+                schedule=schedule,
+                route_station_id=route_station_id,
+                train_stop_id=train_stop_id,
+                latitude=float(latitude),
+                longitude=float(longitude)
+            )
+            self.db.commit()
+            return result
+        except Exception:
+            self.db.rollback()
+            raise
+
     def _handle_manual_arrival(
         self,
         device: TrainRiderDevice,
@@ -673,10 +775,14 @@ class LocationTrackingService:
         device_id: str,
         train_stop_id: int,
         manual_departure: bool = False,
-        route_station_id: Optional[int] = None
+        route_station_id: Optional[int] = None,
+        actor_staff_id: Optional[str] = None
     ) -> dict:
         device = self._get_device(device_id)
+        self._assert_device_owner(device, actor_staff_id)
         schedule = self._get_schedule_for_device(device)
+        if schedule.status != "ACTIVE":
+            raise ValueError(f"Schedule #{schedule.id} is not active")
         current_time = railway_now()
 
         train_stop = (
@@ -713,16 +819,18 @@ class LocationTrackingService:
                 "Route station does not belong to the current schedule route"
             )
 
+        if device.current_route_station_id != route_station.id:
+            raise ValueError(
+                "Manual departure is allowed only from the station currently marked ARRIVED"
+            )
+
         arrival_log = self._get_runtime_log(
             schedule.id,
             route_station.id
         )
 
         if not arrival_log or arrival_log.status != "ARRIVED":
-            return {
-                "status": "no_arrival_log_found",
-                "schedule_id": schedule.id
-            }
+            raise ValueError("No ARRIVED station log exists for this departure")
 
         try:
             arrival_log.departure_time = current_time
@@ -780,15 +888,10 @@ class LocationTrackingService:
         """
         Complete the dated run without touching TrainStop.
         """
-        # Preserve compatibility with the current frontend behavior.
-        arrival_log.departure_time = arrival_log.departure_time or current_time
-        arrival_log.status = "DEPARTED"
-        arrival_log.stop_duration_seconds = (
-            arrival_log.stop_duration_seconds or 0
-        )
-        arrival_log.stop_duration_minutes = (
-            arrival_log.stop_duration_minutes or 0
-        )
+        # The destination is complete on ARRIVAL. Do not invent a departure
+        # event from the final station.
+        arrival_log.status = "ARRIVED"
+        arrival_log.departure_time = None
 
         schedule.status = "COMPLETED"
         schedule.actual_arrival_time = current_time
@@ -819,7 +922,7 @@ class LocationTrackingService:
                 staff.is_available = True
                 staff.status = StaffStatus.ACTIVE
 
-        device.current_route_station_id = None
+        device.current_route_station_id = route_station.id
         device.next_route_station_id = None
         device.status = "INACTIVE"
 
@@ -830,8 +933,13 @@ class LocationTrackingService:
     # Status
     # ============================================================
 
-    def get_device_status(self, device_id: str) -> dict:
+    def get_device_status(
+        self,
+        device_id: str,
+        actor_staff_id: Optional[str] = None
+    ) -> dict:
         device = self._get_device(device_id)
+        self._assert_device_owner(device, actor_staff_id)
 
         recent_locations = []
         recent_logs = []

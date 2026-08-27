@@ -163,7 +163,12 @@ const TrainRiderHome = () => {
       return;
     }
 
-    const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
+    if (!staffInfo?.staff_id) {
+      alert('Train rider staff ID is missing. Please sign in again.');
+      return;
+    }
+
+    const deviceId = staffInfo.staff_id;
 
     try {
       console.log('🚂 Starting journey...');

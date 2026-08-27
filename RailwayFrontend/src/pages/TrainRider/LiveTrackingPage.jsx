@@ -34,11 +34,16 @@ const LiveTrackingPage = () => {
   const [currentStation, setCurrentStation] = useState(null);
   const [nextStation, setNextStation] = useState(null);
   const [isTracking, setIsTracking] = useState(false);
-  const [watchId, setWatchId] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [notification, setNotification] = useState(null);
   const [journeyCompleted, setJourneyCompleted] = useState(false);
+  const [gpsError, setGpsError] = useState(null);
+  const [manualMode, setManualMode] = useState(false);
+  const [distanceToStation, setDistanceToStation] = useState(null);
 
+  const watchIdRef = useRef(null);
+  const journeyCompletedRef = useRef(false);
+  const sendingLocationRef = useRef(false);
   const lastAutoEventRef = useRef({ station: null, time: null, type: null });
 
   const showNotification = (title, description, type = 'success') => {
@@ -47,23 +52,32 @@ const LiveTrackingPage = () => {
   };
 
   useEffect(() => {
-    if (currentAssignment) {
-      fetchRouteStops();
-      startGPSTracking();
+    journeyCompletedRef.current = journeyCompleted;
+    if (journeyCompleted) {
+      stopGPSTracking();
     }
+  }, [journeyCompleted]);
+
+  useEffect(() => {
+    if (!currentAssignment?.schedule_id) {
+      stopGPSTracking();
+      return undefined;
+    }
+
+    fetchRouteStops();
+
+    if (currentAssignment.status === 'ACTIVE') {
+      startGPSTracking();
+    } else {
+      setGpsError('Journey has not started yet. Press Depart on the Train Rider home screen first.');
+    }
+
     return () => stopGPSTracking();
-  }, [currentAssignment]);
+  }, [currentAssignment?.schedule_id, currentAssignment?.status, staffInfo?.staff_id]);
 
   useEffect(() => {
     if (routeStops.length > 0) {
       updateCurrentAndNextStation();
-
-      const allCompleted = routeStops.every(stop => stop.status === 'DEPARTED');
-      const lastStationDeparted = routeStops[routeStops.length - 1]?.status === 'DEPARTED';
-
-      if (allCompleted || lastStationDeparted) {
-        setJourneyCompleted(true);
-      }
     }
   }, [routeStops]);
 
@@ -92,45 +106,46 @@ const LiveTrackingPage = () => {
         train_stop_id: stop.train_stop_id || null,
       }));
       setRouteStops(mappedStops);
+      if (response.schedule_status === 'COMPLETED') {
+        setJourneyCompleted(true);
+      }
     } catch (err) {
       console.error('Failed to fetch route stops:', err);
     }
   };
 
   const handleStationArrival = async (routeStationId, trainStopId) => {
-    if (!routeStationId) {
-      showNotification('Error', 'Missing station ID', 'error');
+    if (!routeStationId || !staffInfo?.staff_id) {
+      showNotification('Error', 'Missing rider or station information', 'error');
       return;
     }
 
     try {
       setIsUpdating(true);
-      const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
-
       const payload = {
-        device_id: deviceId,
-        latitude: gpsData.latitude || 0,
-        longitude: gpsData.longitude || 0,
-        speed: gpsData.speed,
-        accuracy: gpsData.accuracy,
-        manual_arrival: true,
         route_station_id: routeStationId,
-        train_stop_id: trainStopId
+        train_stop_id: trainStopId || null,
       };
 
-      const response = await locationTrackingApi.updateLocation(payload);
+      if (gpsData.latitude != null && gpsData.longitude != null) {
+        payload.latitude = gpsData.latitude;
+        payload.longitude = gpsData.longitude;
+      }
+
+      const response = await locationTrackingApi.manualArrival(staffInfo.staff_id, payload);
 
       if (response.is_last_station) {
         setJourneyCompleted(true);
         setArrivalAlert(null);
-        setCurrentStation(null);
+        setCurrentStation(response.station_name || null);
         setNextStation(null);
-        showNotification('🎉 Journey Complete!', 'Train has arrived at the final destination. All tables updated!');
+        showNotification('🎉 Journey Complete!', 'Train has arrived at the final destination.');
       } else {
-        showNotification('Station Arrived!', 'Train arrival has been logged successfully.');
+        setArrivalAlert(response);
+        showNotification('Manual Arrival Logged', `Arrived at ${response.station_name}.`);
       }
 
-      fetchRouteStops();
+      await fetchRouteStops();
     } catch (err) {
       console.error('Failed to log station arrival:', err);
       showNotification('Error', err.detail || 'Failed to log station arrival', 'error');
@@ -142,9 +157,9 @@ const LiveTrackingPage = () => {
   const handleStationDeparture = async (routeStationId, trainStopId) => {
     try {
       setIsUpdating(true);
-      const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
+      if (!staffInfo?.staff_id) throw { detail: 'Missing rider staff ID' };
 
-      await locationTrackingApi.logDeparture(deviceId, trainStopId, {
+      await locationTrackingApi.logDeparture(staffInfo.staff_id, trainStopId, {
         manual_departure: true,
         route_station_id: routeStationId
       });
@@ -159,52 +174,76 @@ const LiveTrackingPage = () => {
     }
   };
 
-  const startGPSTracking = () => {
-    if (!navigator.geolocation) {
-      showNotification('GPS Not Available', 'Geolocation is not supported.', 'warning');
-      return;
+  const stopGPSTracking = () => {
+    if (watchIdRef.current != null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
     }
-    setIsTracking(true);
-    const id = navigator.geolocation.watchPosition(
-      handlePosition,
-      handleError,
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000, distanceFilter: 10 }
-    );
-    setWatchId(id);
+    setIsTracking(false);
   };
 
-  const stopGPSTracking = () => {
-    if (watchId) {
-      navigator.geolocation.clearWatch(watchId);
-      setWatchId(null);
-      setIsTracking(false);
+  const startGPSTracking = () => {
+    if (!navigator.geolocation) {
+      setGpsError('Geolocation is not supported by this browser.');
+      return;
     }
+    if (!staffInfo?.staff_id) {
+      setGpsError('Rider staff ID is missing. Please sign in again.');
+      return;
+    }
+    if (!window.isSecureContext && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+      setGpsError('GPS requires HTTPS on phones. Open the rider app through an HTTPS URL.');
+      return;
+    }
+
+    stopGPSTracking();
+    setGpsError(null);
+    setIsTracking(true);
+
+    const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 3000 };
+
+    // Do not wait for watchPosition's first callback. Send one fix immediately.
+    navigator.geolocation.getCurrentPosition(handlePosition, handleError, options);
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      handlePosition,
+      handleError,
+      options
+    );
   };
 
   const handlePosition = async (position) => {
     const { latitude, longitude, speed, accuracy } = position.coords;
+    const speedMph = speed != null ? Math.round(speed * 2.2369362920544) : null;
+    const accuracyMeters = accuracy != null ? Math.round(accuracy) : null;
 
     setGpsData({
       latitude,
       longitude,
-      speed: speed != null ? Math.round(speed * 2.2369362920544) : null,
-      accuracy: Math.round(accuracy),
+      speed: speedMph,
+      accuracy: accuracyMeters,
       lastUpdate: new Date()
     });
-
     setCurrentLocation([latitude, longitude]);
+    setGpsError(null);
 
-    if (journeyCompleted) return;
+    if (journeyCompletedRef.current || sendingLocationRef.current) return;
 
+    sendingLocationRef.current = true;
     try {
-      const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
       const response = await locationTrackingApi.updateLocation({
-        device_id: deviceId,
+        device_id: staffInfo.staff_id,
         latitude,
         longitude,
-        speed: speed != null ? Math.round(speed * 2.2369362920544) : null,
-        accuracy: Math.round(accuracy)
+        speed: speedMph,
+        accuracy: accuracyMeters
       });
+
+      if (response.distance_to_station_m != null) {
+        setDistanceToStation({
+          meters: response.distance_to_station_m,
+          station: response.proximity_station_name || null,
+        });
+      }
 
       if (response.arrival_detected) {
         const stationName = response.station_name;
@@ -220,7 +259,7 @@ const LiveTrackingPage = () => {
           if (response.is_last_station) {
             setJourneyCompleted(true);
             setArrivalAlert(null);
-            setCurrentStation(null);
+            setCurrentStation(stationName);
             setNextStation(null);
             showNotification('🎉 Journey Complete!', `Train has arrived at final destination: ${stationName}`);
           } else {
@@ -231,38 +270,50 @@ const LiveTrackingPage = () => {
           }
         }
 
-        fetchRouteStops();
+        await fetchRouteStops();
       }
 
       if (response.auto_departed) {
-        const now2 = Date.now();
+        const now = Date.now();
         if (
           lastAutoEventRef.current.type !== 'departure' ||
-          now2 - lastAutoEventRef.current.time > 10000
+          now - lastAutoEventRef.current.time > 10000
         ) {
-          lastAutoEventRef.current = { station: null, time: now2, type: 'departure' };
-          showNotification('🚂 Auto-Departed!', 'Train has left the station.');
+          lastAutoEventRef.current = { station: response.station_name || null, time: now, type: 'departure' };
+          showNotification('🚂 Auto-Departed!', `Train has left ${response.station_name || 'the station'}.`);
         }
 
         setArrivalAlert(null);
         setCurrentStation(null);
-        fetchRouteStops();
+        await fetchRouteStops();
       }
-
     } catch (err) {
       console.error('Failed to update location:', err);
+      const message = err?.detail || 'Location could not be sent to the backend.';
+      setGpsError(message);
+    } finally {
+      sendingLocationRef.current = false;
     }
   };
 
   const handleError = (error) => {
     console.error('GPS Error:', error);
+    const messages = {
+      1: 'Location permission was denied. Allow location access and reload the page.',
+      2: 'Current GPS position is unavailable.',
+      3: 'GPS request timed out. Check location services and try again.',
+    };
+    setGpsError(messages[error.code] || error.message || 'Unable to read GPS location.');
+    setIsTracking(false);
   };
 
   const handleLogDeparture = async () => {
-    if (!arrivalAlert?.train_stop_id) return;
+    if (!arrivalAlert?.train_stop_id || !staffInfo?.staff_id) return;
     try {
-      const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
-      await locationTrackingApi.logDeparture(deviceId, arrivalAlert.train_stop_id);
+      await locationTrackingApi.logDeparture(staffInfo.staff_id, arrivalAlert.train_stop_id, {
+        manual_departure: true,
+        route_station_id: arrivalAlert.route_station_id,
+      });
       setArrivalAlert(null);
       fetchRouteStops();
       showNotification('Departed Station', 'Train has departed.');
@@ -303,8 +354,12 @@ const LiveTrackingPage = () => {
     }
   };
 
-  const completedCount = routeStops.filter(s => s.status === 'DEPARTED').length;
-  const progressPercent = routeStops.length > 0 ? (completedCount / routeStops.length) * 100 : 0;
+  const departedCount = routeStops.filter(s => s.status === 'DEPARTED').length;
+  const finalArrivedCompleted = journeyCompleted && routeStops[routeStops.length - 1]?.status === 'ARRIVED' ? 1 : 0;
+  const completedCount = departedCount + finalArrivedCompleted;
+  const progressPercent = routeStops.length > 0 ? Math.min(100, (completedCount / routeStops.length) * 100) : 0;
+  const nextManualStop = routeStops.find(stop => stop.status === 'SCHEDULED');
+  const arrivedManualStop = routeStops.find(stop => stop.status === 'ARRIVED');
 
   return (
     <div className="space-y-4 pb-20">
@@ -378,6 +433,25 @@ const LiveTrackingPage = () => {
         </Card>
       </div>
 
+      {gpsError && !journeyCompleted && (
+        <Card padding="p-4" className="bg-red-50 border-red-200">
+          <div className="flex items-start gap-3 text-red-700">
+            <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold">GPS / Tracking problem</p>
+              <p className="text-sm mt-1">{gpsError}</p>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {distanceToStation && !journeyCompleted && (
+        <p className="text-xs text-center text-gray-500">
+          {distanceToStation.station ? `${distanceToStation.station}: ` : ''}
+          {distanceToStation.meters} m from station trigger point
+        </p>
+      )}
+
       {/* Arrival Alert */}
       {arrivalAlert && !journeyCompleted && (
         <Card padding="p-4" className="bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0 animate-pulse">
@@ -393,9 +467,13 @@ const LiveTrackingPage = () => {
               <p className="text-sm">Next: <strong>{arrivalAlert.next_station.name}</strong></p>
             </div>
           )}
-          <Button className="w-full bg-white text-green-600 hover:bg-green-50" onClick={handleLogDeparture}>
-            Confirm Departure
-          </Button>
+          {manualMode ? (
+            <Button className="w-full bg-white text-green-600 hover:bg-green-50" onClick={handleLogDeparture}>
+              Manual Depart Now
+            </Button>
+          ) : (
+            <p className="text-xs opacity-90">Departure will be logged automatically after the train moves more than 50 m from the station.</p>
+          )}
         </Card>
       )}
 
@@ -416,6 +494,53 @@ const LiveTrackingPage = () => {
           />
         </Card>
       </div>
+
+      {/* Optional manual fallback controls */}
+      {!journeyCompleted && routeStops.length > 0 && (
+        <Card padding="p-4" className="border-amber-200 bg-amber-50">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="font-semibold text-amber-900">Manual station fallback</p>
+              <p className="text-xs text-amber-700 mt-1">
+                Automatic GPS remains primary. Enable this only when GPS arrival/departure detection needs help.
+              </p>
+            </div>
+            <Button
+              variant={manualMode ? 'default' : 'outline'}
+              onClick={() => setManualMode(value => !value)}
+              disabled={isUpdating}
+            >
+              {manualMode ? 'Disable Manual' : 'Enable Manual'}
+            </Button>
+          </div>
+
+          {manualMode && (
+            <div className="mt-4 pt-4 border-t border-amber-200">
+              {arrivedManualStop ? (
+                <Button
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                  onClick={() => handleStationDeparture(arrivedManualStop.route_station_id, arrivedManualStop.train_stop_id)}
+                  disabled={isUpdating || !arrivedManualStop.train_stop_id}
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Manual Depart — {arrivedManualStop.station_name}
+                </Button>
+              ) : nextManualStop ? (
+                <Button
+                  className="w-full bg-green-600 hover:bg-green-700 text-white"
+                  onClick={() => handleStationArrival(nextManualStop.route_station_id, nextManualStop.train_stop_id)}
+                  disabled={isUpdating || !nextManualStop.train_stop_id}
+                >
+                  <MapPin className="w-4 h-4 mr-2" />
+                  Manual Arrive — {nextManualStop.station_name}
+                </Button>
+              ) : (
+                <p className="text-sm text-amber-800">No manual action is currently available.</p>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Route Stations List */}
       {routeStops.length > 0 && (
@@ -473,25 +598,11 @@ const LiveTrackingPage = () => {
                     </div>
 
                     <div className="flex gap-2 ml-3">
-                      {(stop.status === 'SCHEDULED') && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleStationArrival(stop.route_station_id, stop.train_stop_id)}
-                          disabled={isUpdating || journeyCompleted}
-                          className="bg-green-600 hover:bg-green-700 text-white text-xs whitespace-nowrap"
-                        >
-                          <MapPin className="w-3 h-3 mr-1" /> Arrive
-                        </Button>
-                      )}
                       {stop.status === 'ARRIVED' && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleStationDeparture(stop.route_station_id, stop.train_stop_id)}
-                          disabled={isUpdating || journeyCompleted}
-                          className="bg-blue-600 hover:bg-blue-700 text-white text-xs whitespace-nowrap"
-                        >
-                          <LogOut className="w-3 h-3 mr-1" /> Depart
-                        </Button>
+                        <span className="text-xs text-green-700 font-medium self-center">At station</span>
+                      )}
+                      {stop.status === 'SCHEDULED' && nextManualStop?.route_station_id === stop.route_station_id && (
+                        <span className="text-xs text-blue-600 font-medium self-center">Next</span>
                       )}
                       {stop.status === 'DEPARTED' && (
                         <span className="text-xs text-green-600 font-medium self-center">
