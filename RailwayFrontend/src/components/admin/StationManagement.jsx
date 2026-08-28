@@ -263,7 +263,15 @@ const StationManagement = () => {
             />
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={handleAddClick}
+              className="bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4" />
+              Add New Station
+            </Button>
+
             <Button
               onClick={() => setShowFilters(!showFilters)}
               className={`border ${
@@ -356,7 +364,7 @@ const StationManagement = () => {
           {!searchTerm && (
             <Button onClick={handleAddClick} className="bg-blue-600 hover:bg-blue-700 text-white">
               <Plus className="w-4 h-4" />
-              Add Station
+              Add New Station
             </Button>
           )}
         </div>

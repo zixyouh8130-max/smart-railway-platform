@@ -42,13 +42,13 @@ const AdminLayout = () => {
       badge: null
     },
     {
-      icon: <TrainFront className="w-5 h-5" />,
-      label: 'Trains',
-      path: '/admin/trains',
-      myanmarLabel: 'ရထားများ',
+      icon: <MapPin className="w-5 h-5" />,
+      label: 'Stations',
+      path: '/admin/stations',
+      myanmarLabel: 'ဘူတာများ',
       badge: null
     },
-    {
+     {
       icon: <Route className="w-5 h-5" />,
       label: 'Routes',
       path: '/admin/routes',
@@ -56,12 +56,12 @@ const AdminLayout = () => {
       badge: null
     },
     {
-      icon: <MapPin className="w-5 h-5" />,
-      label: 'Stations',
-      path: '/admin/stations',
-      myanmarLabel: 'ဘူတာများ',
+      icon: <TrainFront className="w-5 h-5" />,
+      label: 'Trains',
+      path: '/admin/trains',
+      myanmarLabel: 'ရထားများ',
       badge: null
-    },
+    }, 
     {
       icon: <Calendar className="w-5 h-5" />,
       label: 'Schedules',
@@ -69,13 +69,7 @@ const AdminLayout = () => {
       myanmarLabel: 'အချိန်ဇယား',
       badge: null
     },
-    {
-      icon: <Users className="w-5 h-5" />,
-      label: 'Users',
-      path: '/admin/users',
-      myanmarLabel: 'အသုံးပြုသူများ',
-      badge: null
-    },
+    
     {
       icon: <Radio className="w-5 h-5" />,
       label: 'Live Tracking',
@@ -95,6 +89,13 @@ const AdminLayout = () => {
       label: 'Track Issues',
       path: '/admin/track-issues',
       myanmarLabel: 'လမ်းပိုင်းပြုပြင်မှု',
+      badge: null
+    },
+    {
+      icon: <Users className="w-5 h-5" />,
+      label: 'Users',
+      path: '/admin/users',
+      myanmarLabel: 'အသုံးပြုသူများ',
       badge: null
     },
     {

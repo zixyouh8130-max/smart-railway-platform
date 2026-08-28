@@ -557,6 +557,7 @@ class LocationTrackingService:
 
         result = {
             "arrival_detected": True,
+            "schedule_id": schedule.id,
             "station_name": route_station.station_name,
             "train_stop_id": train_stop.id,
             "route_station_id": route_station.id,
@@ -626,7 +627,11 @@ class LocationTrackingService:
 
         return {
             "auto_departed": True,
+            "schedule_id": schedule.id,
             "station_name": route_station.station_name,
+            "route_station_id": route_station.id,
+            "next_route_station_id": arrival_log.next_route_station_id,
+            "next_station_name": arrival_log.next_station_name,
             "departure_time": current_time.isoformat() + "Z"
         }
 
@@ -863,6 +868,9 @@ class LocationTrackingService:
                 "status": "departed",
                 "schedule_id": schedule.id,
                 "station_name": route_station.station_name,
+                "route_station_id": route_station.id,
+                "next_route_station_id": arrival_log.next_route_station_id,
+                "next_station_name": arrival_log.next_station_name,
                 "stop_duration_seconds": arrival_log.stop_duration_seconds,
                 "stop_duration_minutes": arrival_log.stop_duration_minutes,
                 "departure_time": current_time.isoformat() + "Z",

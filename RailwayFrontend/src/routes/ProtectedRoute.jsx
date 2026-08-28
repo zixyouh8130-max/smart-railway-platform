@@ -2,6 +2,7 @@ import {
   Navigate,
   Outlet,
   useLocation,
+  useOutletContext,
 } from 'react-router-dom';
 
 import { useAuth } from '@/context/AuthContext';
@@ -22,6 +23,12 @@ export default function ProtectedRoute({
   } = useAuth();
 
   const location = useLocation();
+
+  // Important for nested guards:
+  // TrainRiderLayout provides staffInfo/currentAssignment through Outlet context.
+  // A nested <Outlet /> without context would replace that value with null before
+  // LiveTrackingPage receives it. Read the parent context and forward it.
+  const parentOutletContext = useOutletContext();
 
   if (loading) {
     return (
@@ -74,5 +81,5 @@ export default function ProtectedRoute({
     );
   }
 
-  return <Outlet />;
+  return <Outlet context={parentOutletContext} />;
 }

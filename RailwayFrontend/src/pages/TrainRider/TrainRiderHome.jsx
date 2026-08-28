@@ -13,13 +13,14 @@ import { Separator } from '@/components/ui/separator';
 import api from '@/api/axios';
 import { formatRailwayDate, railwayDateTimeToInstant } from '@/utils/railwayDateTime';
 
-const POLL_INTERVAL = 15000; // Poll every 15 seconds
 const ALERT_THRESHOLD = 15; // Alert when 15 minutes or less to departure
 
 const TrainRiderHome = () => {
   const navigate = useNavigate();
   const outletContext = useOutletContext() || {};
   const {
+    user: contextUser = null,
+    staffInfo: contextStaffInfo = null,
     setUser: setSharedUser,
     setStaffInfo: setSharedStaffInfo,
     setCurrentAssignment: setSharedCurrentAssignment,
@@ -36,26 +37,35 @@ const TrainRiderHome = () => {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [connectionError, setConnectionError] = useState(false);
 
-  const pollIntervalRef = useRef(null);
   const clockIntervalRef = useRef(null);
 
-  // 🆕 Fetch schedule data
+  // Fetch the rider assignment only on page load or when the rider manually
+  // presses Refresh. Reuse the layout's authenticated staff context when present.
   const fetchScheduleData = useCallback(async (showRefreshIndicator = false) => {
     if (showRefreshIndicator) setRefreshing(true);
     setConnectionError(false);
 
     try {
-      const userResponse = await api.get('/auth/me');
-      setUser(userResponse.data);
-      setSharedUser?.(userResponse.data);
+      let nextUser = contextUser;
+      let nextStaff = contextStaffInfo;
 
-      if (userResponse.data.staff) {
-        setStaffInfo(userResponse.data.staff);
-        setSharedStaffInfo?.(userResponse.data.staff);
+      // Fallback only if the layout context has not finished loading yet.
+      if (!nextStaff?.staff_id) {
+        const userResponse = await api.get('/auth/me');
+        nextUser = userResponse.data || null;
+        nextStaff = nextUser?.staff || null;
 
-        // Get today's assignment
-        const staffId = userResponse.data.staff.staff_id;
-        const assignmentResponse = await api.get(`/staff/assignments/current/${staffId}`);
+        setSharedUser?.(nextUser);
+        setSharedStaffInfo?.(nextStaff);
+      }
+
+      setUser(nextUser);
+      setStaffInfo(nextStaff);
+
+      if (nextStaff?.staff_id) {
+        const assignmentResponse = await api.get(
+          `/staff/assignments/current/${nextStaff.staff_id}`
+        );
 
         if (assignmentResponse.data) {
           const newSchedule = assignmentResponse.data;
@@ -63,16 +73,20 @@ const TrainRiderHome = () => {
           setSharedCurrentAssignment?.(newSchedule);
           setLastUpdated(new Date());
 
-          // Update journey status
-          if (newSchedule.status === 'ACTIVE') {
-            setJourneyActive(true);
-          } else {
-            setJourneyActive(false);
-          }
+          const scheduleRuntimeStatus =
+            newSchedule.schedule_status || newSchedule.status;
+          const readyForTracking =
+            newSchedule.status === 'ACTIVE' &&
+            scheduleRuntimeStatus === 'ACTIVE';
+
+          setJourneyActive(readyForTracking);
 
           console.log('📅 Schedule updated:', {
             departure: newSchedule.departure_time,
-            status: newSchedule.status,
+            assignmentStatus: newSchedule.status,
+            scheduleStatus: scheduleRuntimeStatus,
+            scheduleId: newSchedule.schedule_id,
+            trackingReady: readyForTracking,
             updated: new Date().toLocaleTimeString()
           });
         } else {
@@ -81,10 +95,9 @@ const TrainRiderHome = () => {
           setJourneyActive(false);
         }
       } else {
-        setStaffInfo(null);
-        setSharedStaffInfo?.(null);
         setTodaySchedule(null);
         setSharedCurrentAssignment?.(null);
+        setJourneyActive(false);
       }
     } catch (err) {
       console.error('Failed to fetch schedule:', err);
@@ -93,27 +106,31 @@ const TrainRiderHome = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [setSharedUser, setSharedStaffInfo, setSharedCurrentAssignment]);
+  }, [
+    contextUser,
+    contextStaffInfo,
+    setSharedUser,
+    setSharedStaffInfo,
+    setSharedCurrentAssignment,
+  ]);
 
-  // 🆕 Initial load + polling
+  // Load the assignment once when this page opens. The clock continues locally
+  // for the departure countdown, but it does not make any backend requests.
   useEffect(() => {
     fetchScheduleData();
 
-    // Set up polling
-    pollIntervalRef.current = setInterval(() => {
-      fetchScheduleData(true);
-    }, POLL_INTERVAL);
-
-    // Update clock every second
     clockIntervalRef.current = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000);
 
     return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
       if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
     };
-  }, [fetchScheduleData]);
+
+    // Deliberately do not re-run when layout context changes. Assignment refresh
+    // after initial load is user-controlled via the Refresh button.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 🆕 Recalculate time to departure whenever schedule or current time changes
   useEffect(() => {
@@ -182,30 +199,15 @@ const TrainRiderHome = () => {
 
       console.log('✅ Journey started:', response.data);
 
-      // Keep a usable ACTIVE assignment immediately, even if the refresh below
-      // briefly fails after the backend has already started the journey.
-      let refreshedAssignment = {
+      // start-journey already succeeded, so update the local/shared assignment
+      // directly instead of making another assignments/current request.
+      const refreshedAssignment = {
         ...todaySchedule,
         status: response.data?.status || 'ACTIVE',
+        schedule_status: response.data?.schedule_status || 'ACTIVE',
         schedule_id: response.data?.schedule_id ?? todaySchedule.schedule_id,
+        tracking_ready: true,
       };
-
-      if (staffInfo?.staff_id) {
-        try {
-          const assignmentResponse = await api.get(
-            `/staff/assignments/current/${staffInfo.staff_id}`
-          );
-
-          if (assignmentResponse.data) {
-            refreshedAssignment = assignmentResponse.data;
-          }
-        } catch (refreshError) {
-          console.warn(
-            '⚠️ Journey started, but assignment refresh failed:',
-            refreshError
-          );
-        }
-      }
 
       setTodaySchedule(refreshedAssignment);
       setSharedCurrentAssignment?.(refreshedAssignment);
@@ -265,6 +267,10 @@ const TrainRiderHome = () => {
     if (timeToDeparture <= 15) return 'text-amber-600';
     return 'text-blue-600';
   };
+
+  const scheduleNeedsResume =
+    todaySchedule?.schedule_status === 'ACTIVE' &&
+    todaySchedule?.status !== 'ACTIVE';
 
   if (loading) {
     return (
@@ -441,7 +447,8 @@ const TrainRiderHome = () => {
 
           {/* 🆕 Schedule Status */}
           <div className="text-center text-xs text-gray-400">
-            Status: {todaySchedule.status} |
+            Assignment: {todaySchedule.status} |
+            Schedule: {todaySchedule.schedule_status || todaySchedule.status} |
             Last checked: {lastUpdated?.toLocaleTimeString() || 'Never'}
           </div>
         </div>
@@ -455,9 +462,10 @@ const TrainRiderHome = () => {
             className="w-full text-lg py-4"
             icon={<Play className="w-6 h-6" />}
             onClick={handleStartJourney}
-            disabled={timeToDeparture > 15}
+            disabled={!scheduleNeedsResume && timeToDeparture > 15}
           >
-            {timeToDeparture <= 0 ? 'ထွက်ခွာမည်' :
+            {scheduleNeedsResume ? 'ခရီးစဉ်ကို ပြန်လည်ဆက်သွယ်မည် (Resume)' :
+             timeToDeparture <= 0 ? 'ထွက်ခွာမည်' :
              timeToDeparture <= 15 ? 'စောစီးစွာ ထွက်ခွာမည်' :
              'ထွက်ခွာချိန် စောင့်ဆိုင်းပါ'}
           </Button>

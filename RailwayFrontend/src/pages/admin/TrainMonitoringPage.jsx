@@ -1,5 +1,5 @@
 // pages/Admin/TrainMonitoringPage.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -9,7 +9,6 @@ import Button from '@/components/ui/button';
 import adminDashboardApi from '@/api/adminDashboard';
 import { formatRailwayTime } from '@/utils/railwayDateTime';
 
-const POLL_INTERVAL = 60000;
 
 // Train icon (red)
 const trainIcon = L.divIcon({
@@ -58,16 +57,15 @@ const TrainMonitoringPage = () => {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [connectionError, setConnectionError] = useState(false);
   const [expandedTrain, setExpandedTrain] = useState(null);
-  const pollRef = useRef(null);
 
   const defaultCenter = [21.9162, 95.9560];
 
+  // Load one snapshot when the page opens. After that, the Refresh button
+  // is the only action that asks the backend for a newer train location.
   useEffect(() => {
     fetchData();
-    pollRef.current = setInterval(fetchData, POLL_INTERVAL);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+    // Intentionally no polling.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchData = async () => {
@@ -197,7 +195,7 @@ const TrainMonitoringPage = () => {
             ) : (
               <span className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-sm border border-emerald-200">
                 <Wifi className="w-4 h-4" />
-                အချိန်နှင့်တပြေးညီ
+                လက်ဖြင့် အပ်ဒိတ်
               </span>
             )}
             <Button 

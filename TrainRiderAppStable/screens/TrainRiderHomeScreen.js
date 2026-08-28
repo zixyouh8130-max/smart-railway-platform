@@ -14,6 +14,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import api from '../api/axios';
 import { requestLocationPermission } from '../utils/locationPermission';
 
+const POLL_INTERVAL = 15000; // keep pre-departure schedule/assignment changes in sync
 const ALERT_THRESHOLD = 15;   // minutes
 
 const TrainRiderHomeScreen = () => {
@@ -30,6 +31,7 @@ const TrainRiderHomeScreen = () => {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [connectionError, setConnectionError] = useState(false);
 
+  const pollIntervalRef = useRef(null);
   const clockIntervalRef = useRef(null);
 
   const fetchScheduleData = useCallback(async (showRefreshIndicator = false) => {
@@ -62,16 +64,24 @@ const TrainRiderHomeScreen = () => {
   }, []);
 
   useEffect(() => {
-    // Fetch schedule only ONCE when Home page first opens.
+    // Initial load plus lightweight polling. Before departure, admin schedule
+    // edits are synchronized into the assignment by the backend; polling makes
+    // those changes visible on the rider phone without requiring a restart.
     fetchScheduleData();
 
-    // This only updates the countdown clock.
-    // It does NOT call the backend.
+    pollIntervalRef.current = setInterval(() => {
+      fetchScheduleData(false);
+    }, POLL_INTERVAL);
+
     clockIntervalRef.current = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000);
 
     return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
       if (clockIntervalRef.current) {
         clearInterval(clockIntervalRef.current);
         clockIntervalRef.current = null;
@@ -108,9 +118,16 @@ const TrainRiderHomeScreen = () => {
 
   const handleStartJourney = async () => {
     try {
-      // 1. Ask for location permission first
-      const locationGranted = await requestLocationPermission();
+      if (!staffInfo?.staff_id) {
+        Alert.alert(
+          'Staff ID Missing',
+          'Tracking device ID requires your signed-in staff profile. Please sign in again.',
+        );
+        return;
+      }
 
+      // Ask for native location permission before changing the run to ACTIVE.
+      const locationGranted = await requestLocationPermission();
       if (!locationGranted) {
         Alert.alert(
           'Location Permission Required',
@@ -119,33 +136,38 @@ const TrainRiderHomeScreen = () => {
         return;
       }
 
-      // 2. Only start the journey after permission is granted
-      const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
-
       const response = await api.post(
         `/staff/assignments/${todaySchedule.assignment_id}/start-journey`,
-        {
-          device_id: deviceId,
-        },
+        { device_id: staffInfo.staff_id },
       );
 
-      // 3. Update local state
+      // The pre-departure assignment object still says SCHEDULED. Pass an
+      // ACTIVE copy to LiveTracking so GPS starts immediately after Depart.
+      const activeAssignment = {
+        ...todaySchedule,
+        schedule_id: response.data?.schedule_id || todaySchedule.schedule_id,
+        status: response.data?.status || 'ACTIVE',
+      };
+
+      setTodaySchedule(activeAssignment);
       setJourneyActive(true);
       setShowAlert(false);
 
-      // 4. Open live tracking
       navigation.navigate('LiveTracking', {
-        currentAssignment: todaySchedule,
-        staffInfo: staffInfo,
+        currentAssignment: activeAssignment,
+        staffInfo,
       });
-
     } catch (err) {
-      console.error('Failed to start journey:', err);
+      console.error('Failed to start journey:', err.response?.data || err);
 
-      Alert.alert(
-        'Error',
-        'ခရီးစဉ် စတင်ရန် မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ။',
-      );
+      const detail = err.response?.data?.detail;
+      const message =
+        typeof detail === 'string'
+          ? detail
+          : detail?.message ||
+            'ခရီးစဉ် စတင်ရန် မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ။';
+
+      Alert.alert('Unable to Start Journey', message);
     }
   };
 

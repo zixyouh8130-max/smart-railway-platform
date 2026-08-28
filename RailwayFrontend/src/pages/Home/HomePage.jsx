@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import HeroSection from '@/components/home/HeroSection';
+import HomeTicketTracker from '@/components/home/HomeTicketTracker';
 import QuickActions from '@/components/home/QuickActions';
 import LiveUpdates from '@/components/home/LiveUpdates';
 import Services from '@/components/home/Services';
@@ -19,6 +20,7 @@ const HomePage = () => {
         />
       )}
       <HeroSection />
+      <HomeTicketTracker />
       <QuickActions />
       <LiveUpdates />
       <Services />

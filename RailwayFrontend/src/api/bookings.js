@@ -21,15 +21,24 @@ const bookingsApi = {
     }
   },
 
-  getJourneyStatus: async (ticketNo) => {
+  getJourneyStatus: async (ticketNo, train = null) => {
     try {
       const response = await api.get(
-        `/bookings/ticket/${encodeURIComponent(ticketNo)}/journey-status`
+        `/bookings/ticket/${encodeURIComponent(ticketNo)}/journey-status`,
+        { params: train ? { train } : undefined }
       );
       return response.data;
     } catch (error) {
       throw error.response?.data || error;
     }
+  },
+
+  getJourneyEventUrl: (ticketNo, train) => {
+    const baseURL = String(api.defaults.baseURL || '/api').replace(/\/+$/, '');
+    const params = new URLSearchParams();
+    if (train) params.set('train', train);
+
+    return `${baseURL}/bookings/ticket/${encodeURIComponent(ticketNo)}/events?${params.toString()}`;
   },
 
   confirm: async (bookingId, paymentAmount) => {

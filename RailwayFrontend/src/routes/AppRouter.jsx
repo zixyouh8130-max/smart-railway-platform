@@ -19,9 +19,9 @@ import TrainRiderLayout from '@/layouts/TrainRiderLayout';
 import LiveTrackingPage from '@/pages/TrainRider/LiveTrackingPage';
 import StaffLoginPage from '@/pages/TrainRider/StaffLoginPage';
 import RoleAwareStaffHome from '@/pages/TrainRider/RoleAwareStaffHome';
-import TrackEngineerHome from '@/pages/TrainRider/TrackEngineerHome';
-import TrackEngineerIssuePage from '@/pages/TrainRider/TrackEngineerIssuePage';
 import ScheduleTab from '@/pages/TrainRider/ScheduleTab';
+import TrackEngineerCasesPage from '@/pages/TrackEngineer/TrackEngineerCasesPage';
+import TrackEngineerCasePage from '@/pages/TrackEngineer/TrackEngineerCasePage';
 import ProtectedRoute from '@/routes/ProtectedRoute';
 
 export default function AppRouter() {
@@ -87,6 +87,7 @@ export default function AppRouter() {
               index
               element={<RoleAwareStaffHome />}
             />
+
             <Route
               element={
                 <ProtectedRoute
@@ -116,13 +117,25 @@ export default function AppRouter() {
                 />
               }
             >
+              {/* Preferred Track Engineer case/Kanban URLs. */}
+              <Route
+                path="cases"
+                element={<TrackEngineerCasesPage />}
+              />
+              <Route
+                path="cases/:caseId"
+                element={<TrackEngineerCasePage />}
+              />
+
+              {/* Keep old URLs working while RoleAwareStaffHome or old links
+                  are migrated from /issues to /cases. */}
               <Route
                 path="issues"
-                element={<TrackEngineerHome />}
+                element={<TrackEngineerCasesPage />}
               />
               <Route
                 path="issues/:issueId"
-                element={<TrackEngineerIssuePage />}
+                element={<TrackEngineerCasePage />}
               />
             </Route>
           </Route>

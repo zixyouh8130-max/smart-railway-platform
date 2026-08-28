@@ -1,4 +1,5 @@
 # api/staff.py
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -20,6 +21,7 @@ from ..schemas.staff import (
     StaffAttendanceCreate, StaffAttendanceResponse
 )
 from ..services.staff_assignment_service import StaffAssignmentService
+from ..services.passenger_event_broker import passenger_event_broker
 from ..core.dependencies import (
     get_current_admin_user,
     get_current_staff_user,
@@ -27,6 +29,7 @@ from ..core.dependencies import (
 from ..schemas.staff import UpdateStatusRequest
 
 router = APIRouter(tags=["Staff Management"])
+logger = logging.getLogger(__name__)
 
 
 class StartJourneyRequest(BaseModel):
@@ -722,6 +725,7 @@ async def start_journey(
             device.location_updated_at = None
 
         first_station_departed = False
+        first_departure_event_created = False
 
         # ----------------------------------------------------
         # If there is a tracking device, create/update only the
@@ -773,6 +777,7 @@ async def start_journey(
                 )
                 db.add(arrival_log)
                 first_station_departed = True
+                first_departure_event_created = True
             else:
                 first_station_departed = arrival_log.status == "DEPARTED"
 
@@ -785,6 +790,33 @@ async def start_journey(
 
 
         db.commit()
+
+        # Starting a journey creates the first StationArrivalLog DEPARTED
+        # transition. Publish it only when that row was newly created so an
+        # idempotent/retried start cannot notify passengers twice.
+        if first_departure_event_created:
+            try:
+                await passenger_event_broker.publish(
+                    schedule.id,
+                    {
+                        "type": "DEPARTED",
+                        "schedule_id": schedule.id,
+                        "route_station_id": first_route_station.id,
+                        "station_name": first_route_station.station_name,
+                        "event_time": current_time.isoformat() + "Z",
+                        "next_route_station_id": (
+                            next_station.id if next_station else None
+                        ),
+                        "next_station_name": (
+                            next_station.station_name if next_station else None
+                        ),
+                        "is_last_station": False,
+                    },
+                )
+            except Exception:
+                # The journey is already committed. Notification delivery is
+                # best-effort and must not make the rider see a false failure.
+                logger.exception("Failed to publish initial passenger departure event")
 
         return {
             "message": "Journey started successfully",

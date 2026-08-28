@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   X, Loader, Train, Hash, Tag, Route, Gauge, 
-  Activity, CheckCircle, AlertCircle, ArrowRight
+  Activity, CheckCircle, AlertCircle, ArrowRight, Plus
 } from 'lucide-react';
 import Button from '@/components/ui/button';
 

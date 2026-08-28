@@ -225,8 +225,14 @@ const HeroSection = () => {
     navigate('/schedules');
   };
 
-  // Handle PNR status check
+  // Scroll to the embedded homepage ticket tracker.
+  // Keep /pnr-status as a fallback if this component is reused elsewhere.
   const handlePNRCheck = () => {
+    const tracker = document.getElementById('ticket-tracker');
+    if (tracker) {
+      tracker.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     navigate('/pnr-status');
   };
 

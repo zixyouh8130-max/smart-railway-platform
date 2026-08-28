@@ -18,12 +18,19 @@ import TrainTrackerMap from '../components/TrainTrackerMap';
 import { requestLocationPermission } from '../utils/locationPermission';
 import { formatRailwayTime } from '../utils/railwayDateTime';
 
-const LOCATION_UPLOAD_INTERVAL = 30000; // 30 seconds
+const GPS_OPTIONS = {
+  enableHighAccuracy: true,
+  timeout: 15000,
+  maximumAge: 3000,
+  distanceFilter: 5,
+  // Android-specific cadence hints. iOS safely ignores unsupported fields.
+  interval: 3000,
+  fastestInterval: 1500,
+};
 
 const LiveTrackingScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  // Params passed from TrainRiderHomeScreen
   const { currentAssignment, staffInfo } = route.params || {};
 
   const [gpsData, setGpsData] = useState({
@@ -43,104 +50,209 @@ const LiveTrackingScreen = () => {
   const [notification, setNotification] = useState(null);
   const [journeyCompleted, setJourneyCompleted] = useState(false);
   const [loadingStops, setLoadingStops] = useState(true);
-
-  const lastAutoEventRef = useRef({ station: null, time: null, type: null });
+  const [gpsError, setGpsError] = useState(null);
+  const [manualMode, setManualMode] = useState(false);
+  const [distanceToStation, setDistanceToStation] = useState(null);
 
   const watchIdRef = useRef(null);
-
-  // Controls POST every 15 seconds
-  const locationUploadIntervalRef = useRef(null);
-
-  // Always contains newest GPS position
-  const latestLocationRef = useRef(null);
-
-  // Allows first GPS position to be sent immediately
-  const firstLocationSentRef = useRef(false);
-
-  // Prevents overlapping backend requests
-  const locationSendInFlightRef = useRef(false);
-
-  // Gives timers/callbacks the latest completed state
   const journeyCompletedRef = useRef(false);
+  const sendingLocationRef = useRef(false);
+  const lastAutoEventRef = useRef({ station: null, time: null, type: null });
 
-  // Show notification helper
   const showNotification = (title, description, type = 'success') => {
     setNotification({ title, description, type });
-    setTimeout(() => setNotification(null), 4000);
+    setTimeout(() => setNotification(null), 4500);
   };
-
-  // Fetch route stops on mount
-  useEffect(() => {
-    if (currentAssignment) {
-      fetchRouteStops();
-      startGPSTracking();
-    }
-    return () => stopGPSTracking();
-  }, []);
-
-  useEffect(() => {
-    if (routeStops.length > 0) {
-      updateCurrentAndNextStation();
-
-      const allCompleted = routeStops.every(
-        stop => stop.status === 'DEPARTED',
-      );
-
-      const lastDeparted =
-        routeStops[routeStops.length - 1]?.status === 'DEPARTED';
-
-      if (allCompleted || lastDeparted) {
-        journeyCompletedRef.current = true;
-
-        setJourneyCompleted(true);
-
-        stopGPSTracking();
-      }
-    }
-  }, [routeStops]);
 
   useEffect(() => {
     journeyCompletedRef.current = journeyCompleted;
+    if (journeyCompleted) {
+      stopGPSTracking();
+    }
   }, [journeyCompleted]);
 
-  const updateCurrentAndNextStation = () => {
-    const current = routeStops.find(s => s.status === 'ARRIVED');
-    setCurrentStation(current?.station_name || null);
-    const next = routeStops.find(s => s.status === 'SCHEDULED');
-    setNextStation(next?.station_name || null);
-  };
+  useEffect(() => {
+    let disposed = false;
+
+    const initializeTracking = async () => {
+      if (!currentAssignment?.schedule_id) {
+        setLoadingStops(false);
+        setGpsError('No schedule is linked to this tracking screen.');
+        return;
+      }
+
+      const routeData = await fetchRouteStops();
+      if (disposed) return;
+
+      const status = routeData?.schedule_status || currentAssignment?.status;
+      if (status === 'COMPLETED') {
+        setJourneyCompleted(true);
+        return;
+      }
+
+      if (status !== 'ACTIVE') {
+        setGpsError(
+          'Journey has not started yet. Press Depart on the Train Rider home screen first.',
+        );
+        return;
+      }
+
+      await startGPSTracking();
+    };
+
+    initializeTracking();
+
+    return () => {
+      disposed = true;
+      stopGPSTracking();
+    };
+  }, [currentAssignment?.schedule_id, staffInfo?.staff_id]);
+
+  useEffect(() => {
+    if (routeStops.length > 0) {
+      const current = routeStops.find(stop => stop.status === 'ARRIVED');
+      const next = routeStops.find(stop => stop.status === 'SCHEDULED');
+      setCurrentStation(current?.station_name || null);
+      setNextStation(next?.station_name || null);
+    }
+  }, [routeStops]);
 
   const fetchRouteStops = async () => {
+    if (!currentAssignment?.schedule_id) return null;
+
     setLoadingStops(true);
     try {
-      const response = await schedulesApi.getRouteStops(currentAssignment.schedule_id);
+      const response = await schedulesApi.getRouteStops(
+        currentAssignment.schedule_id,
+      );
       const stops = (response.stops || []).map(stop => ({
         ...stop,
         route_station_id: stop.route_station_id || stop.id,
         train_stop_id: stop.train_stop_id || null,
       }));
       setRouteStops(stops);
+
+      if (response.schedule_status === 'COMPLETED') {
+        setJourneyCompleted(true);
+      }
+
+      return response;
     } catch (err) {
       console.error('Failed to fetch route stops:', err);
-      showNotification('Error', 'Failed to load route stations', 'error');
+      const message = err?.detail || 'Failed to load route stations';
+      showNotification('Route Error', message, 'error');
+      return null;
     } finally {
       setLoadingStops(false);
     }
   };
 
-  const handleTrackingResponse = (data) => {
-    if (!data) {
+  const stopGPSTracking = () => {
+    if (watchIdRef.current !== null) {
+      Geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    sendingLocationRef.current = false;
+    setIsTracking(false);
+  };
+
+  const startGPSTracking = async () => {
+    if (!staffInfo?.staff_id) {
+      setGpsError('Rider staff ID is missing. Please sign in again.');
       return;
     }
 
-    // -----------------------------
-    // Automatic station arrival
-    // -----------------------------
+    const granted = await requestLocationPermission();
+    if (!granted) {
+      setGpsError(
+        'Location permission was denied. Allow precise location access for live train tracking.',
+      );
+      return;
+    }
+
+    stopGPSTracking();
+    setGpsError(null);
+    setIsTracking(true);
+
+    // Send one fresh fix immediately; do not wait for watchPosition.
+    Geolocation.getCurrentPosition(handlePosition, handleGPSError, GPS_OPTIONS);
+
+    watchIdRef.current = Geolocation.watchPosition(
+      handlePosition,
+      handleGPSError,
+      GPS_OPTIONS,
+    );
+  };
+
+  const handlePosition = async position => {
+    if (journeyCompletedRef.current) return;
+
+    const { latitude, longitude, speed, accuracy } = position.coords;
+    const speedMph =
+      speed != null ? Math.max(0, Math.round(speed * 2.2369362920544)) : null;
+    const accuracyMeters = accuracy != null ? Math.round(accuracy) : null;
+
+    const location = {
+      latitude,
+      longitude,
+      speed: speedMph,
+      accuracy: accuracyMeters,
+      lastUpdate: new Date(),
+    };
+
+    setGpsData(location);
+    setCurrentLocation([latitude, longitude]);
+    setGpsError(null);
+
+    if (sendingLocationRef.current || !staffInfo?.staff_id) return;
+    sendingLocationRef.current = true;
+
+    try {
+      const response = await locationTrackingApi.updateLocation({
+        device_id: staffInfo.staff_id,
+        latitude,
+        longitude,
+        speed: speedMph,
+        accuracy: accuracyMeters,
+      });
+      handleTrackingResponse(response);
+    } catch (err) {
+      console.error('Failed to send location:', err);
+      const detail = err?.detail;
+      const message =
+        typeof detail === 'string'
+          ? detail
+          : detail?.message || 'Current location could not be sent to the backend.';
+      setGpsError(message);
+    } finally {
+      sendingLocationRef.current = false;
+    }
+  };
+
+  const handleGPSError = error => {
+    console.error('GPS Error:', error);
+    const messages = {
+      1: 'Location permission was denied. Enable location permission in device settings.',
+      2: 'Current GPS position is unavailable. Check that device Location is enabled.',
+      3: 'GPS request timed out. Move to an area with a better GPS signal and try again.',
+    };
+    setGpsError(messages[error.code] || error.message || 'Unable to read GPS location.');
+    setIsTracking(false);
+  };
+
+  const handleTrackingResponse = data => {
+    if (!data) return;
+
+    if (data.distance_to_station_m != null) {
+      setDistanceToStation({
+        meters: data.distance_to_station_m,
+        station: data.proximity_station_name || null,
+      });
+    }
 
     if (data.arrival_detected) {
       const stationName = data.station_name;
       const now = Date.now();
-
       const isNewArrival =
         lastAutoEventRef.current.station !== stationName ||
         lastAutoEventRef.current.type !== 'arrival' ||
@@ -155,421 +267,171 @@ const LiveTrackingScreen = () => {
 
         if (data.is_last_station) {
           journeyCompletedRef.current = true;
-
           setJourneyCompleted(true);
           setArrivalAlert(null);
-          setCurrentStation(null);
+          setCurrentStation(stationName);
           setNextStation(null);
-
+          setDistanceToStation(null);
           showNotification(
             '🎉 Journey Complete!',
-            `Arrived at ${stationName}`,
+            `Arrived at final destination: ${stationName}`,
           );
-
-          stopGPSTracking();
         } else {
-          showNotification(
-            '📍 Auto-Arrived!',
-            `Arrived at ${stationName}`,
-          );
-
           setArrivalAlert(data);
           setCurrentStation(stationName);
-
-          setNextStation(
-            data.next_station?.name || null,
-          );
+          setNextStation(data.next_station?.name || null);
+          showNotification('📍 Auto-Arrived!', `Arrived at ${stationName}`);
         }
       }
 
       fetchRouteStops();
     }
 
-    // -----------------------------
-    // Automatic station departure
-    // -----------------------------
-
     if (data.auto_departed) {
       const now = Date.now();
-
       const isNewDeparture =
         lastAutoEventRef.current.type !== 'departure' ||
         now - lastAutoEventRef.current.time > 10000;
 
       if (isNewDeparture) {
         lastAutoEventRef.current = {
-          station: null,
+          station: data.station_name || null,
           time: now,
           type: 'departure',
         };
-
         showNotification(
           '🚂 Auto-Departed!',
-          'Train has left the station.',
+          `Train has left ${data.station_name || 'the station'}.`,
         );
       }
 
       setArrivalAlert(null);
       setCurrentStation(null);
-
       fetchRouteStops();
-    }
-  };
-  const sendLatestLocation = async () => {
-    // Stop sending after journey completion
-    if (journeyCompletedRef.current) {
-      return;
-    }
-
-    const location = latestLocationRef.current;
-
-    // GPS has not provided a position yet
-    if (!location) {
-      console.log(
-        '⏳ Waiting for GPS before sending location...',
-      );
-
-      return;
-    }
-
-    // Don't allow overlapping API requests
-    if (locationSendInFlightRef.current) {
-      console.log(
-        '⏭️ Previous location update is still sending',
-      );
-
-      return;
-    }
-
-    locationSendInFlightRef.current = true;
-
-    try {
-      const deviceId =
-        staffInfo?.staff_id || 'TRAIN_RIDER_001';
-
-      const payload = {
-        device_id: deviceId,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        speed: location.speed,
-        accuracy: location.accuracy,
-      };
-
-      console.log(
-        '📍 Sending scheduled location update:',
-        payload,
-      );
-
-      const response =
-        await locationTrackingApi.updateLocation(payload);
-
-      console.log(
-        '✅ Scheduled location response:',
-        response,
-      );
-
-      handleTrackingResponse(response);
-
-    } catch (err) {
-      console.error(
-        '❌ Failed scheduled location update:',
-        err,
-      );
-    } finally {
-      locationSendInFlightRef.current = false;
     }
   };
 
   const handleStationArrival = async (routeStationId, trainStopId) => {
-    if (!routeStationId) {
-      showNotification('Error', 'Missing station ID', 'error');
-      return;
-    }
-
-    if (gpsData.latitude == null || gpsData.longitude == null) {
-      showNotification(
-        'GPS Required',
-        'Wait for a valid GPS position before recording manual arrival.',
-        'warning',
-      );
+    if (!routeStationId || !staffInfo?.staff_id) {
+      showNotification('Error', 'Missing rider or station information', 'error');
       return;
     }
 
     setIsUpdating(true);
     try {
-      const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
       const payload = {
-        device_id: deviceId,
-        latitude: gpsData.latitude,
-        longitude: gpsData.longitude,
-        speed: gpsData.speed,
-        accuracy: gpsData.accuracy,
-        manual_arrival: true,
         route_station_id: routeStationId,
-        train_stop_id: trainStopId,
+        train_stop_id: trainStopId || null,
       };
-      const response = await locationTrackingApi.updateLocation(payload);
+
+      if (gpsData.latitude != null && gpsData.longitude != null) {
+        payload.latitude = gpsData.latitude;
+        payload.longitude = gpsData.longitude;
+      }
+
+      const response = await locationTrackingApi.manualArrival(
+        staffInfo.staff_id,
+        payload,
+      );
+
       if (response.is_last_station) {
         journeyCompletedRef.current = true;
         setJourneyCompleted(true);
         setArrivalAlert(null);
-        setCurrentStation(null);
+        setCurrentStation(response.station_name || null);
         setNextStation(null);
-        stopGPSTracking();
-        showNotification('🎉 Journey Complete!', 'Final destination reached.');
+        showNotification(
+          '🎉 Journey Complete!',
+          'Train has arrived at the final destination.',
+        );
       } else {
-        showNotification('Station Arrived!', 'Arrival logged successfully.');
+        setArrivalAlert(response);
+        setCurrentStation(response.station_name || null);
+        setNextStation(response.next_station?.name || null);
+        showNotification(
+          'Manual Arrival Logged',
+          `Arrived at ${response.station_name}.`,
+        );
       }
-      fetchRouteStops();
+
+      await fetchRouteStops();
     } catch (err) {
-      console.error(err);
-      showNotification('Error', err.detail || 'Failed to log arrival', 'error');
+      console.error('Manual arrival failed:', err);
+      const detail = err?.detail;
+      showNotification(
+        'Manual Arrival Failed',
+        typeof detail === 'string' ? detail : detail?.message || 'Failed to log arrival',
+        'error',
+      );
     } finally {
       setIsUpdating(false);
     }
   };
 
   const handleStationDeparture = async (routeStationId, trainStopId) => {
+    if (!staffInfo?.staff_id || !trainStopId) {
+      showNotification('Error', 'Missing rider or stop information', 'error');
+      return;
+    }
+
     setIsUpdating(true);
     try {
-      const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
-      await locationTrackingApi.logDeparture(deviceId, trainStopId, {
+      await locationTrackingApi.logDeparture(staffInfo.staff_id, trainStopId, {
         manual_departure: true,
         route_station_id: routeStationId,
       });
-      showNotification('Station Departed', 'Departure logged successfully.');
-      fetchRouteStops();
+      setArrivalAlert(null);
+      setCurrentStation(null);
+      showNotification('Manual Departure Logged', 'Train departure has been logged.');
+      await fetchRouteStops();
     } catch (err) {
-      console.error(err);
-      showNotification('Error', err.detail || 'Failed to log departure', 'error');
-    } finally {
-      setIsUpdating(false);
-    }
-  };
-
-  const startGPSTracking = async () => {
-    try {
-      // Home already asks for permission before Start Journey,
-      // but check again here because the user might reopen an
-      // already-active journey.
-      const locationGranted =
-        await requestLocationPermission();
-
-      if (!locationGranted) {
-        showNotification(
-          'Permission Denied',
-          'Location permission is required for live train tracking.',
-          'error',
-        );
-
-        return;
-      }
-
-      // Prevent duplicate GPS watchers / timers
-      if (
-        watchIdRef.current !== null ||
-        locationUploadIntervalRef.current !== null
-      ) {
-        console.log(
-          '⚠️ GPS tracking is already running',
-        );
-
-        return;
-      }
-
-      console.log(
-        '✅ Starting GPS tracking',
-      );
-
-      setIsTracking(true);
-
-      // --------------------------------
-      // GPS WATCHER
-      // --------------------------------
-
-      watchIdRef.current =
-        Geolocation.watchPosition(
-          handlePosition,
-
-          handleGPSError,
-
-          {
-            enableHighAccuracy: true,
-
-            timeout: 20000,
-
-            maximumAge: 5000,
-
-            // Update newest GPS location when
-            // device moves approximately 10m.
-            distanceFilter: 10,
-          },
-        );
-
-      // --------------------------------
-      // BACKEND UPDATE TIMER
-      // --------------------------------
-
-      locationUploadIntervalRef.current =
-        setInterval(() => {
-          sendLatestLocation();
-        }, LOCATION_UPLOAD_INTERVAL);
-
-      console.log(
-        `⏱️ Location will be sent every ${
-          LOCATION_UPLOAD_INTERVAL / 1000
-        } seconds`,
-      );
-
-    } catch (error) {
-      console.error(
-        'Failed to start GPS tracking:',
-        error,
-      );
-
+      console.error('Manual departure failed:', err);
+      const detail = err?.detail;
       showNotification(
-        'GPS Error',
-        'Failed to start GPS tracking.',
+        'Manual Departure Failed',
+        typeof detail === 'string' ? detail : detail?.message || 'Failed to log departure',
         'error',
       );
-    }
-  };
-
-  const stopGPSTracking = () => {
-    console.log(
-      '🛑 Stopping GPS tracking',
-    );
-
-    // Stop native GPS watcher
-    if (watchIdRef.current !== null) {
-      Geolocation.clearWatch(
-        watchIdRef.current,
-      );
-
-      watchIdRef.current = null;
-    }
-
-    // Stop 15-second API timer
-    if (
-      locationUploadIntervalRef.current !== null
-    ) {
-      clearInterval(
-        locationUploadIntervalRef.current,
-      );
-
-      locationUploadIntervalRef.current = null;
-    }
-
-    latestLocationRef.current = null;
-
-    firstLocationSentRef.current = false;
-
-    locationSendInFlightRef.current = false;
-
-    setIsTracking(false);
-  };
-
-  const handlePosition = (position) => {
-    const {
-      latitude,
-      longitude,
-      speed,
-      accuracy,
-    } = position.coords;
-
-    const speedMph =
-      speed != null
-        ? Math.max(
-            0,
-            Math.round(speed * 2.2369362920544),
-          )
-        : null;
-
-    const accuracyRounded =
-      accuracy != null
-        ? Math.round(accuracy)
-        : null;
-
-    const location = {
-      latitude,
-      longitude,
-      speed: speedMph,
-      accuracy: accuracyRounded,
-    };
-
-    // Save latest GPS position.
-    // The 15-second timer will use this value.
-    latestLocationRef.current = location;
-
-    // Update visible GPS information
-    setGpsData({
-      ...location,
-      lastUpdate: new Date(),
-    });
-
-    // Your map currently expects:
-    // [latitude, longitude]
-    setCurrentLocation([
-      latitude,
-      longitude,
-    ]);
-
-    console.log(
-      '📡 GPS position received:',
-      location,
-    );
-
-    // Send first GPS fix immediately.
-    // After that the timer sends every 15 seconds.
-    if (!firstLocationSentRef.current) {
-      firstLocationSentRef.current = true;
-
-      sendLatestLocation();
-    }
-  };
-
-  const handleGPSError = (error) => {
-    console.error('GPS Error:', error);
-    showNotification('GPS Error', error.message, 'error');
-  };
-
-  const handleLogDeparture = async () => {
-    if (!arrivalAlert?.train_stop_id) return;
-    setIsUpdating(true);
-    try {
-      const deviceId = staffInfo?.staff_id || 'TRAIN_RIDER_001';
-      await locationTrackingApi.logDeparture(deviceId, arrivalAlert.train_stop_id);
-      setArrivalAlert(null);
-      fetchRouteStops();
-      showNotification('Departed Station', 'Train has departed.');
-    } catch (err) {
-      console.error(err);
-      showNotification('Error', 'Failed to log departure', 'error');
     } finally {
       setIsUpdating(false);
     }
   };
 
-  const getStatusIcon = (status) => {
+  const getStatusIcon = status => {
     switch (status) {
-      case 'ARRIVED': return <Icon name="map-marker" size={16} color="#10b981" />;
-      case 'DEPARTED': return <Icon name="check-circle" size={16} color="#3b82f6" />;
-      default: return <Icon name="clock-outline" size={16} color="#9ca3af" />;
+      case 'ARRIVED':
+        return <Icon name="map-marker" size={16} color="#10b981" />;
+      case 'DEPARTED':
+        return <Icon name="check-circle" size={16} color="#3b82f6" />;
+      default:
+        return <Icon name="clock-outline" size={16} color="#9ca3af" />;
     }
   };
 
-  const getStatusBg = (status) => {
+  const getStatusBg = status => {
     switch (status) {
-      case 'ARRIVED': return { backgroundColor: '#ecfdf5', borderColor: '#a7f3d0' };
-      case 'DEPARTED': return { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' };
-      default: return { backgroundColor: '#f9fafb', borderColor: '#e5e7eb' };
+      case 'ARRIVED':
+        return { backgroundColor: '#ecfdf5', borderColor: '#a7f3d0' };
+      case 'DEPARTED':
+        return { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' };
+      default:
+        return { backgroundColor: '#f9fafb', borderColor: '#e5e7eb' };
     }
   };
 
-  const formatTime = (timeString) => formatRailwayTime(timeString);
+  const formatTime = timeString => formatRailwayTime(timeString);
 
-  const completedCount = routeStops.filter(s => s.status === 'DEPARTED').length;
-  const progressPercent = routeStops.length > 0 ? (completedCount / routeStops.length) * 100 : 0;
+  const departedCount = routeStops.filter(stop => stop.status === 'DEPARTED').length;
+  const finalArrivedCompleted =
+    journeyCompleted && routeStops[routeStops.length - 1]?.status === 'ARRIVED' ? 1 : 0;
+  const completedCount = departedCount + finalArrivedCompleted;
+  const progressPercent =
+    routeStops.length > 0
+      ? Math.min(100, (completedCount / routeStops.length) * 100)
+      : 0;
+
+  const nextManualStop = routeStops.find(stop => stop.status === 'SCHEDULED');
+  const arrivedManualStop = routeStops.find(stop => stop.status === 'ARRIVED');
 
   const notificationColor = {
     success: '#10b981',
@@ -580,12 +442,18 @@ const LiveTrackingScreen = () => {
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Notification banner */}
         {notification && (
-          <View style={[styles.notification, { borderLeftColor: notificationColor[notification.type] || '#3b82f6' }]}>
+          <View
+            style={[
+              styles.notification,
+              { borderLeftColor: notificationColor[notification.type] || '#3b82f6' },
+            ]}
+          >
             <View style={{ flex: 1 }}>
               <Text style={styles.notificationTitle}>{notification.title}</Text>
-              {notification.description && <Text style={styles.notificationDesc}>{notification.description}</Text>}
+              {notification.description && (
+                <Text style={styles.notificationDesc}>{notification.description}</Text>
+              )}
             </View>
             <TouchableOpacity onPress={() => setNotification(null)}>
               <Icon name="close" size={18} color="#6b7280" />
@@ -593,21 +461,27 @@ const LiveTrackingScreen = () => {
           </View>
         )}
 
-        {/* Journey Completed Banner */}
         {journeyCompleted && (
           <View style={styles.completedBanner}>
             <Text style={styles.completedEmoji}>🎉</Text>
             <Text style={styles.completedTitle}>Journey Completed!</Text>
-            <Text style={styles.completedText}>All stations visited. Schedules and assignments updated.</Text>
+            <Text style={styles.completedText}>
+              Final destination reached. Schedule, assignments and tracking device are completed.
+            </Text>
           </View>
         )}
 
-        {/* GPS Status Cards */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Icon name="satellite-variant" size={18} color={isTracking && !journeyCompleted ? '#10b981' : '#9ca3af'} />
+            <Icon
+              name="satellite-variant"
+              size={18}
+              color={isTracking && !journeyCompleted ? '#10b981' : '#9ca3af'}
+            />
             <Text style={styles.statLabel}>GPS</Text>
-            <Text style={styles.statValue}>{journeyCompleted ? 'Done' : isTracking ? 'Active' : 'Inactive'}</Text>
+            <Text style={styles.statValue}>
+              {journeyCompleted ? 'Done' : isTracking ? 'Active' : 'Inactive'}
+            </Text>
           </View>
           <View style={styles.statCard}>
             <Icon name="speedometer" size={18} color="#dc2626" />
@@ -617,16 +491,36 @@ const LiveTrackingScreen = () => {
           <View style={styles.statCard}>
             <Icon name="map-marker" size={18} color="#10b981" />
             <Text style={styles.statLabel}>Station</Text>
-            <Text style={styles.statValue} numberOfLines={1}>{journeyCompleted ? 'Destination' : currentStation || 'In Transit'}</Text>
+            <Text style={styles.statValue} numberOfLines={1}>
+              {journeyCompleted ? currentStation || 'Destination' : currentStation || 'In Transit'}
+            </Text>
           </View>
           <View style={styles.statCard}>
             <Icon name="navigation" size={18} color="#3b82f6" />
             <Text style={styles.statLabel}>Next</Text>
-            <Text style={styles.statValue} numberOfLines={1}>{journeyCompleted ? '--' : nextStation || '--'}</Text>
+            <Text style={styles.statValue} numberOfLines={1}>
+              {journeyCompleted ? '--' : nextStation || '--'}
+            </Text>
           </View>
         </View>
 
-        {/* Arrival Alert */}
+        {gpsError && !journeyCompleted && (
+          <View style={styles.trackingErrorCard}>
+            <Icon name="alert-circle" size={20} color="#dc2626" />
+            <View style={{ flex: 1, marginLeft: 8 }}>
+              <Text style={styles.trackingErrorTitle}>GPS / Tracking problem</Text>
+              <Text style={styles.trackingErrorText}>{gpsError}</Text>
+            </View>
+          </View>
+        )}
+
+        {distanceToStation && !journeyCompleted && (
+          <Text style={styles.distanceText}>
+            {distanceToStation.station ? `${distanceToStation.station}: ` : ''}
+            {distanceToStation.meters} m from station trigger point
+          </Text>
+        )}
+
         {arrivalAlert && !journeyCompleted && (
           <View style={styles.arrivalCard}>
             <View style={styles.arrivalHeader}>
@@ -638,16 +532,34 @@ const LiveTrackingScreen = () => {
             </View>
             {arrivalAlert.next_station && (
               <View style={styles.nextStationBox}>
-                <Text style={styles.nextStationText}>Next: {arrivalAlert.next_station.name}</Text>
+                <Text style={styles.nextStationText}>
+                  Next: {arrivalAlert.next_station.name}
+                </Text>
               </View>
             )}
-            <TouchableOpacity style={styles.departButton} onPress={handleLogDeparture}>
-              <Text style={styles.departButtonText}>Confirm Departure</Text>
-            </TouchableOpacity>
+            {manualMode ? (
+              <TouchableOpacity
+                style={styles.departButton}
+                onPress={() =>
+                  handleStationDeparture(
+                    arrivalAlert.route_station_id,
+                    arrivalAlert.train_stop_id,
+                  )
+                }
+                disabled={isUpdating}
+              >
+                <Text style={styles.departButtonText}>
+                  {isUpdating ? 'Updating...' : 'Manual Depart Now'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.automaticDepartureText}>
+                Departure is automatic after the train moves more than 50 m from this station.
+              </Text>
+            )}
           </View>
         )}
 
-        {/* Map */}
         <TrainTrackerMap
           routeStops={routeStops}
           currentLocation={currentLocation}
@@ -655,9 +567,82 @@ const LiveTrackingScreen = () => {
           nextStation={nextStation}
         />
 
-        {/* Route Stations List */}
+        {!journeyCompleted && routeStops.length > 0 && (
+          <View style={styles.manualCard}>
+            <View style={styles.manualHeader}>
+              <View style={styles.manualInfo}>
+                <Text style={styles.manualTitle}>Manual station fallback</Text>
+                <Text style={styles.manualText}>
+                  GPS automation stays primary. Enable only when an arrival or departure needs manual help.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.manualToggle,
+                  manualMode && styles.manualToggleActive,
+                ]}
+                onPress={() => setManualMode(value => !value)}
+                disabled={isUpdating}
+              >
+                <Text
+                  style={[
+                    styles.manualToggleText,
+                    manualMode && styles.manualToggleTextActive,
+                  ]}
+                >
+                  {manualMode ? 'Disable' : 'Enable'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {manualMode && arrivedManualStop && (
+              <TouchableOpacity
+                style={[styles.manualAction, styles.manualDepartAction]}
+                onPress={() =>
+                  handleStationDeparture(
+                    arrivedManualStop.route_station_id,
+                    arrivedManualStop.train_stop_id,
+                  )
+                }
+                disabled={isUpdating || !arrivedManualStop.train_stop_id}
+              >
+                <Icon name="logout" size={17} color="#fff" />
+                <Text style={styles.manualActionText}>
+                  Manual Depart — {arrivedManualStop.station_name}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {manualMode && !arrivedManualStop && nextManualStop && (
+              <TouchableOpacity
+                style={styles.manualAction}
+                onPress={() =>
+                  handleStationArrival(
+                    nextManualStop.route_station_id,
+                    nextManualStop.train_stop_id,
+                  )
+                }
+                disabled={isUpdating || !nextManualStop.train_stop_id}
+              >
+                <Icon name="map-marker-check" size={17} color="#fff" />
+                <Text style={styles.manualActionText}>
+                  Manual Arrive — {nextManualStop.station_name}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {manualMode && !arrivedManualStop && !nextManualStop && (
+              <Text style={styles.manualHint}>No valid manual station action is available.</Text>
+            )}
+          </View>
+        )}
+
         {loadingStops ? (
-          <ActivityIndicator size="small" color="#3b82f6" style={{ marginVertical: 20 }} />
+          <ActivityIndicator
+            size="small"
+            color="#3b82f6"
+            style={{ marginVertical: 20 }}
+          />
         ) : routeStops.length > 0 ? (
           <View style={styles.stationsCard}>
             <View style={styles.stationsHeader}>
@@ -665,73 +650,112 @@ const LiveTrackingScreen = () => {
                 <Icon name="train" size={18} color="#1d4ed8" />
                 <Text style={styles.stationsTitle}>Route Stations</Text>
               </View>
-              <Text style={styles.stationsCount}>{completedCount}/{routeStops.length} completed</Text>
+              <Text style={styles.stationsCount}>
+                {completedCount}/{routeStops.length} completed
+              </Text>
             </View>
             <View style={styles.progressBarBg}>
-              <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
+              <View
+                style={[styles.progressBarFill, { width: `${progressPercent}%` }]}
+              />
             </View>
 
             {routeStops.map((stop, index) => (
-              <View key={stop.route_station_id || index} style={[styles.stopItem, getStatusBg(stop.status)]}>
-                <View style={styles.stopIconContainer}>
-                  {getStatusIcon(stop.status)}
-                </View>
+              <View
+                key={stop.route_station_id || index}
+                style={[styles.stopItem, getStatusBg(stop.status)]}
+              >
+                <View style={styles.stopIconContainer}>{getStatusIcon(stop.status)}</View>
                 <View style={styles.stopInfo}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                    }}
+                  >
                     <Text style={styles.stopName}>{stop.station_name}</Text>
                     {index === 0 && <Text style={styles.badge}>Start</Text>}
-                    {index === routeStops.length - 1 && <Text style={[styles.badge, { backgroundColor: '#ede9fe', color: '#6d28d9' }]}>End</Text>}
+                    {index === routeStops.length - 1 && (
+                      <Text
+                        style={[
+                          styles.badge,
+                          { backgroundColor: '#ede9fe', color: '#6d28d9' },
+                        ]}
+                      >
+                        End
+                      </Text>
+                    )}
+                    {manualMode &&
+                      nextManualStop?.route_station_id === stop.route_station_id && (
+                        <Text style={styles.nextStopText}>NEXT</Text>
+                      )}
                   </View>
                   <View style={styles.stopTimes}>
-                    {stop.expected_arrival && <Text style={styles.timeText}>🕐 ETA: {stop.expected_arrival}</Text>}
-                    {stop.expected_departure && <Text style={styles.timeText}>🚂 ETD: {stop.expected_departure}</Text>}
-                    {stop.actual_arrival && <Text style={styles.timeActual}>✅ Arr: {formatTime(stop.actual_arrival)}</Text>}
-                    {stop.actual_departure && <Text style={styles.timeActual}>🚂 Dep: {formatTime(stop.actual_departure)}</Text>}
-                    {stop.delay_minutes > 0 && <Text style={styles.delayText}>⚠️ +{stop.delay_minutes}min</Text>}
+                    {stop.expected_arrival && (
+                      <Text style={styles.timeText}>🕐 ETA: {stop.expected_arrival}</Text>
+                    )}
+                    {stop.expected_departure && (
+                      <Text style={styles.timeText}>🚂 ETD: {stop.expected_departure}</Text>
+                    )}
+                    {stop.actual_arrival && (
+                      <Text style={styles.timeActual}>
+                        ✅ Arr: {formatTime(stop.actual_arrival)}
+                      </Text>
+                    )}
+                    {stop.actual_departure && (
+                      <Text style={styles.timeActual}>
+                        🚂 Dep: {formatTime(stop.actual_departure)}
+                      </Text>
+                    )}
+                    {stop.delay_minutes > 0 && (
+                      <Text style={styles.delayText}>⚠️ +{stop.delay_minutes}min</Text>
+                    )}
                   </View>
                 </View>
-                {stop.status === 'SCHEDULED' && !journeyCompleted && (
-                  <TouchableOpacity style={styles.actionButton} onPress={() => handleStationArrival(stop.route_station_id, stop.train_stop_id)} disabled={isUpdating}>
-                    <Icon name="map-marker" size={14} color="#fff" />
-                    <Text style={styles.actionButtonText}>Arrive</Text>
-                  </TouchableOpacity>
-                )}
-                {stop.status === 'ARRIVED' && !journeyCompleted && (
-                  <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#3b82f6' }]} onPress={() => handleStationDeparture(stop.route_station_id, stop.train_stop_id)} disabled={isUpdating}>
-                    <Icon name="logout" size={14} color="#fff" />
-                    <Text style={styles.actionButtonText}>Depart</Text>
-                  </TouchableOpacity>
-                )}
                 {stop.status === 'DEPARTED' && (
-                  <Text style={styles.doneText}>{index === routeStops.length - 1 ? '🏁' : '✓'}</Text>
+                  <Text style={styles.doneText}>✓</Text>
                 )}
+                {journeyCompleted &&
+                  index === routeStops.length - 1 &&
+                  stop.status === 'ARRIVED' && <Text style={styles.doneText}>🏁</Text>}
               </View>
             ))}
           </View>
         ) : null}
 
-        {/* GPS Coordinates */}
         <View style={styles.coordsCard}>
           <View style={styles.coordsHeader}>
             <Icon name="satellite-variant" size={16} color="#6b7280" />
             <Text style={styles.coordsTitle}>GPS Coordinates</Text>
-            {gpsData.lastUpdate && <Text style={styles.coordsUpdated}>Updated: {gpsData.lastUpdate.toLocaleTimeString()}</Text>}
+            {gpsData.lastUpdate && (
+              <Text style={styles.coordsUpdated}>
+                Updated: {gpsData.lastUpdate.toLocaleTimeString()}
+              </Text>
+            )}
           </View>
           <View style={styles.coordsRow}>
             <View style={styles.coordItem}>
               <Text style={styles.coordLabel}>Latitude</Text>
-              <Text style={styles.coordValue}>{gpsData.latitude?.toFixed(6) || '--'}</Text>
+              <Text style={styles.coordValue}>
+                {gpsData.latitude?.toFixed(6) || '--'}
+              </Text>
             </View>
             <View style={styles.coordItem}>
               <Text style={styles.coordLabel}>Longitude</Text>
-              <Text style={styles.coordValue}>{gpsData.longitude?.toFixed(6) || '--'}</Text>
+              <Text style={styles.coordValue}>
+                {gpsData.longitude?.toFixed(6) || '--'}
+              </Text>
             </View>
           </View>
-          {gpsData.accuracy && <Text style={styles.accuracyText}>GPS Accuracy: ±{gpsData.accuracy} meters</Text>}
+          {gpsData.accuracy != null && (
+            <Text style={styles.accuracyText}>
+              GPS Accuracy: ±{gpsData.accuracy} meters
+            </Text>
+          )}
         </View>
       </ScrollView>
 
-      {/* Floating Back Button */}
       <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
         <Icon name="arrow-left" size={24} color="#fff" />
       </TouchableOpacity>
@@ -1007,6 +1031,115 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#9ca3af',
     marginTop: 8,
+  },
+  trackingErrorCard: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  trackingErrorTitle: {
+    color: '#991b1b',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  trackingErrorText: {
+    color: '#b91c1c',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  distanceText: {
+    textAlign: 'center',
+    color: '#6b7280',
+    fontSize: 12,
+    marginBottom: 12,
+  },
+  automaticDepartureText: {
+    color: '#fff',
+    opacity: 0.9,
+    fontSize: 12,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  manualCard: {
+    backgroundColor: '#fffbeb',
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 16,
+  },
+  manualHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  manualInfo: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  manualTitle: {
+    color: '#78350f',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  manualText: {
+    color: '#92400e',
+    fontSize: 11,
+    marginTop: 3,
+  },
+  manualToggle: {
+    borderWidth: 1,
+    borderColor: '#d97706',
+    borderRadius: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: '#fff',
+  },
+  manualToggleActive: {
+    backgroundColor: '#d97706',
+  },
+  manualToggleText: {
+    color: '#b45309',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  manualToggleTextActive: {
+    color: '#fff',
+  },
+  manualAction: {
+    marginTop: 12,
+    backgroundColor: '#d97706',
+    borderRadius: 8,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  manualDepartAction: {
+    backgroundColor: '#2563eb',
+  },
+  manualActionText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    marginLeft: 6,
+    fontSize: 13,
+  },
+  manualHint: {
+    marginTop: 10,
+    color: '#92400e',
+    fontSize: 11,
+  },
+  nextStopText: {
+    color: '#d97706',
+    fontSize: 10,
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
   backButton: {
     position: 'absolute',
