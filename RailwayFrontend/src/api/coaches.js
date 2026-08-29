@@ -5,7 +5,7 @@ const coachesApi = {
   // Get all coaches
   getAll: async (params = {}) => {
     try {
-      const response = await api.get('/coaches', { params });
+      const response = await api.get('/coaches/', { params });
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };
@@ -39,7 +39,7 @@ const coachesApi = {
   // Create new coach
   create: async (coachData) => {
     try {
-      const response = await api.post('/coaches', coachData);
+      const response = await api.post('/coaches/', coachData);
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };

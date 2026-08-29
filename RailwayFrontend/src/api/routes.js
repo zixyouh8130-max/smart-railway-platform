@@ -5,7 +5,7 @@ const routesApi = {
   // Get all routes
   getAll: async (params = {}) => {
     try {
-      const response = await api.get('/routes', { params });
+      const response = await api.get('/routes/', { params });
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };
@@ -25,7 +25,7 @@ const routesApi = {
   // Create new route
   create: async (routeData) => {
     try {
-      const response = await api.post('/routes', routeData);
+      const response = await api.post('/routes/', routeData);
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };

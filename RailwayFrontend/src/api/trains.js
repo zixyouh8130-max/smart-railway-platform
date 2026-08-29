@@ -5,7 +5,7 @@ const trainsApi = {
   // Get all trains
   getAll: async (params = {}) => {
     try {
-      const response = await api.get('/trains', { params });
+      const response = await api.get('/trains/', { params });
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };
@@ -25,7 +25,7 @@ const trainsApi = {
   // Create new train
   create: async (trainData) => {
     try {
-      const response = await api.post('/trains', trainData);
+      const response = await api.post('/trains/', trainData);
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };
@@ -77,7 +77,7 @@ const trainsApi = {
   // 🆕 Create train stop
   createTrainStop: async (stopData) => {
     try {
-      const response = await api.post('/train-stops', stopData);
+      const response = await api.post('/train-stops/', stopData);
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };
@@ -143,7 +143,7 @@ const trainsApi = {
   // Get all routes (for dropdown)
   getRoutes: async () => {
     try {
-      const response = await api.get('/routes');
+      const response = await api.get('/routes/');
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };

@@ -5,7 +5,13 @@ from ..models.user import User, UserRole
 from ..models.staff import Staff, StaffRole, StaffStatus
 from ..repositories.user_repository import UserRepository
 from ..repositories.staff_repository import StaffRepository
-from ..core.security import hash_password, verify_password, create_access_token
+from ..core.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+)
 from datetime import datetime, timezone
 
 
@@ -76,6 +82,7 @@ class AuthService:
             token_data["staff"] = staff_info
 
         token = create_access_token(token_data)
+        refresh_token = create_refresh_token(str(user.id), user.email)
 
         # Update last login - timezone aware
         user.last_login = datetime.now(timezone.utc)
@@ -87,8 +94,9 @@ class AuthService:
 
         return {
             "access_token": token,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
-            "user": user_dict
+            "user": user_dict,
         }
 
     def admin_login(self, request) -> dict:
@@ -140,6 +148,7 @@ class AuthService:
         if staff_info:
             token_data["staff"] = staff_info
         token = create_access_token(token_data)
+        refresh_token = create_refresh_token(str(user.id), user.email)
 
         # Update last login - timezone aware
         user.last_login = datetime.now(timezone.utc)
@@ -151,9 +160,81 @@ class AuthService:
 
         return {
             "access_token": token,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
-            "user": user_dict
+            "user": user_dict,
         }
+
+    def refresh_access_token(self, refresh_token: str) -> dict:
+        """Rotate a valid refresh token and issue a fresh access token."""
+        payload = decode_access_token(refresh_token)
+
+        if not payload or payload.get("type") != "refresh" or not payload.get("sub"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired refresh token",
+            )
+
+        user = self.repo.get_by_id(payload["sub"])
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User no longer exists",
+            )
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is inactive",
+            )
+
+        token_data = {
+            "sub": str(user.id),
+            "role": user.role.value if isinstance(user.role, UserRole) else str(user.role),
+            "type": "access",
+        }
+
+        # Keep the staff claim consistent with login tokens.
+        if self.staff_repo:
+            staff = self.staff_repo.get_by_user_id(user.id)
+            if staff:
+                token_data["staff"] = {
+                    "staff_id": staff.staff_id,
+                    "role": staff.role.value if isinstance(staff.role, StaffRole) else staff.role,
+                    "department": staff.department,
+                    "status": staff.status.value if isinstance(staff.status, StaffStatus) else str(staff.status),
+                    "is_available": staff.is_available,
+                }
+
+        return {
+            "access_token": create_access_token(token_data),
+            "refresh_token": create_refresh_token(str(user.id), user.email),
+            "token_type": "bearer",
+        }
+
+    def change_password(self, user_id: str, current_password: str, new_password: str) -> None:
+        """Change the current user's password after verifying the old password."""
+        user = self.repo.get_by_id(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="အသုံးပြုသူ မတွေ့ရှိပါ",
+            )
+
+        if not verify_password(current_password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="လက်ရှိ စကားဝှက် မှားယွင်းနေပါသည်",
+            )
+
+        if verify_password(new_password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="စကားဝှက်အသစ်သည် လက်ရှိစကားဝှက်နှင့် မတူရပါ",
+            )
+
+        user.password_hash = hash_password(new_password)
+        self.repo.update(user)
 
     def get_current_user(self, user_id: str) -> dict:
         """Get current user by ID"""

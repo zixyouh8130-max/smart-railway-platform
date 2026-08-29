@@ -1,5 +1,5 @@
 // api/auth.js
-import api from './axios';  // Use your existing axios instance
+import api from './axios';
 
 const authApi = {
   // Admin login
@@ -22,17 +22,19 @@ const authApi = {
     }
   },
 
-  // Refresh token
+  // Refresh access token; backend rotates the refresh token as well.
   refreshToken: async (refreshToken) => {
     try {
-      const response = await api.post('/auth/refresh', { refresh_token: refreshToken });
+      const response = await api.post('/auth/refresh', {
+        refresh_token: refreshToken,
+      });
       return response.data;
     } catch (error) {
       throw error.response?.data || { detail: error.message };
     }
   },
 
-  // Logout
+  // Stateless logout acknowledgement. The caller should clear local tokens.
   logout: async () => {
     try {
       const response = await api.post('/auth/logout');
@@ -42,7 +44,7 @@ const authApi = {
     }
   },
 
-  // Change password
+  // passwordData = { current_password, new_password }
   changePassword: async (passwordData) => {
     try {
       const response = await api.post('/auth/change-password', passwordData);
@@ -50,7 +52,29 @@ const authApi = {
     } catch (error) {
       throw error.response?.data || { detail: error.message };
     }
-  }
+  },
+
+  // Admin: list all users
+  getAllUsers: async () => {
+    try {
+      const response = await api.get('/auth/admin/users');
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { detail: error.message };
+    }
+  },
+
+  // Super admin: JSON body now matches the backend request model.
+  updateUserRole: async (userId, newRole) => {
+    try {
+      const response = await api.put(`/auth/admin/users/${userId}/role`, {
+        new_role: newRole,
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { detail: error.message };
+    }
+  },
 };
 
 export default authApi;

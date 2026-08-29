@@ -99,7 +99,11 @@ app = FastAPI(
 # CORS middleware - MUST be added before routers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://smart-railway-platform-delta.vercel.app",
+        "https://smart-railway-platform-iatrbksbo-su-solo.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -124,7 +128,7 @@ app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(chatbot_router, prefix="/api/chatbot", tags=["AI Chatbot"])
 app.include_router(inspection_router, prefix="/api/inspection", tags=["Inspection"])
 app.include_router(track_issues_router, prefix="/api/track-issues", tags=["Track Maintenance Issues"])
-app.include_router(routes_and_station_router, prefix="/api", tags=["Routes&Stations"])
+app.include_router(routes_and_station_router, prefix="/api/routes-and-stations", tags=["Routes&Stations"])
 
 @app.get("/")
 async def root():
