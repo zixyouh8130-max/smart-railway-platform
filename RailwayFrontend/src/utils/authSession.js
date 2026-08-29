@@ -1,4 +1,5 @@
 const TOKEN_KEY = 'token';
+const REFRESH_TOKEN_KEY = 'refreshToken';
 const USER_KEY = 'user';
 const STAFF_KEY = 'staffInfo';
 
@@ -20,11 +21,15 @@ export const isRegularUser = (user) =>
 export const getDefaultPathForUser = (user) => {
   if (isAdminUser(user)) return '/admin/dashboard';
   if (isStaffUser(user)) return '/train-rider';
+
   return '/';
 };
 
 export const getStoredToken = () =>
   localStorage.getItem(TOKEN_KEY);
+
+export const getStoredRefreshToken = () =>
+  localStorage.getItem(REFRESH_TOKEN_KEY);
 
 export const getStoredUser = () => {
   try {
@@ -35,13 +40,28 @@ export const getStoredUser = () => {
   }
 };
 
-export const persistSession = ({ access_token, user }) => {
+export const persistSession = ({
+  access_token,
+  refresh_token,
+  user,
+}) => {
   if (!access_token || !user) {
     throw new Error('Invalid authentication response');
   }
 
   localStorage.setItem(TOKEN_KEY, access_token);
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+
+  if (refresh_token) {
+    localStorage.setItem(
+      REFRESH_TOKEN_KEY,
+      refresh_token
+    );
+  }
+
+  localStorage.setItem(
+    USER_KEY,
+    JSON.stringify(user)
+  );
 
   if (user.staff) {
     localStorage.setItem(
@@ -52,9 +72,30 @@ export const persistSession = ({ access_token, user }) => {
     localStorage.removeItem(STAFF_KEY);
   }
 
-  // Remove the old parallel admin session so there is only one source.
+  // Remove legacy parallel admin session.
   localStorage.removeItem(LEGACY_ADMIN_TOKEN_KEY);
   localStorage.removeItem(LEGACY_ADMIN_USER_KEY);
+};
+
+export const persistTokens = ({
+  access_token,
+  refresh_token,
+}) => {
+  if (!access_token) {
+    throw new Error('Missing access token');
+  }
+
+  localStorage.setItem(
+    TOKEN_KEY,
+    access_token
+  );
+
+  if (refresh_token) {
+    localStorage.setItem(
+      REFRESH_TOKEN_KEY,
+      refresh_token
+    );
+  }
 };
 
 export const persistUser = (user) => {
@@ -64,7 +105,10 @@ export const persistUser = (user) => {
     return;
   }
 
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  localStorage.setItem(
+    USER_KEY,
+    JSON.stringify(user)
+  );
 
   if (user.staff) {
     localStorage.setItem(
@@ -78,10 +122,11 @@ export const persistUser = (user) => {
 
 export const clearSession = () => {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem(STAFF_KEY);
 
-  // Clean stale keys created by the previous frontend.
+  // Clean stale keys created by previous frontend.
   localStorage.removeItem(LEGACY_ADMIN_TOKEN_KEY);
   localStorage.removeItem(LEGACY_ADMIN_USER_KEY);
 };

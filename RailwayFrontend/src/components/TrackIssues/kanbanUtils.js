@@ -1,38 +1,111 @@
 export const CASE_COLUMNS = [
-  { key: 'OPEN', label: 'Open' },
-  { key: 'ACKNOWLEDGED', label: 'Acknowledged' },
-  { key: 'IN_PROGRESS', label: 'In Progress' },
-  { key: 'VERIFYING', label: 'Verifying' },
-  { key: 'BLOCKED', label: 'Blocked' },
-  { key: 'COMPLETED', label: 'Completed' },
+  { key: 'OPEN', label: 'ဖွင့်ထား' },
+  { key: 'ACKNOWLEDGED', label: 'လက်ခံပြီး' },
+  { key: 'IN_PROGRESS', label: 'လုပ်ဆောင်နေ' },
+  { key: 'VERIFYING', label: 'အပြီးသတ်သုံးသပ်နေ' },
+  { key: 'BLOCKED', label: 'ရပ်တန့်ထား' },
+  { key: 'COMPLETED', label: 'ပြီးစီး' },
 ];
 
 export const DEFECT_COLUMNS = [
-  { key: 'FIELD_CHECK', label: 'Field Check', icon: 'search' },
-  { key: 'VERIFIED', label: 'Verified', icon: 'eye' },
-  { key: 'REPAIR_REQUIRED', label: 'Repair Required', icon: 'wrench' },
-  { key: 'REPAIR_IN_PROGRESS', label: 'Repair In Progress', icon: 'hammer' },
-  { key: 'FOLLOW_UP', label: 'Follow-up', icon: 'clock' },
-  { key: 'FALSE_POSITIVE', label: 'False Positive', icon: 'x' },
-  { key: 'DONE', label: 'Done', icon: 'check' },
+  { key: 'FIELD_CHECK', label: 'ကွင်းဆင်းစစ်ဆေးရန်', icon: 'search' },
+  { key: 'VERIFIED', label: 'အတည်ပြုပြီး', icon: 'eye' },
+  { key: 'REPAIR_REQUIRED', label: 'ပြုပြင်ရန်လို', icon: 'wrench' },
+  { key: 'REPAIR_IN_PROGRESS', label: 'ပြုပြင်နေ', icon: 'hammer' },
+  { key: 'FOLLOW_UP', label: 'ထပ်မံစစ်ဆေးရန်', icon: 'clock' },
+  { key: 'FALSE_POSITIVE', label: 'AI မှားယွင်းတွေ့ရှိမှု', icon: 'x' },
+  { key: 'DONE', label: 'ပြီးစီး', icon: 'check' },
 ];
 
 export const FIELD_VERIFICATION_OPTIONS = [
-  ['NOT_CHECKED', 'Not checked'],
-  ['CONFIRMED', 'Confirmed'],
-  ['PARTIALLY_CONFIRMED', 'Partially confirmed'],
-  ['NOT_CONFIRMED', 'Not confirmed / false positive'],
-  ['UNABLE_TO_VERIFY', 'Unable to verify'],
+  ['NOT_CHECKED', 'မစစ်ဆေးရသေး'],
+  ['CONFIRMED', 'တွေ့ရှိချက်ကို အတည်ပြုသည်'],
+  ['PARTIALLY_CONFIRMED', 'တစ်စိတ်တစ်ပိုင်း အတည်ပြုသည်'],
+  ['NOT_CONFIRMED', 'မတွေ့ရှိပါ (AI မှားယွင်းတွေ့ရှိမှု)'],
+  ['UNABLE_TO_VERIFY', 'စစ်ဆေးအတည်ပြု၍ မရပါ'],
 ];
 
 export const MAINTENANCE_OPTIONS = [
-  ['PENDING', 'Pending'],
-  ['NO_ACTION_REQUIRED', 'No action required'],
-  ['REPAIR_REQUIRED', 'Repair required'],
-  ['REPAIR_IN_PROGRESS', 'Repair in progress'],
-  ['REPAIR_COMPLETED', 'Repair completed'],
-  ['FOLLOW_UP_REQUIRED', 'Follow-up required'],
+  ['PENDING', 'စောင့်ဆိုင်းနေ'],
+  ['NO_ACTION_REQUIRED', 'ပြုပြင်ရန် မလိုပါ'],
+  ['REPAIR_REQUIRED', 'ပြုပြင်ရန် လိုအပ်သည်'],
+  ['REPAIR_IN_PROGRESS', 'ပြုပြင်နေသည်'],
+  ['REPAIR_COMPLETED', 'ပြုပြင်ပြီးစီးသည်'],
+  ['FOLLOW_UP_REQUIRED', 'ထပ်မံစစ်ဆေးရန် လိုအပ်သည်'],
 ];
+
+const CASE_STATUS_LABELS = Object.fromEntries(
+  CASE_COLUMNS.map(({ key, label }) => [key, label]),
+);
+
+const FIELD_LABELS = Object.fromEntries(FIELD_VERIFICATION_OPTIONS);
+const MAINTENANCE_LABELS = Object.fromEntries(MAINTENANCE_OPTIONS);
+
+const PRIORITY_LABELS = {
+  ROUTINE: 'ပုံမှန်',
+  LOW: 'အနိမ့်',
+  MEDIUM: 'အလယ်အလတ်',
+  MONITOR: 'စောင့်ကြည့်ရန်',
+  PRIORITY: 'ဦးစားပေး',
+  PRIORITY_INSPECTION: 'ဦးစားပေး စစ်ဆေးရန်',
+  HIGH: 'မြင့်',
+  URGENT: 'အရေးပေါ်',
+  CRITICAL: 'အလွန်အရေးကြီး',
+};
+
+const RAIL_SIDE_LABELS = {
+  LEFT: 'ဘယ်ဘက် ရထားလမ်း',
+  RIGHT: 'ညာဘက် ရထားလမ်း',
+  BOTH: 'ရထားလမ်း နှစ်ဘက်လုံး',
+  CENTER: 'အလယ်ပိုင်း',
+  UNKNOWN: 'မသတ်မှတ်ရသေး',
+};
+
+const PROXIMITY_LABELS = {
+  ON_SITE: 'သတ်မှတ်နေရာသို့ ရောက်ရှိ',
+  NEARBY: 'အနီးတွင် ရှိနေ',
+  APPROACHING: 'နေရာသို့ နီးကပ်လာနေ',
+  FAR: 'နေရာမှ အဝေးတွင် ရှိနေ',
+  GPS_UNCERTAIN: 'GPS တိကျမှု မသေချာ',
+};
+
+const DEFECT_TYPE_LABELS = {
+  MISSING_FASTENER: 'Fastener ပျောက်ဆုံးမှု',
+  DAMAGED_FASTENER: 'Fastener ပျက်စီးမှု',
+  MISSING_FISHPLATE: 'Fishplate ပျောက်ဆုံးမှု',
+  DAMAGED_FISHPLATE: 'Fishplate ပျက်စီးမှု',
+  DAMAGED_SLEEPER: 'Sleeper ပျက်စီးမှု',
+  BROKEN_SLEEPER: 'Sleeper ကျိုးပဲ့မှု',
+  CRACK: 'အက်ကွဲမှု',
+  RAIL_CRACK: 'ရထားသံလမ်း အက်ကွဲမှု',
+  VEGETATION: 'အပင်ပေါက်မှု',
+  VEGETATION_OVERGROWTH: 'အပင်အလွန်ထူထပ်စွာ ပေါက်မှု',
+  TRACK_OBSTRUCTION: 'ရထားလမ်း ပိတ်ဆို့မှု',
+};
+
+const STAFF_ROLE_LABELS = {
+  TRACK_ENGINEER: 'လမ်းကြောင်းအင်ဂျင်နီယာ',
+  TRAIN_DRIVER: 'ရထားမောင်းသူ',
+  ASSISTANT_DRIVER: 'အကူရထားမောင်းသူ',
+  TRAIN_GUARD: 'ရထားစောင့်ကြည့်ဝန်ထမ်း',
+  TICKET_CHECKER: 'လက်မှတ်စစ်ဝန်ထမ်း',
+  ADMIN: 'စီမံခန့်ခွဲသူ',
+  SUPER_ADMIN: 'အဓိက စီမံခန့်ခွဲသူ',
+};
+
+const ACTIVITY_TYPE_LABELS = {
+  COMMENT: 'မှတ်ချက်',
+  MESSAGE: 'စာတို',
+  QUESTION: 'မေးခွန်း',
+  SUGGESTION: 'အကြံပြုချက်',
+  LOCATION_CHECK: 'တည်နေရာ စစ်ဆေးမှု',
+  FIELD_VERIFICATION: 'ကွင်းဆင်း အတည်ပြုမှု',
+  MAINTENANCE_UPDATE: 'ပြုပြင်ထိန်းသိမ်းမှု အပ်ဒိတ်',
+  STATUS_CHANGE: 'အခြေအနေ ပြောင်းလဲမှု',
+  CASE_CREATED: 'ကိစ္စ ဖန်တီးမှု',
+  ISSUE_CREATED: 'တွေ့ရှိချက် ဖန်တီးမှု',
+  AI_REVIEW: 'AI သုံးသပ်ချက်',
+};
 
 const FINAL_FIELD_STATES = new Set([
   'CONFIRMED',
@@ -45,11 +118,14 @@ const FINAL_MAINTENANCE_STATES = new Set([
   'REPAIR_COMPLETED',
 ]);
 
-export function normalizeCaseStatus(status) {
-  const value = String(status || 'OPEN').toUpperCase();
+const normalizedKey = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/[\s-]+/g, '_')
+    .toUpperCase();
 
-  // Reopened work remains visible in the active/open lane without adding a
-  // second lifecycle just for presentation.
+export function normalizeCaseStatus(status) {
+  const value = normalizedKey(status || 'OPEN');
   if (value === 'REOPENED') return 'OPEN';
 
   return CASE_COLUMNS.some((column) => column.key === value)
@@ -58,16 +134,13 @@ export function normalizeCaseStatus(status) {
 }
 
 export function deriveDefectKanbanStatus(issue = {}) {
-  const field = String(
+  const field = normalizedKey(
     issue.field_verification_status || 'NOT_CHECKED',
-  ).toUpperCase();
-
-  const maintenance = String(
+  );
+  const maintenance = normalizedKey(
     issue.maintenance_status || 'PENDING',
-  ).toUpperCase();
+  );
 
-  // Keep false positives visually distinct even though the backend may
-  // automatically set maintenance to NO_ACTION_REQUIRED.
   if (field === 'NOT_CONFIRMED') return 'FALSE_POSITIVE';
 
   if (
@@ -77,13 +150,8 @@ export function deriveDefectKanbanStatus(issue = {}) {
     return 'FOLLOW_UP';
   }
 
-  if (maintenance === 'REPAIR_IN_PROGRESS') {
-    return 'REPAIR_IN_PROGRESS';
-  }
-
-  if (maintenance === 'REPAIR_REQUIRED') {
-    return 'REPAIR_REQUIRED';
-  }
+  if (maintenance === 'REPAIR_IN_PROGRESS') return 'REPAIR_IN_PROGRESS';
+  if (maintenance === 'REPAIR_REQUIRED') return 'REPAIR_REQUIRED';
 
   if (
     ['CONFIRMED', 'PARTIALLY_CONFIRMED'].includes(field) &&
@@ -92,24 +160,16 @@ export function deriveDefectKanbanStatus(issue = {}) {
     return 'VERIFIED';
   }
 
-  if (field === 'NOT_CHECKED') {
-    return 'FIELD_CHECK';
-  }
-
-  if (FINAL_MAINTENANCE_STATES.has(maintenance)) {
-    return 'DONE';
-  }
-
-  // Safe fallback: a checked finding without a recognized final disposition
-  // belongs in Verified rather than disappearing from the board.
+  if (field === 'NOT_CHECKED') return 'FIELD_CHECK';
+  if (FINAL_MAINTENANCE_STATES.has(maintenance)) return 'DONE';
   if (field !== 'NOT_CHECKED') return 'VERIFIED';
 
   return 'FIELD_CHECK';
 }
 
 export function isIssueComplete(issue = {}) {
-  const field = String(issue.field_verification_status || '').toUpperCase();
-  const maintenance = String(issue.maintenance_status || '').toUpperCase();
+  const field = normalizedKey(issue.field_verification_status);
+  const maintenance = normalizedKey(issue.maintenance_status);
 
   return (
     FINAL_FIELD_STATES.has(field) &&
@@ -167,6 +227,57 @@ export function humanize(value) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+export function caseStatusLabel(value) {
+  const key = normalizedKey(value);
+  if (key === 'REOPENED') return 'ပြန်လည်ဖွင့်ထား';
+  return CASE_STATUS_LABELS[key] || humanize(value);
+}
+
+export function fieldVerificationLabel(value) {
+  return FIELD_LABELS[normalizedKey(value)] || humanize(value);
+}
+
+export function maintenanceStatusLabel(value) {
+  return MAINTENANCE_LABELS[normalizedKey(value)] || humanize(value);
+}
+
+export function priorityLabel(value) {
+  const key = normalizedKey(value || 'ROUTINE');
+  return PRIORITY_LABELS[key] || humanize(value || 'ROUTINE');
+}
+
+export function railSideLabel(value) {
+  const key = normalizedKey(value);
+  return RAIL_SIDE_LABELS[key] || humanize(value);
+}
+
+export function proximityLabel(value) {
+  return PROXIMITY_LABELS[normalizedKey(value)] || humanize(value);
+}
+
+export function defectTypeLabel(value) {
+  return value ? String(value) : 'Unknown defect';
+}
+
+export function caseDisplayName(caseItem = {}) {
+  const customName = String(caseItem.case_name || '').trim();
+  if (customName) return customName;
+
+  const runId = String(caseItem.run_id || '').trim();
+  if (runId) return runId;
+
+  return `စစ်ဆေးမှုကိစ္စ #${shortId(caseItem.id)}`;
+}
+
+export function staffRoleLabel(value) {
+  return STAFF_ROLE_LABELS[normalizedKey(value)] || humanize(value);
+}
+
+export function activityTypeLabel(value) {
+  const key = normalizedKey(value);
+  return ACTIVITY_TYPE_LABELS[key] || humanize(value || 'ACTIVITY');
+}
+
 export function formatDistanceFromStart(miles) {
   const numeric = Number(miles);
   if (!Number.isFinite(numeric)) return null;
@@ -174,10 +285,10 @@ export function formatDistanceFromStart(miles) {
   const meters = numeric * 1609.344;
 
   if (meters < 1000) {
-    return `${meters.toFixed(meters < 100 ? 1 : 0)} m from start`;
+    return `အစမှ ${meters.toFixed(meters < 100 ? 1 : 0)} မီတာ`;
   }
 
-  return `${numeric.toFixed(2)} mi from start`;
+  return `အစမှ ${(meters / 1000).toFixed(2)} ကီလိုမီတာ`;
 }
 
 export function priorityClasses(priority) {
@@ -208,10 +319,19 @@ export function dateTimeLabel(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
 
-  return date.toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  try {
+    return date.toLocaleString('my-MM', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return date.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }
 }

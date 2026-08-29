@@ -711,307 +711,572 @@ const LiveTrackingPage = () => {
   const arrivedManualStop = routeStops.find(stop => stop.status === 'ARRIVED');
 
   return (
-    <div className="space-y-4 pb-20">
-      {/* Notification */}
-      {notification && (
-        <div className={`fixed top-4 right-4 z-50 max-w-sm p-4 rounded-lg border-l-4 shadow-lg ${getNotificationStyles(notification.type)}`}>
-          <div className="flex items-start gap-3">
-            <div className="flex-1">
-              <p className="text-sm font-semibold">{notification.title}</p>
-              {notification.description && <p className="text-sm mt-1">{notification.description}</p>}
-            </div>
-            <button onClick={() => setNotification(null)} className="text-gray-400 hover:text-gray-600">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Journey Completed Banner */}
-      {journeyCompleted && (
-        <Card padding="p-6" className="bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 text-white border-0 text-center">
-          <div className="text-4xl mb-3">🎉</div>
-          <h3 className="text-xl font-bold mb-2">Journey Completed!</h3>
-          <p className="text-sm opacity-90 mb-3">
-            All stations have been visited. The schedule, staff assignments, and device status have been updated.
-          </p>
-        </Card>
-      )}
-
-      {/* GPS Status Bar */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card padding="p-3" hover={false}>
-          <div className="flex items-center gap-2">
-            <Satellite className={`w-4 h-4 ${isTracking && !journeyCompleted ? 'text-green-500' : 'text-gray-400'}`} />
-            <div>
-              <p className="text-xs text-gray-500">GPS</p>
-              <p className="text-sm font-semibold">
-                {journeyCompleted ? 'Done' : isTracking ? 'Active' : 'Inactive'}
-              </p>
-            </div>
-          </div>
-        </Card>
-        <Card padding="p-3" hover={false}>
-          <div className="flex items-center gap-2">
-            <Gauge className="w-4 h-4 text-railway-red-500" />
-            <div>
-              <p className="text-xs text-gray-500">Speed</p>
-              <p className="text-sm font-semibold">{journeyCompleted ? '0' : gpsData.speed || 0} mph</p>
-            </div>
-          </div>
-        </Card>
-        <Card padding="p-3" hover={false}>
-          <div className="flex items-center gap-2">
-            <MapPin className="w-4 h-4 text-green-500" />
-            <div>
-              <p className="text-xs text-gray-500">Station</p>
-              <p className="text-sm font-semibold truncate">
-                {journeyCompleted ? 'Destination' : currentStation || 'In Transit'}
-              </p>
-            </div>
-          </div>
-        </Card>
-        <Card padding="p-3" hover={false}>
-          <div className="flex items-center gap-2">
-            <Navigation className="w-4 h-4 text-blue-500" />
-            <div>
-              <p className="text-xs text-gray-500">Next</p>
-              <p className="text-sm font-semibold truncate">{journeyCompleted ? '--' : nextStation || '--'}</p>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {gpsError && !journeyCompleted && (
-        <Card padding="p-4" className="bg-red-50 border-red-200">
-          <div className="flex items-start gap-3 text-red-700">
-            <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-semibold">GPS / Tracking problem</p>
-              <p className="text-sm mt-1">{gpsError}</p>
-              <p className="text-xs mt-2 opacity-80">
-                Schedule: {runtimeScheduleId || '--'} · Runtime: {trackingReady ? 'READY' : 'NOT READY'}
-              </p>
-              {trackingReady && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-3"
-                  onClick={() => {
-                    stopGPSTracking();
-                    startGPSTracking();
-                  }}
-                >
-                  Retry GPS
-                </Button>
-              )}
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {distanceToStation && !journeyCompleted && (
-        <p className="text-xs text-center text-gray-500">
-          {distanceToStation.station ? `${distanceToStation.station}: ` : ''}
-          {distanceToStation.meters} m from station trigger point
-        </p>
-      )}
-
-      {/* Arrival Alert */}
-      {arrivalAlert && !journeyCompleted && (
-        <Card padding="p-4" className="bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0 animate-pulse">
-          <div className="flex items-center gap-3 mb-3">
-            <MapPin className="w-8 h-8" />
-            <div>
-              <h3 className="text-lg font-bold">Station Arrived!</h3>
-              <p className="text-sm opacity-90">{arrivalAlert.station_name}</p>
-            </div>
-          </div>
-          {arrivalAlert.next_station && (
-            <div className="bg-white/10 rounded-lg p-3 mb-3">
-              <p className="text-sm">Next: <strong>{arrivalAlert.next_station.name}</strong></p>
-            </div>
-          )}
-          {manualMode ? (
-            <Button className="w-full bg-white text-green-600 hover:bg-green-50" onClick={handleLogDeparture}>
-              Manual Depart Now
-            </Button>
-          ) : (
-            <p className="text-xs opacity-90">Departure will be logged automatically after the train moves more than 50 m from the station.</p>
-          )}
-        </Card>
-      )}
-
-      {/* 🗺️ Map */}
-      <div className="flex justify-center">
-        <Card
-          padding="p-0"
-          hover={false}
-          className="overflow-hidden"
-          style={{ width: '100%', maxWidth: '800px' }}  // 🆕 Specific width
-        >
-          <TrainTrackerMap
-            routeStops={routeStops}
-            currentLocation={currentLocation}
-            currentStation={currentStation}
-            nextStation={nextStation}
-            scheduleId={runtimeScheduleId}
-          />
-        </Card>
-      </div>
-
-      {/* Optional manual fallback controls */}
-      {!journeyCompleted && routeStops.length > 0 && (
-        <Card padding="p-4" className="border-amber-200 bg-amber-50">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <p className="font-semibold text-amber-900">Manual station fallback</p>
-              <p className="text-xs text-amber-700 mt-1">
-                Automatic GPS remains primary. Enable this only when GPS arrival/departure detection needs help.
-              </p>
-            </div>
-            <Button
-              variant={manualMode ? 'default' : 'outline'}
-              onClick={() => setManualMode(value => !value)}
-              disabled={isUpdating}
-            >
-              {manualMode ? 'Disable Manual' : 'Enable Manual'}
-            </Button>
-          </div>
-
-          {manualMode && (
-            <div className="mt-4 pt-4 border-t border-amber-200">
-              {arrivedManualStop ? (
-                <Button
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                  onClick={() => handleStationDeparture(arrivedManualStop.route_station_id, arrivedManualStop.train_stop_id)}
-                  disabled={isUpdating || !arrivedManualStop.train_stop_id}
-                >
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Manual Depart — {arrivedManualStop.station_name}
-                </Button>
-              ) : nextManualStop ? (
-                <Button
-                  className="w-full bg-green-600 hover:bg-green-700 text-white"
-                  onClick={() => handleStationArrival(nextManualStop.route_station_id, nextManualStop.train_stop_id)}
-                  disabled={isUpdating || !nextManualStop.train_stop_id}
-                >
-                  <MapPin className="w-4 h-4 mr-2" />
-                  Manual Arrive — {nextManualStop.station_name}
-                </Button>
-              ) : (
-                <p className="text-sm text-amber-800">No manual action is currently available.</p>
-              )}
-            </div>
-          )}
-        </Card>
-      )}
-
-      {/* Route Stations List */}
-      {routeStops.length > 0 && (
-        <Card padding="p-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Train className="w-5 h-5 text-railway-blue-500" />
-              <h3 className="font-bold text-lg">Route Stations</h3>
-            </div>
-            <span className="text-sm text-gray-500">
-              {completedCount}/{routeStops.length} completed
-            </span>
-          </div>
-
-          <div className="w-full h-2 bg-gray-200 rounded-full mb-4">
+    <div className="min-h-full bg-slate-50/80 text-slate-900">
+      <div className="mx-auto max-w-7xl space-y-5 px-3 py-4 sm:px-5 lg:px-6">
+        {/* Toast notification */}
+        {notification && (
+          <div
+            className={`fixed right-3 top-3 z-[100] w-[calc(100%-1.5rem)] max-w-md overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-xl sm:right-5 sm:top-5 sm:w-auto ${
+              notification.type === 'success'
+                ? 'border-emerald-200 bg-white/95'
+                : notification.type === 'error'
+                  ? 'border-red-200 bg-white/95'
+                  : notification.type === 'warning'
+                    ? 'border-amber-200 bg-white/95'
+                    : 'border-blue-200 bg-white/95'
+            }`}
+          >
             <div
-              className={`h-full rounded-full transition-all duration-700 ${
-                journeyCompleted
-                  ? 'bg-gradient-to-r from-green-500 via-purple-500 to-pink-500'
-                  : 'bg-gradient-to-r from-green-500 via-blue-500 to-purple-500'
+              className={`h-1 ${
+                notification.type === 'success'
+                  ? 'bg-emerald-500'
+                  : notification.type === 'error'
+                    ? 'bg-red-500'
+                    : notification.type === 'warning'
+                      ? 'bg-amber-500'
+                      : 'bg-blue-500'
               }`}
-              style={{ width: `${progressPercent}%` }}
+            />
+            <div className="flex items-start gap-3 p-4">
+              <div
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                  notification.type === 'success'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : notification.type === 'error'
+                      ? 'bg-red-100 text-red-700'
+                      : notification.type === 'warning'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-blue-100 text-blue-700'
+                }`}
+              >
+                {notification.type === 'success' ? '✓' : notification.type === 'error' ? '!' : 'i'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-slate-900">{notification.title}</p>
+                {notification.description && (
+                  <p className="mt-0.5 text-sm leading-5 text-slate-600">
+                    {notification.description}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setNotification(null)}
+                aria-label="Close notification"
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Journey completed */}
+        {journeyCompleted && (
+          <section className="relative overflow-hidden rounded-3xl border border-emerald-200 bg-white shadow-sm">
+            <div className="absolute inset-0 bg-gradient-to-br from-emerald-50 via-white to-indigo-50" />
+            <div className="absolute -right-16 -top-20 h-48 w-48 rounded-full bg-emerald-200/30 blur-3xl" />
+            <div className="absolute -bottom-20 -left-16 h-48 w-48 rounded-full bg-indigo-200/30 blur-3xl" />
+            <div className="relative px-5 py-7 text-center sm:px-8 sm:py-9">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 text-4xl shadow-sm ring-8 ring-emerald-50">
+                🎉
+              </div>
+              <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-700">
+                <CheckCircle className="h-3.5 w-3.5" />
+                Journey finished
+              </div>
+              <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+                Journey Completed!
+              </h2>
+              <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                All stations have been visited. The schedule, staff assignments, and device
+                status have been updated.
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* Live tracking header */}
+        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-lg">
+                <Train className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-lg font-extrabold tracking-tight text-slate-900 sm:text-xl">
+                    Live Journey Tracking
+                  </h1>
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                      isTracking && !journeyCompleted
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : journeyCompleted
+                          ? 'bg-slate-100 text-slate-600'
+                          : 'bg-amber-100 text-amber-700'
+                    }`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        isTracking && !journeyCompleted
+                          ? 'animate-pulse bg-emerald-500'
+                          : journeyCompleted
+                            ? 'bg-slate-400'
+                            : 'bg-amber-500'
+                      }`}
+                    />
+                    {journeyCompleted ? 'Completed' : isTracking ? 'Live' : 'Standby'}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {runtimeScheduleId ? `Schedule #${runtimeScheduleId}` : 'Tracking journey status'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  connectionStatus === 'online' ? 'bg-emerald-500' : 'bg-red-500'
+                }`}
+              />
+              {connectionStatus === 'online' ? 'Connected' : 'Connection issue'}
+              {batteryLevel != null && <span className="ml-2">• Battery {batteryLevel}%</span>}
+            </div>
+          </div>
+        </section>
+
+        {/* Status cards */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[
+            {
+              label: 'GPS',
+              value: journeyCompleted ? 'Done' : isTracking ? 'Active' : 'Inactive',
+              icon: Satellite,
+              iconClass:
+                isTracking && !journeyCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500',
+              valueClass:
+                isTracking && !journeyCompleted ? 'text-emerald-700' : 'text-slate-900',
+            },
+            {
+              label: 'Speed',
+              value: `${journeyCompleted ? 0 : gpsData.speed || 0} mph`,
+              icon: Gauge,
+              iconClass: 'bg-red-50 text-railway-red-500',
+              valueClass: 'text-slate-900',
+            },
+            {
+              label: 'Current station',
+              value: journeyCompleted ? 'Destination' : currentStation || 'In Transit',
+              icon: MapPin,
+              iconClass: 'bg-emerald-100 text-emerald-700',
+              valueClass: 'text-slate-900',
+            },
+            {
+              label: 'Next station',
+              value: journeyCompleted ? '--' : nextStation || '--',
+              icon: Navigation,
+              iconClass: 'bg-blue-100 text-blue-700',
+              valueClass: 'text-slate-900',
+            },
+          ].map(({ label, value, icon: Icon, iconClass, valueClass }) => (
+            <div
+              key={label}
+              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+            >
+              <div className="flex items-center gap-3">
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${iconClass}`}>
+                  <Icon className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    {label}
+                  </p>
+                  <p className={`mt-0.5 truncate text-sm font-bold ${valueClass}`}>{value}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* GPS error */}
+        {gpsError && !journeyCompleted && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-bold text-red-900">GPS / Tracking problem</p>
+                <p className="mt-1 text-sm leading-5 text-red-700">{gpsError}</p>
+                <p className="mt-2 text-xs text-red-600/80">
+                  Schedule: {runtimeScheduleId || '--'} · Runtime: {trackingReady ? 'READY' : 'NOT READY'}
+                </p>
+                {trackingReady && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-3 !border-red-300 !bg-white !font-semibold !text-red-700 shadow-sm hover:!bg-red-100 hover:!text-red-800"
+                    onClick={() => {
+                      stopGPSTracking();
+                      startGPSTracking();
+                    }}
+                  >
+                    Retry GPS
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Distance indicator */}
+        {distanceToStation && !journeyCompleted && (
+          <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-medium text-slate-500 shadow-sm">
+            <Navigation className="h-3.5 w-3.5 text-blue-500" />
+            {distanceToStation.station ? `${distanceToStation.station}: ` : ''}
+            {distanceToStation.meters} m from station trigger point
+          </div>
+        )}
+
+        {/* Arrival alert */}
+        {arrivalAlert && !journeyCompleted && (
+          <section className="relative overflow-hidden rounded-3xl border border-emerald-300 bg-white shadow-xl shadow-emerald-100/60">
+            <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500" />
+            <div className="absolute -right-16 -top-20 h-52 w-52 rounded-full bg-emerald-100/70 blur-3xl" />
+            <div className="relative p-5 sm:p-6">
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700 ring-4 ring-emerald-50">
+                    <MapPin className="h-7 w-7" />
+                  </div>
+                  <div>
+                    <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                      Arrival detected
+                    </div>
+                    <h2 className="text-xl font-extrabold text-slate-900">Station Arrived!</h2>
+                    <p className="mt-0.5 text-sm font-medium text-slate-600">
+                      {arrivalAlert.station_name}
+                    </p>
+                  </div>
+                </div>
+
+                {arrivalAlert.next_station && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:min-w-[190px]">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Next station
+                    </p>
+                    <p className="mt-1 font-bold text-slate-800">{arrivalAlert.next_station.name}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 border-t border-slate-100 pt-5">
+                {manualMode ? (
+                  <Button
+                    className="!flex !h-12 !w-full !items-center !justify-center !rounded-xl !border-0 !bg-slate-900 !px-5 !font-bold !text-white !shadow-lg hover:!bg-slate-800 sm:!w-auto sm:!min-w-[220px]"
+                    onClick={handleLogDeparture}
+                    disabled={isUpdating}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />
+                    {isUpdating ? 'Logging departure…' : 'Manual Depart Now'}
+                  </Button>
+                ) : (
+                  <div className="flex items-start gap-2 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
+                    <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                    Departure will be logged automatically after the train moves more than 50 m from the station.
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Map */}
+        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-5">
+            <div>
+              <h2 className="font-bold text-slate-900">Live route map</h2>
+              <p className="text-xs text-slate-500">Current train position and station route</p>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+              <span className={`h-1.5 w-1.5 rounded-full ${isTracking ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+              {isTracking ? 'Tracking' : 'Paused'}
+            </div>
+          </div>
+          <div className="overflow-hidden">
+            <TrainTrackerMap
+              routeStops={routeStops}
+              currentLocation={currentLocation}
+              currentStation={currentStation}
+              nextStation={nextStation}
+              scheduleId={runtimeScheduleId}
             />
           </div>
+        </section>
 
-          <div className="space-y-3">
-            {routeStops.map((stop, index) => {
-              const isFirst = index === 0;
-              const isLast = index === routeStops.length - 1;
-
-              return (
+        {/* Manual fallback */}
+        {!journeyCompleted && routeStops.length > 0 && (
+          <section
+            className={`rounded-3xl border p-4 shadow-sm sm:p-5 ${
+              manualMode
+                ? 'border-amber-300 bg-amber-50'
+                : 'border-slate-200 bg-white'
+            }`}
+          >
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
                 <div
-                  key={stop.route_station_id || stop.id || index}
-                  className={`p-3 rounded-lg border ${getStationStatusColor(stop.status)} transition-all duration-300`}
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                    manualMode ? 'bg-amber-200 text-amber-800' : 'bg-slate-100 text-slate-600'
+                  }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 flex-1">
-                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-white border-2 border-gray-300">
-                        {getStationStatusIcon(stop.status)}
+                  <Navigation className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-900">Manual station fallback</p>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">
+                    Automatic GPS remains primary. Enable this only when GPS arrival/departure detection needs help.
+                  </p>
+                </div>
+              </div>
+
+              <Button
+                variant={manualMode ? 'default' : 'outline'}
+                onClick={() => setManualMode(value => !value)}
+                disabled={isUpdating}
+                className={
+                  manualMode
+                    ? '!h-11 !rounded-xl !border-0 !bg-slate-900 !px-5 !font-bold !text-white !shadow-md hover:!bg-slate-800'
+                    : '!h-11 !rounded-xl !border-2 !border-slate-300 !bg-white !px-5 !font-bold !text-slate-800 !shadow-sm hover:!border-slate-400 hover:!bg-slate-50'
+                }
+              >
+                {manualMode ? 'Disable Manual' : 'Enable Manual'}
+              </Button>
+            </div>
+
+            {manualMode && (
+              <div className="mt-4 border-t border-amber-200 pt-4">
+                {arrivedManualStop ? (
+                  <Button
+                    className="!flex !h-12 !w-full !items-center !justify-center !rounded-xl !border-0 !bg-blue-600 !font-bold !text-white !shadow-md hover:!bg-blue-700 disabled:!opacity-60"
+                    onClick={() =>
+                      handleStationDeparture(
+                        arrivedManualStop.route_station_id,
+                        arrivedManualStop.train_stop_id
+                      )
+                    }
+                    disabled={isUpdating || !arrivedManualStop.train_stop_id}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />
+                    {isUpdating ? 'Processing…' : `Manual Depart — ${arrivedManualStop.station_name}`}
+                  </Button>
+                ) : nextManualStop ? (
+                  <Button
+                    className="!flex !h-12 !w-full !items-center !justify-center !rounded-xl !border-0 !bg-emerald-600 !font-bold !text-white !shadow-md hover:!bg-emerald-700 disabled:!opacity-60"
+                    onClick={() =>
+                      handleStationArrival(
+                        nextManualStop.route_station_id,
+                        nextManualStop.train_stop_id
+                      )
+                    }
+                    disabled={isUpdating || !nextManualStop.train_stop_id}
+                  >
+                    <MapPin className="mr-2 h-4 w-4" />
+                    {isUpdating ? 'Processing…' : `Manual Arrive — ${nextManualStop.station_name}`}
+                  </Button>
+                ) : (
+                  <p className="rounded-xl bg-white/70 px-4 py-3 text-sm font-medium text-amber-800">
+                    No manual action is currently available.
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Route stations */}
+        {routeStops.length > 0 && (
+          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                  <Train className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-slate-900">Route Stations</h2>
+                  <p className="text-xs text-slate-500">Journey progress and station activity</p>
+                </div>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                {completedCount}/{routeStops.length} completed
+              </span>
+            </div>
+
+            <div className="mt-5">
+              <div className="mb-2 flex items-center justify-between text-[11px] font-semibold text-slate-400">
+                <span>Progress</span>
+                <span>{Math.round(progressPercent)}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 ${
+                    journeyCompleted
+                      ? 'bg-gradient-to-r from-emerald-500 via-blue-500 to-indigo-500'
+                      : 'bg-gradient-to-r from-emerald-500 via-blue-500 to-indigo-500'
+                  }`}
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-2.5">
+              {routeStops.map((stop, index) => {
+                const isFirst = index === 0;
+                const isLast = index === routeStops.length - 1;
+                const statusMeta = {
+                  ARRIVED: {
+                    icon: <MapPin className="h-4 w-4" />,
+                    iconWrap: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+                    card: 'border-emerald-200 bg-emerald-50/60',
+                    label: 'At station',
+                    labelClass: 'bg-emerald-100 text-emerald-700',
+                  },
+                  DEPARTED: {
+                    icon: <CheckCircle className="h-4 w-4" />,
+                    iconWrap: 'bg-blue-100 text-blue-700 border-blue-200',
+                    card: 'border-slate-200 bg-slate-50/80',
+                    label: isLast ? 'Done' : 'Completed',
+                    labelClass: 'bg-blue-100 text-blue-700',
+                  },
+                  SCHEDULED: {
+                    icon: <Clock className="h-4 w-4" />,
+                    iconWrap: 'bg-white text-slate-400 border-slate-200',
+                    card:
+                      nextManualStop?.route_station_id === stop.route_station_id
+                        ? 'border-blue-200 bg-blue-50/60'
+                        : 'border-slate-200 bg-white',
+                    label: 'Next',
+                    labelClass: 'bg-blue-100 text-blue-700',
+                  },
+                }[stop.status] || {
+                  icon: <AlertCircle className="h-4 w-4" />,
+                  iconWrap: 'bg-slate-100 text-slate-400 border-slate-200',
+                  card: 'border-slate-200 bg-white',
+                  label: '',
+                  labelClass: '',
+                };
+
+                return (
+                  <div
+                    key={stop.route_station_id || stop.id || index}
+                    className={`relative rounded-2xl border p-3.5 transition-all duration-300 hover:shadow-sm sm:p-4 ${statusMeta.card}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 bg-white ${statusMeta.iconWrap}`}
+                      >
+                        {statusMeta.icon}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold truncate">{stop.station_name}</p>
-                          {isFirst && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">Start</span>}
-                          {isLast && <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">End</span>}
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="truncate font-bold text-slate-900">{stop.station_name}</p>
+                          {isFirst && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                              Start
+                            </span>
+                          )}
+                          {isLast && (
+                            <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                              End
+                            </span>
+                          )}
                         </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mt-1">
+
+                        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
                           {stop.expected_arrival && <span>🕐 ETA: {stop.expected_arrival}</span>}
                           {stop.expected_departure && <span>🚂 ETD: {stop.expected_departure}</span>}
-                          {stop.actual_arrival && <span className="text-green-600">✅ Arr: {formatTime(stop.actual_arrival)}</span>}
-                          {stop.actual_departure && <span className="text-blue-600">🚂 Dep: {formatTime(stop.actual_departure)}</span>}
-                          {stop.delay_minutes > 0 && <span className="text-red-500 font-medium">⚠️ +{stop.delay_minutes}min</span>}
+                          {stop.actual_arrival && (
+                            <span className="font-medium text-emerald-600">
+                              ✓ Arr: {formatTime(stop.actual_arrival)}
+                            </span>
+                          )}
+                          {stop.actual_departure && (
+                            <span className="font-medium text-blue-600">
+                              🚂 Dep: {formatTime(stop.actual_departure)}
+                            </span>
+                          )}
+                          {stop.delay_minutes > 0 && (
+                            <span className="font-bold text-red-500">
+                              ⚠ +{stop.delay_minutes}min
+                            </span>
+                          )}
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex gap-2 ml-3">
-                      {stop.status === 'ARRIVED' && (
-                        <span className="text-xs text-green-700 font-medium self-center">At station</span>
-                      )}
-                      {stop.status === 'SCHEDULED' && nextManualStop?.route_station_id === stop.route_station_id && (
-                        <span className="text-xs text-blue-600 font-medium self-center">Next</span>
-                      )}
-                      {stop.status === 'DEPARTED' && (
-                        <span className="text-xs text-green-600 font-medium self-center">
-                          {isLast ? '🏁 Done' : '✓ Done'}
+                      {statusMeta.label && (
+                        <span
+                          className={`hidden shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold sm:inline-flex ${statusMeta.labelClass}`}
+                        >
+                          {statusMeta.label}
                         </span>
                       )}
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      )}
-
-      {/* GPS Coordinates */}
-      <Card padding="p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Satellite className="w-4 h-4 text-gray-500" />
-          <h3 className="font-semibold text-sm">GPS Coordinates</h3>
-          {gpsData.lastUpdate && (
-            <span className="text-xs text-gray-400 ml-auto">
-              Updated: {gpsData.lastUpdate.toLocaleTimeString()}
-            </span>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <Label className="text-xs text-gray-500">Latitude</Label>
-            <p className="font-mono font-semibold">{gpsData.latitude?.toFixed(6) || '--'}</p>
-          </div>
-          <div>
-            <Label className="text-xs text-gray-500">Longitude</Label>
-            <p className="font-mono font-semibold">{gpsData.longitude?.toFixed(6) || '--'}</p>
-          </div>
-        </div>
-        {gpsData.accuracy && (
-          <p className="text-xs text-gray-400 mt-2">
-            GPS Accuracy: ±{gpsData.accuracy} meters
-          </p>
+                );
+              })}
+            </div>
+          </section>
         )}
-      </Card>
+
+        {/* GPS coordinates */}
+        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+              <Satellite className="h-4 w-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">GPS Coordinates</h2>
+              <p className="text-[11px] text-slate-400">Latest device position</p>
+            </div>
+            {gpsData.lastUpdate && (
+              <span className="ml-auto text-[11px] text-slate-400">
+                Updated: {gpsData.lastUpdate.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl bg-slate-50 px-4 py-3">
+              <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Latitude
+              </Label>
+              <p className="mt-1 font-mono text-sm font-bold text-slate-800">
+                {gpsData.latitude?.toFixed(6) || '--'}
+              </p>
+            </div>
+            <div className="rounded-2xl bg-slate-50 px-4 py-3">
+              <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Longitude
+              </Label>
+              <p className="mt-1 font-mono text-sm font-bold text-slate-800">
+                {gpsData.longitude?.toFixed(6) || '--'}
+              </p>
+            </div>
+          </div>
+
+          {gpsData.accuracy && (
+            <p className="mt-3 text-xs text-slate-400">
+              GPS Accuracy: ±{gpsData.accuracy} meters
+            </p>
+          )}
+        </section>
+      </div>
     </div>
-  );
+  )
 };
 
 export default LiveTrackingPage;

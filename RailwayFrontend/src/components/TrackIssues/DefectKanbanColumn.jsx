@@ -30,10 +30,10 @@ const DefectKanbanColumn = ({
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
-      <header className="mb-3 flex items-center justify-between px-1">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-slate-500" />
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-700">
+      <header className="mb-3 flex items-center justify-between gap-2 px-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0 text-slate-500" />
+          <h3 className="text-xs font-semibold text-slate-700">
             {column.label}
           </h3>
         </div>
@@ -55,7 +55,7 @@ const DefectKanbanColumn = ({
 
         {!issues.length && (
           <div className="rounded-xl border border-dashed border-slate-200 bg-white/70 px-3 py-7 text-center text-xs text-slate-400">
-            No findings
+            တွေ့ရှိချက် မရှိပါ
           </div>
         )}
       </div>

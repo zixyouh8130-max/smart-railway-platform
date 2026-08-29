@@ -1,17 +1,22 @@
 import React from 'react';
 import ModalShell from './ModalShell';
 import AIReviewPanel from './AIReviewPanel';
+import { defectTypeLabel } from './kanbanUtils';
 
 const AIReviewDialog = ({ issue, open, onClose }) => (
   <ModalShell
     open={open}
     onClose={onClose}
-    title={issue ? `AI review — ${issue.defect_type || 'Finding'}` : 'AI finding review'}
+    title={
+      issue
+        ? `AI သုံးသပ်ချက် — ${defectTypeLabel(issue.defect_type)}`
+        : 'AI တွေ့ရှိချက် သုံးသပ်ချက်'
+    }
   >
     {issue ? (
       <AIReviewPanel issue={issue} compact />
     ) : (
-      <p className="text-sm text-slate-500">No finding selected.</p>
+      <p className="text-sm text-slate-500">တွေ့ရှိချက် မရွေးရသေးပါ။</p>
     )}
   </ModalShell>
 );

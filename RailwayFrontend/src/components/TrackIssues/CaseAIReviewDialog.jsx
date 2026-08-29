@@ -6,12 +6,12 @@ const CaseAIReviewDialog = ({ inspectionCase, open, onClose }) => (
   <ModalShell
     open={open}
     onClose={onClose}
-    title="Inspection-wide AI review"
+    title="စစ်ဆေးမှုတစ်ခုလုံးအတွက် AI သုံးသပ်ချက်"
   >
     {inspectionCase ? (
       <InspectionCaseAIReview inspectionCase={inspectionCase} />
     ) : (
-      <p className="text-sm text-slate-500">No inspection case selected.</p>
+      <p className="text-sm text-slate-500">စစ်ဆေးမှုCase မရွေးရသေးပါ။</p>
     )}
   </ModalShell>
 );

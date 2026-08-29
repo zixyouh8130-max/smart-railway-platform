@@ -5,6 +5,7 @@ import {
   CircleDot,
   CircleSlash2,
 } from 'lucide-react';
+import { caseStatusLabel } from './kanbanUtils';
 
 const PRIMARY_STEPS = [
   'OPEN',
@@ -13,14 +14,6 @@ const PRIMARY_STEPS = [
   'VERIFYING',
   'COMPLETED',
 ];
-
-const LABELS = {
-  OPEN: 'Open',
-  ACKNOWLEDGED: 'Acknowledged',
-  IN_PROGRESS: 'In Progress',
-  VERIFYING: 'Verifying',
-  COMPLETED: 'Completed',
-};
 
 const CaseStatusBar = ({ status }) => {
   const current = String(status || 'OPEN').toUpperCase();
@@ -33,11 +26,11 @@ const CaseStatusBar = ({ status }) => {
       {blocked && (
         <div className="mb-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
           <CircleSlash2 className="h-4 w-4" />
-          This case is currently blocked.
+          ဤCaseကို လောလောဆယ် ရပ်တန့်ထားပါသည်။
         </div>
       )}
 
-      <div className="flex min-w-[720px] items-center">
+      <div className="flex min-w-[780px] items-center">
         {PRIMARY_STEPS.map((step, index) => {
           const done = !blocked && currentIndex > index;
           const active = !blocked && currentIndex === index;
@@ -72,7 +65,7 @@ const CaseStatusBar = ({ status }) => {
                         : 'text-slate-400',
                   ].join(' ')}
                 >
-                  {LABELS[step]}
+                  {caseStatusLabel(step)}
                 </span>
               </div>
 

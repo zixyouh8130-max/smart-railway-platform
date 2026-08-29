@@ -21,6 +21,7 @@ const ModalShell = ({ open, onClose, title, children, width = 'max-w-4xl' }) => 
       role="dialog"
       aria-modal="true"
       aria-label={title}
+      lang="my"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose?.();
       }}
@@ -32,7 +33,7 @@ const ModalShell = ({ open, onClose, title, children, width = 'max-w-4xl' }) => 
             type="button"
             onClick={onClose}
             className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close"
+            aria-label="ပိတ်ရန်"
           >
             <X className="h-5 w-5" />
           </button>

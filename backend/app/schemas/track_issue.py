@@ -45,6 +45,14 @@ class TrackCaseAssignmentRequest(BaseModel):
     note: Optional[str] = Field(None, max_length=2000)
 
 
+class TrackCaseRenameRequest(BaseModel):
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=160,
+    )
+
+
 class TrackCaseStatusRequest(BaseModel):
     status: TrackCaseStatus
     note: Optional[str] = Field(None, max_length=4000)
@@ -131,6 +139,10 @@ class TrackIssueResponse(BaseModel):
 class TrackCaseResponse(BaseModel):
     id: UUID
     inspection_id: str
+
+    # Admin-managed human-readable name for the inspection maintenance case.
+    case_name: Optional[str] = None
+
     run_id: Optional[str] = None
     status: TrackCaseStatus
     ai_overall_priority: Optional[str] = None

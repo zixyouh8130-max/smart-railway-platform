@@ -70,16 +70,6 @@ L.Icon.Default.mergeOptions({
 // -----------------------------------------------------------------------------
 
 const DEFECT_META = {
-  Corrosion: {
-    color: '#B45309',
-    icon: '🟤',
-    label: 'သံချေးတက်',
-  },
-  'Fishplate Damage': {
-    color: '#E11D48',
-    icon: '🔧',
-    label: 'သံလမ်းဆစ်ပျက်စီး',
-  },
   'Missing Fastener': {
     color: '#F59E0B',
     icon: '🔶',

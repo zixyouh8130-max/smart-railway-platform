@@ -23,6 +23,7 @@ from ..schemas.track_issue import (
     TrackCaseCommentRequest,
     TrackCaseDetailResponse,
     TrackCaseResponse,
+    TrackCaseRenameRequest,
     TrackCaseStatus,
     TrackCaseStatusRequest,
     TrackIssueFieldVerificationRequest,
@@ -396,6 +397,7 @@ def _case_to_dict(
     payload: Dict[str, Any] = {
         "id": case.id,
         "inspection_id": case.inspection_id,
+        "case_name": case.case_name,
         "run_id": case.run_id,
         "status": case.status,
         "ai_overall_priority": case.ai_overall_priority,
@@ -739,7 +741,13 @@ async def list_cases(
         query = query.filter(TrackInspectionCase.assigned_staff_id == assigned_staff_id)
     if q:
         token = f"%{q.strip()}%"
-        query = query.filter(or_(TrackInspectionCase.inspection_id.ilike(token), TrackInspectionCase.run_id.ilike(token)))
+        query = query.filter(
+            or_(
+                TrackInspectionCase.case_name.ilike(token),
+                TrackInspectionCase.inspection_id.ilike(token),
+                TrackInspectionCase.run_id.ilike(token),
+            )
+        )
     cases = query.order_by(TrackInspectionCase.updated_at.desc()).all()
     return [_case_to_dict(c) for c in cases]
 
@@ -778,6 +786,47 @@ async def get_case(
     case = _load_case(db, case_id)
     _ensure_engineer_can_view_case(case, current_user)
     return _case_to_dict(case, include_detail=True)
+
+
+
+@router.patch(
+    "/{case_id}/name",
+    response_model=TrackCaseDetailResponse,
+    dependencies=[Depends(get_current_admin_user)],
+)
+async def rename_case(
+    case_id: UUID,
+    payload: TrackCaseRenameRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin_user),
+):
+    case = _load_case(db, case_id)
+    new_name = payload.name.strip()
+
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Case name cannot be empty")
+
+    if len(new_name) > 160:
+        raise HTTPException(status_code=400, detail="Case name cannot exceed 160 characters")
+
+    previous_name = case.case_name
+    if previous_name == new_name:
+        return _case_to_dict(case, include_detail=True)
+
+    case.case_name = new_name
+    _add_activity(
+        db,
+        case,
+        current_user,
+        activity_type="CASE_RENAMED",
+        message=f'Case renamed to "{new_name}".',
+        extra_data={
+            "previous_name": previous_name,
+            "new_name": new_name,
+        },
+    )
+    db.commit()
+    return _case_to_dict(_load_case(db, case_id), include_detail=True)
 
 
 @router.patch("/{case_id}/assign", response_model=TrackCaseDetailResponse, dependencies=[Depends(get_current_admin_user)])
@@ -1013,8 +1062,35 @@ async def update_case_status(
         if target != current and target not in CASE_ENGINEER_TRANSITIONS.get(current, set()):
             raise HTTPException(status_code=409, detail=f"Case transition {current} → {target} is not allowed")
     else:
-        if current == "COMPLETED" and target != "REOPENED":
-            raise HTTPException(status_code=409, detail="Use REOPENED before changing a completed case")
+        # Admin owns assignment/oversight, but once the Track Engineer has
+        # acknowledged the case, lifecycle progress belongs to that engineer.
+        # The only post-completion exception is the admin-only REOPEN action.
+        if current == "COMPLETED":
+            if target != "REOPENED":
+                raise HTTPException(
+                    status_code=403,
+                    detail="A completed case can only be reopened by an admin before more field work is recorded",
+                )
+        elif case.acknowledged_at is not None:
+            if target != current:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "After Track Engineer acknowledgement, case lifecycle status "
+                        "is controlled by the assigned Track Engineer. Admin may monitor, "
+                        "reassign, comment, rename, and review AI evidence."
+                    ),
+                )
+        else:
+            admin_pre_ack_allowed = {"OPEN", "BLOCKED"}
+            if target not in admin_pre_ack_allowed:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "Before acknowledgement, admin may only leave the case OPEN "
+                        "or mark it BLOCKED. The Track Engineer must acknowledge the case."
+                    ),
+                )
 
     note = (payload.note or "").strip()
     if target == "BLOCKED" and not note:

@@ -1,12 +1,13 @@
 import React from 'react';
+import { Bot, MapPin } from 'lucide-react';
 import {
-  Bot,
-  MapPin,
-} from 'lucide-react';
-import {
+  defectTypeLabel,
+  fieldVerificationLabel,
   formatDistanceFromStart,
-  humanize,
+  maintenanceStatusLabel,
   priorityClasses,
+  priorityLabel,
+  railSideLabel,
 } from './kanbanUtils';
 
 const DefectKanbanCard = ({ issue, onOpen, onOpenAI }) => {
@@ -27,7 +28,7 @@ const DefectKanbanCard = ({ issue, onOpen, onOpenAI }) => {
     >
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-sm font-semibold leading-5 text-slate-900">
-          {issue.defect_type || 'Unnamed finding'}
+          {defectTypeLabel(issue.defect_type)}
         </h3>
 
         <button
@@ -37,8 +38,8 @@ const DefectKanbanCard = ({ issue, onOpen, onOpenAI }) => {
             onOpenAI?.(issue);
           }}
           className="shrink-0 rounded-lg border border-violet-200 bg-violet-50 p-1.5 text-violet-700 transition hover:bg-violet-100"
-          title="Open AI finding review"
-          aria-label="Open AI finding review"
+          title="AI တွေ့ရှိချက် သုံးသပ်ရန်"
+          aria-label="AI တွေ့ရှိချက် သုံးသပ်ရန်"
         >
           <Bot className="h-4 w-4" />
         </button>
@@ -50,37 +51,40 @@ const DefectKanbanCard = ({ issue, onOpen, onOpenAI }) => {
             issue.ai_priority,
           )}`}
         >
-          {humanize(issue.ai_priority || 'Routine')}
+          {priorityLabel(issue.ai_priority || 'ROUTINE')}
         </span>
       </div>
 
       <div className="mt-3 space-y-1.5 text-xs text-slate-500">
         {issue.rail_side && (
           <p>
-            Rail: <span className="font-medium text-slate-700">{humanize(issue.rail_side)}</span>
+            ရထားလမ်းဘက်:{' '}
+            <span className="font-medium text-slate-700">
+              {railSideLabel(issue.rail_side)}
+            </span>
           </p>
         )}
 
         {distance && <p>{distance}</p>}
 
         <p>
-          Field:{' '}
+          ကွင်းဆင်းအတည်ပြုမှု:{' '}
           <span className="font-medium text-slate-700">
-            {humanize(issue.field_verification_status)}
+            {fieldVerificationLabel(issue.field_verification_status)}
           </span>
         </p>
 
         <p>
-          Maintenance:{' '}
+          ပြုပြင်ထိန်းသိမ်းမှု:{' '}
           <span className="font-medium text-slate-700">
-            {humanize(issue.maintenance_status)}
+            {maintenanceStatusLabel(issue.maintenance_status)}
           </span>
         </p>
 
         {issue.latitude != null && issue.longitude != null && (
           <p className="flex items-center gap-1 pt-1 text-emerald-700">
             <MapPin className="h-3.5 w-3.5" />
-            GPS available
+            GPS တည်နေရာ ရရှိထားသည်
           </p>
         )}
       </div>
