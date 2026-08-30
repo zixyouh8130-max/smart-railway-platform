@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 import httpx
 import motor.motor_asyncio
 from sqlalchemy.orm import Session
+import google.auth
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, ConfigDict
@@ -202,27 +203,26 @@ inspection_events_collection = db.inspection_events
 
 
 # ============================================================================
-# Google Drive video access (OAuth user authorization)
+# Google Drive access
 # ============================================================================
 #
-# Service-account key creation can be blocked by Google Cloud organization
-# policy. This backend therefore uses OAuth 2.0 user credentials instead.
+# Cloud Run:
+#   - Uses the Cloud Run runtime service account through Application Default
+#     Credentials (ADC).
+#   - Share the inspection_results Google Drive folder with that service account
+#     as Viewer.
+#   - No service-account key file and no user OAuth token are required in Cloud Run.
 #
-# One-time setup:
-#   1. Enable Google Drive API.
-#   2. Create an OAuth 2.0 Client ID -> Desktop app.
-#   3. Download the client JSON.
-#   4. Run google_drive_authorize.py once while signed in to the Google account
-#      that owns/can read Smart_Railway_AI/inspection_results.
-#   5. Keep the generated token.json private.
+# Local development:
+#   - May continue using GOOGLE_DRIVE_OAUTH_TOKEN_FILE with the existing
+#     authorized-user token.json.
+#   - GOOGLE_DRIVE_OAUTH_TOKEN_JSON remains available as an optional fallback.
 #
-# Configure:
+# Required for both environments:
+#   GOOGLE_DRIVE_INSPECTION_ROOT_FOLDER_ID=<inspection_results folder id>
 #
-# GOOGLE_DRIVE_OAUTH_TOKEN_FILE=C:/.../google_drive_token.json
-# GOOGLE_DRIVE_INSPECTION_ROOT_FOLDER_ID=<inspection_results folder id>
-#
-# FastAPI proxies private Drive video bytes to React and forwards HTTP Range
-# requests so HTML5 <video> controls can seek through MP4 output.
+# FastAPI proxies private Drive video bytes to React and uses the same Drive
+# access for targeted Rail Break / Missing Fishplate Bolt evidence images.
 # ============================================================================
 
 GOOGLE_DRIVE_OAUTH_TOKEN_FILE = (
@@ -244,6 +244,11 @@ GOOGLE_DRIVE_INSPECTION_ROOT_FOLDER_ID = (
 )
 
 GOOGLE_DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+
+# K_SERVICE is automatically supplied by Cloud Run. When present, prefer the
+# runtime service account through ADC even if an old local OAuth path happens
+# to remain in the service environment.
+GOOGLE_DRIVE_USE_ADC = bool(os.getenv("K_SERVICE"))
 
 _drive_credentials = None
 _drive_credentials_lock = asyncio.Lock()
@@ -327,12 +332,18 @@ def _candidate_video_names(
     return names
 
 
-def _save_drive_token(credentials: Credentials) -> None:
-    """Persist refreshed OAuth credentials only for local file-based mode."""
+def _save_drive_token(credentials) -> None:
+    """
+    Persist refreshed OAuth credentials only for local development.
+
+    Cloud Run uses ADC/service-account credentials and therefore has no local
+    user OAuth token file to update.
+    """
+    if GOOGLE_DRIVE_USE_ADC:
+        return
+
     if GOOGLE_DRIVE_OAUTH_TOKEN_JSON:
-        # Cloud/Secret-Manager mode is intentionally read-only. The refreshed
-        # access token remains valid in this running instance; the refresh token
-        # from the secret is reused again by a future instance.
+        # Environment/secret JSON is intentionally treated as read-only.
         return
 
     if not GOOGLE_DRIVE_OAUTH_TOKEN_FILE:
@@ -348,82 +359,103 @@ def _save_drive_token(credentials: Credentials) -> None:
 
 
 async def _get_drive_access_token() -> str:
-    """Load/refresh Drive OAuth from Cloud secret JSON or local token file."""
+    """
+    Get a Google Drive access token.
+
+    Cloud Run:
+        Uses the Cloud Run runtime service account via Application Default
+        Credentials (ADC). The inspection_results folder must be shared with
+        that service account.
+
+    Local development:
+        Uses GOOGLE_DRIVE_OAUTH_TOKEN_JSON or GOOGLE_DRIVE_OAUTH_TOKEN_FILE.
+    """
     global _drive_credentials
-
-    if not GOOGLE_DRIVE_OAUTH_TOKEN_JSON and not GOOGLE_DRIVE_OAUTH_TOKEN_FILE:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Google Drive OAuth is not configured. Set "
-                "GOOGLE_DRIVE_OAUTH_TOKEN_JSON for Cloud Run or "
-                "GOOGLE_DRIVE_OAUTH_TOKEN_FILE for local development."
-            ),
-        )
-
-    if (
-        not GOOGLE_DRIVE_OAUTH_TOKEN_JSON
-        and GOOGLE_DRIVE_OAUTH_TOKEN_FILE
-        and not os.path.isfile(GOOGLE_DRIVE_OAUTH_TOKEN_FILE)
-    ):
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Google Drive OAuth token file was not found. "
-                "Run google_drive_authorize.py once, then restart FastAPI. "
-                f"Expected token file: {GOOGLE_DRIVE_OAUTH_TOKEN_FILE}"
-            ),
-        )
 
     async with _drive_credentials_lock:
         if _drive_credentials is None:
             try:
-                if GOOGLE_DRIVE_OAUTH_TOKEN_JSON:
+                # ------------------------------------------------------------
+                # Cloud Run: runtime service account via ADC
+                # ------------------------------------------------------------
+                if GOOGLE_DRIVE_USE_ADC:
+                    _drive_credentials, _ = google.auth.default(
+                        scopes=[GOOGLE_DRIVE_READ_SCOPE]
+                    )
+                    print(
+                        "✅ Google Drive authentication: "
+                        "Cloud Run ADC/service account"
+                    )
+
+                # ------------------------------------------------------------
+                # Optional OAuth JSON (local/other non-Cloud-Run environment)
+                # ------------------------------------------------------------
+                elif GOOGLE_DRIVE_OAUTH_TOKEN_JSON:
                     token_info = json.loads(GOOGLE_DRIVE_OAUTH_TOKEN_JSON)
                     _drive_credentials = Credentials.from_authorized_user_info(
                         token_info,
                         scopes=[GOOGLE_DRIVE_READ_SCOPE],
                     )
-                else:
+                    print("✅ Google Drive authentication: OAuth JSON")
+
+                # ------------------------------------------------------------
+                # Local Windows OAuth token file
+                # ------------------------------------------------------------
+                elif GOOGLE_DRIVE_OAUTH_TOKEN_FILE:
+                    if not os.path.isfile(GOOGLE_DRIVE_OAUTH_TOKEN_FILE):
+                        raise RuntimeError(
+                            "Google Drive OAuth token file was not found: "
+                            f"{GOOGLE_DRIVE_OAUTH_TOKEN_FILE}"
+                        )
+
                     _drive_credentials = Credentials.from_authorized_user_file(
                         GOOGLE_DRIVE_OAUTH_TOKEN_FILE,
                         scopes=[GOOGLE_DRIVE_READ_SCOPE],
                     )
+                    print(
+                        "✅ Google Drive authentication: "
+                        "local OAuth token file"
+                    )
+
+                else:
+                    raise RuntimeError(
+                        "Google Drive authentication is not configured. "
+                        "Cloud Run should use ADC; local development should set "
+                        "GOOGLE_DRIVE_OAUTH_TOKEN_FILE or "
+                        "GOOGLE_DRIVE_OAUTH_TOKEN_JSON."
+                    )
+
             except Exception as exc:
                 raise HTTPException(
                     status_code=503,
-                    detail=f"Failed to load Google Drive OAuth credentials: {exc}",
+                    detail=f"Failed to initialize Google Drive credentials: {exc}",
                 ) from exc
 
         if not _drive_credentials.valid:
-            if _drive_credentials.expired and _drive_credentials.refresh_token:
-                try:
-                    await asyncio.to_thread(
-                        _drive_credentials.refresh,
-                        GoogleAuthRequest(),
-                    )
-                    await asyncio.to_thread(
-                        _save_drive_token,
-                        _drive_credentials,
-                    )
-                except Exception as exc:
-                    raise HTTPException(
-                        status_code=503,
-                        detail=(
-                            "Failed to refresh Google Drive OAuth credentials. "
-                            f"Re-authorize if access was revoked. Error: {exc}"
-                        ),
-                    ) from exc
-            else:
+            try:
+                # Works for both ADC service-account credentials and local
+                # authorized-user OAuth credentials.
+                await asyncio.to_thread(
+                    _drive_credentials.refresh,
+                    GoogleAuthRequest(),
+                )
+
+                # This is a no-op for Cloud Run/ADC and secret-JSON mode.
+                await asyncio.to_thread(
+                    _save_drive_token,
+                    _drive_credentials,
+                )
+
+            except Exception as exc:
                 raise HTTPException(
                     status_code=503,
-                    detail="Google Drive OAuth credentials are no longer usable.",
-                )
+                    detail=f"Failed to refresh Google Drive credentials: {exc}",
+                ) from exc
 
         if not _drive_credentials.token:
             raise HTTPException(
                 status_code=503,
-                detail="Google Drive OAuth access token is unavailable.",
+                detail="Google Drive access token is unavailable.",
             )
 
         return _drive_credentials.token
