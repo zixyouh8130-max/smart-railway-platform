@@ -40,7 +40,7 @@ const CaseKanbanCard = ({ caseItem, onOpen, onOpenAI }) => {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium text-slate-400">
-            စစ်ဆေးမှု ကိစ္စ
+            စစ်ဆေးမှု Case
           </p>
 
           <h3 className="mt-1 break-words font-semibold leading-5 text-slate-900">
@@ -98,7 +98,7 @@ const CaseKanbanCard = ({ caseItem, onOpen, onOpenAI }) => {
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 transition hover:bg-violet-100"
       >
         <Bot className="h-4 w-4" />
-        AI ကိစ္စသုံးသပ်ချက်
+        Caseသုံးသပ်ချက်
       </button>
     </article>
   );

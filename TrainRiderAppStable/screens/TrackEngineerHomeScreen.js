@@ -167,7 +167,7 @@ const TrackEngineerHomeScreen = () => {
 
       <Text style={styles.sectionTitle}>My assigned cases</Text>
       {cases.length === 0 ? (
-        <View style={styles.emptyCard}><Icon name="clipboard-check-outline" size={44} color="#10b981" /><Text style={styles.emptyTitle}>No active cases</Text><Text style={styles.emptyText}>Use nearby search to find an unassigned AI inspection case.</Text></View>
+        <View style={styles.emptyCard}><Icon name="clipboard-check-outline" size={44} color="#10b981" /><Text style={styles.emptyTitle}>No active cases</Text><Text style={styles.emptyText}>Use nearby search to find an unassigned inspection case.</Text></View>
       ) : cases.map((item) => <CaseCard key={item.id} item={item} onOpen={(caseId) => navigation.navigate('TrackIssueDetail', { caseId })} />)}
 
       {nearby.length > 0 ? (

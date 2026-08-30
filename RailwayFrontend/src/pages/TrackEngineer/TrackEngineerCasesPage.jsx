@@ -31,7 +31,7 @@ const TrackEngineerCasesPage = () => {
       setError(
         err?.response?.data?.detail ||
           err?.message ||
-          'သင့်အား တာဝန်ပေးထားသော စစ်ဆေးမှုကိစ္စများကို မရယူနိုင်ပါ။',
+          'သင့်အား တာဝန်ပေးထားသော စစ်ဆေးမှုCaseများကို မရယူနိုင်ပါ။',
       );
     } finally {
       setLoading(false);
@@ -53,10 +53,10 @@ const TrackEngineerCasesPage = () => {
                 လမ်းကြောင်းအင်ဂျင်နီယာ
               </p>
               <h1 className="mt-1 text-2xl font-bold text-slate-900">
-                ကျွန်ုပ်၏ စစ်ဆေးမှုကိစ္စများ
+                ကျွန်ုပ်၏ စစ်ဆေးမှုCaseများ
               </h1>
               <p className="mt-1 text-sm text-slate-500">
-                AI စစ်ဆေးမှုတစ်ခုစီကို ကိစ္စတစ်ခုအဖြစ် ကိုင်တွယ်ပြီး၊ တွေ့ရှိချက်များကို လုပ်ငန်းစဉ်ဘုတ်မှတစ်ဆင့် ဆောင်ရွက်ပါ။
+                စစ်ဆေးမှုတစ်ခုစီကို Caseတစ်ခုအဖြစ် ကိုင်တွယ်ပြီး၊ တွေ့ရှိချက်များကို လုပ်ငန်းစဉ် Dashboard မှတစ်ဆင့် ဆောင်ရွက်ပါ။
               </p>
             </div>
 
@@ -82,7 +82,7 @@ const TrackEngineerCasesPage = () => {
               onChange={(event) => setIncludeCompleted(event.target.checked)}
               className="h-4 w-4 rounded border-slate-300"
             />
-            ပြီးစီးထားသော ကိစ္စများကိုပါ ပြရန်
+            ပြီးစီးထားသော Caseများကိုပါ ပြရန်
           </label>
         </header>
 
@@ -98,7 +98,7 @@ const TrackEngineerCasesPage = () => {
             <div className="text-center">
               <Loader2 className="mx-auto h-8 w-8 animate-spin text-slate-500" />
               <p className="mt-3 text-sm text-slate-500">
-                စစ်ဆေးမှုကိစ္စများကို ရယူနေပါသည်…
+                စစ်ဆေးမှုCaseများကို ရယူနေပါသည်…
               </p>
             </div>
           </div>

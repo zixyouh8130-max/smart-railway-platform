@@ -49,7 +49,7 @@ const primaryActionLabel = (status) => {
   if (status === 'ACKNOWLEDGED') return 'လက်ခံအတည်ပြုရန်';
   if (status === 'IN_PROGRESS') return 'လုပ်ငန်းစတင်ရန်';
   if (status === 'VERIFYING') return 'အပြီးသတ်သုံးသပ်မှု စတင်ရန်';
-  if (status === 'COMPLETED') return 'ကိစ္စပြီးစီးရန်';
+  if (status === 'COMPLETED') return 'Caseပြီးစီးရန်';
   return caseStatusLabel(status);
 };
 
@@ -70,7 +70,7 @@ const TrackEngineerCasePage = () => {
 
   const loadCase = useCallback(async (silent = false) => {
     if (!resolvedCaseId) {
-      setError('ကိစ္စ ID မတွေ့ပါ။');
+      setError('Case ID မတွေ့ပါ။');
       setLoading(false);
       return;
     }
@@ -87,7 +87,7 @@ const TrackEngineerCasePage = () => {
       setError(
         err?.response?.data?.detail ||
           err?.message ||
-          'ဤစစ်ဆေးမှုကိစ္စကို မရယူနိုင်ပါ။',
+          'ဤစစ်ဆေးမှုCaseကို မရယူနိုင်ပါ။',
       );
     } finally {
       setLoading(false);
@@ -144,12 +144,12 @@ const TrackEngineerCasePage = () => {
     const note = transitionNote.trim();
 
     if (status === 'COMPLETED' && !note) {
-      setError('ကိစ္စပြီးစီးမီ ပြီးစီးမှုအကျဉ်းချုပ်ကို ထည့်ပါ။');
+      setError('Caseပြီးစီးမီ ပြီးစီးမှုအကျဉ်းချုပ်ကို ထည့်ပါ။');
       return;
     }
 
     if (status === 'BLOCKED' && !note) {
-      setError('ကိစ္စကို ရပ်တန့်ထားမည့် အကြောင်းရင်းကို ထည့်ပါ။');
+      setError('Caseကို ရပ်တန့်ထားမည့် အကြောင်းရင်းကို ထည့်ပါ။');
       return;
     }
 
@@ -176,7 +176,7 @@ const TrackEngineerCasePage = () => {
         <div className="text-center">
           <Loader2 className="mx-auto h-9 w-9 animate-spin text-slate-500" />
           <p className="mt-3 text-sm text-slate-500">
-            စစ်ဆေးမှုကိစ္စကို ရယူနေပါသည်…
+            စစ်ဆေးမှုCaseကို ရယူနေပါသည်…
           </p>
         </div>
       </div>
@@ -187,7 +187,7 @@ const TrackEngineerCasePage = () => {
     return (
       <div className="min-h-screen bg-slate-50 p-6" lang="my">
         <div className="mx-auto max-w-3xl rounded-2xl border border-rose-200 bg-rose-50 p-5 text-rose-700">
-          {error || 'စစ်ဆေးမှုကိစ္စ မတွေ့ပါ။'}
+          {error || 'စစ်ဆေးမှုCase မတွေ့ပါ။'}
         </div>
       </div>
     );
@@ -206,7 +206,7 @@ const TrackEngineerCasePage = () => {
           className="mb-5 inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900"
         >
           <ArrowLeft className="h-4 w-4" />
-          ကျွန်ုပ်၏ ကိစ္စများ
+          ကျွန်ုပ်၏ Caseများ
         </button>
 
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -215,14 +215,14 @@ const TrackEngineerCasePage = () => {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-xs font-semibold text-slate-400">
-                    လမ်းကြောင်းစစ်ဆေး ပြုပြင်ထိန်းသိမ်းမှု ကိစ္စ
+                    လမ်းကြောင်းစစ်ဆေး ပြုပြင်ထိန်းသိမ်းမှု Case
                   </p>
                   <h1 className="mt-1 break-words text-2xl font-bold text-slate-900">
                     {caseDisplayName(inspectionCase)}
                   </h1>
 
                   <p className="mt-1 text-xs text-slate-400">
-                    ကိစ္စ ID #{shortId(inspectionCase.id)}
+                    Case ID #{shortId(inspectionCase.id)}
                   </p>
 
                   <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-500">
@@ -244,7 +244,7 @@ const TrackEngineerCasePage = () => {
                     onClick={() => setShowCaseAI(true)}
                     className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100"
                   >
-                    🤖 AI ကိစ္စသုံးသပ်ချက်
+                    🤖 Caseသုံးသပ်ချက်
                   </button>
 
                   <button
@@ -309,7 +309,7 @@ const TrackEngineerCasePage = () => {
                       disabled={mutating}
                       className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
                     >
-                      ကိစ္စကို ရပ်တန့်ထားရန်
+                      Caseကို ရပ်တန့်ထားရန်
                     </button>
                   )}
                 </div>

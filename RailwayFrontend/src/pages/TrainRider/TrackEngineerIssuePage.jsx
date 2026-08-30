@@ -340,7 +340,7 @@ const TrackEngineerIssuePage = () => {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold text-gray-900">Defect checklist</h2>
-                <p className="text-sm text-gray-500">Work through every AI finding under this one assigned inspection case.</p>
+                <p className="text-sm text-gray-500">Work through every finding under this one assigned inspection case.</p>
               </div>
               <div className="flex gap-2">
                 <Button size="sm" variant={sortMode === 'recommended' ? undefined : 'outline'} onClick={() => setSortMode('recommended')}>Recommended order</Button>
@@ -408,7 +408,7 @@ const TrackEngineerIssuePage = () => {
 
                 <div className="rounded-xl border border-gray-200 p-4">
                   <div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-600" /><h3 className="font-bold">Field verification</h3></div>
-                  <p className="text-sm text-gray-500 mt-1">Record whether the physical defect confirms the AI finding.</p>
+                  <p className="text-sm text-gray-500 mt-1">Record whether the physical defect confirms the finding.</p>
                   {assigned && inspectionCase.status !== 'COMPLETED' ? (
                     <>
                       <select value={verificationStatus} onChange={(e) => setVerificationStatus(e.target.value)} className="w-full mt-3 border rounded-xl px-3 py-2 text-sm">

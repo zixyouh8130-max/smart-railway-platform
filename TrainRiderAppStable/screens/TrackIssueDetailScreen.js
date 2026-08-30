@@ -157,7 +157,7 @@ const TrackIssueDetailScreen = () => {
     if (!selectedIssue) return;
     const granted = await requestLocationPermission();
     if (!granted) {
-      Alert.alert('Location required', 'Location permission is needed to compare your position with this AI finding.');
+      Alert.alert('Location required', 'Location permission is needed to compare your position with this finding.');
       return;
     }
     setBusy(true);
@@ -259,7 +259,7 @@ const TrackIssueDetailScreen = () => {
     <ScrollView style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}>
       <View style={styles.headerRow}>
         <TouchableOpacity style={styles.iconButton} onPress={() => navigation.goBack()}><Icon name="arrow-left" size={22} color="#334155" /></TouchableOpacity>
-        <View style={styles.headerText}><Text style={styles.eyebrow}>INSPECTION MAINTENANCE CASE</Text><Text style={styles.title}>{inspectionCase.total_findings} AI findings</Text><Text numberOfLines={1} style={styles.meta}>{inspectionCase.inspection_id}</Text></View>
+        <View style={styles.headerText}><Text style={styles.eyebrow}>INSPECTION MAINTENANCE CASE</Text><Text style={styles.title}>{inspectionCase.total_findings} findings</Text><Text numberOfLines={1} style={styles.meta}>{inspectionCase.inspection_id}</Text></View>
       </View>
 
       <View style={styles.card}>
@@ -278,7 +278,7 @@ const TrackIssueDetailScreen = () => {
         <Text style={styles.subheading}>Executive summary</Text>
         <Text style={styles.bodyText}>{caseAi.executive_summary || 'No inspection-wide summary available.'}</Text>
         {(caseAi.key_findings || []).slice(0, 4).map((item, index) => <Text key={index} style={styles.checkText}>• {item}</Text>)}
-        {(caseAi.areas_of_attention || []).length > 0 ? <Text style={styles.helper}>{caseAi.areas_of_attention.length} AI area(s) of attention are represented in the checklist below.</Text> : null}
+        {(caseAi.areas_of_attention || []).length > 0 ? <Text style={styles.helper}>{caseAi.areas_of_attention.length} area(s) of attention are represented in the checklist below.</Text> : null}
       </View>
 
       {assigned && inspectionCase.status !== 'COMPLETED' ? (
@@ -308,7 +308,7 @@ const TrackIssueDetailScreen = () => {
             <Text style={styles.meta}>AI priority: {label(selectedIssue.ai_priority)}</Text>
             {eventContext.priority_reason ? <Text style={styles.bodyText}>{eventContext.priority_reason}</Text> : null}
             {(eventContext.recommended_checks || []).length > 0 ? <><Text style={styles.subheading}>Recommended field checks</Text>{eventContext.recommended_checks.map((item, index) => <Text key={index} style={styles.checkText}>• {item}</Text>)}</> : null}
-            {eventContext.matched_area ? <View style={styles.clusterBox}><Text style={styles.clusterTitle}>Nearby defect cluster</Text><Text style={styles.bodyText}>{eventContext.matched_area.assessment || 'This finding belongs to an AI area of attention.'}</Text></View> : null}
+            {eventContext.matched_area ? <View style={styles.clusterBox}><Text style={styles.clusterTitle}>Nearby defect cluster</Text><Text style={styles.bodyText}>{eventContext.matched_area.assessment || 'This finding belongs to an area of attention.'}</Text></View> : null}
           </View>
 
           <Text style={styles.sectionTitle}>Location evidence</Text>
@@ -318,12 +318,12 @@ const TrackIssueDetailScreen = () => {
             <Text style={styles.meta}>On-site verified: {selectedIssue.location_verified_at ? 'Yes' : 'No'}</Text>
             {assigned ? <TouchableOpacity style={styles.locationButton} onPress={checkLocation} disabled={busy}><Icon name="crosshairs-gps" size={18} color="#fff" /><Text style={styles.primaryButtonText}>Check my current location</Text></TouchableOpacity> : null}
             {selectedIssue.latitude != null && selectedIssue.longitude != null ? <TouchableOpacity style={styles.mapButton} onPress={openMap}><Icon name="map-marker-path" size={18} color="#0f766e" /><Text style={styles.mapButtonText}>Open defect in OpenStreetMap</Text></TouchableOpacity> : null}
-            {locationResult ? <View style={styles.locationResult}><Text style={styles.locationResultTitle}>{label(locationResult.proximity)}</Text><Text style={styles.locationResultText}>{Number(locationResult.distance_miles).toFixed(3)} mi from AI location</Text></View> : null}
+            {locationResult ? <View style={styles.locationResult}><Text style={styles.locationResultTitle}>{label(locationResult.proximity)}</Text><Text style={styles.locationResultText}>{Number(locationResult.distance_miles).toFixed(3)} mi from location</Text></View> : null}
           </View>
 
           <Text style={styles.sectionTitle}>Field verification</Text>
           <View style={styles.card}>
-            <Text style={styles.helper}>This answers whether the physical track condition confirms the AI finding. It is separate from the repair result.</Text>
+            <Text style={styles.helper}>This answers whether the physical track condition confirms the finding. It is separate from the repair result.</Text>
             <View style={styles.wrapRow}>{VERIFICATION_OPTIONS.map(([value, title]) => <TouchableOpacity key={value} style={[styles.choiceButton, verificationStatus === value && styles.choiceButtonActive]} onPress={() => setVerificationStatus(value)}><Text style={[styles.choiceText, verificationStatus === value && styles.choiceTextActive]}>{title}</Text></TouchableOpacity>)}</View>
             <TextInput style={styles.noteInput} multiline placeholder="Describe what you physically observed…" value={verificationNote} onChangeText={setVerificationNote} />
             {assigned && inspectionCase.status !== 'COMPLETED' ? <TouchableOpacity style={styles.primaryButton} onPress={saveVerification} disabled={busy}><Text style={styles.primaryButtonText}>Save field verification</Text></TouchableOpacity> : null}

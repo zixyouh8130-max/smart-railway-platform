@@ -72,13 +72,13 @@ const PRIORITY_LABELS = {
 };
 
 const ACTIVITY_LABELS = {
-  CASE_CREATED_FROM_AI: 'AI မှ ကိစ္စဖန်တီးခဲ့သည်',
+  CASE_CREATED_FROM_AI: 'AI မှ Caseဖန်တီးခဲ့သည်',
   CASE_ASSIGNED: 'အင်ဂျင်နီယာ တာဝန်ပေးခဲ့သည်',
   CASE_UNASSIGNED: 'တာဝန်ပေးမှု ဖြုတ်ခဲ့သည်',
   CASE_CLAIMED: 'အင်ဂျင်နီယာက လက်ခံယူခဲ့သည်',
-  CASE_STATUS: 'ကိစ္စအခြေအနေ ပြောင်းလဲခဲ့သည်',
-  CASE_MESSAGE: 'ကိစ္စစာတို',
-  CASE_RENAMED: 'ကိစ္စအမည် ပြောင်းခဲ့သည်',
+  CASE_STATUS: 'Caseအခြေအနေ ပြောင်းလဲခဲ့သည်',
+  CASE_MESSAGE: 'Caseစာတို',
+  CASE_RENAMED: 'Caseအမည် ပြောင်းခဲ့သည်',
   FINDING_MESSAGE: 'ချို့ယွင်းချက်စာတို',
   FIELD_VERIFICATION: 'ကွင်းဆင်းအတည်ပြုမှု',
   MAINTENANCE_STATUS: 'ပြုပြင်ထိန်းသိမ်းမှု အခြေအနေ',
@@ -117,7 +117,7 @@ const shortId = (value) => String(value || '').slice(0, 8);
 const caseDisplayName = (item) => (
   item?.case_name?.trim() ||
   item?.run_id?.trim() ||
-  `စစ်ဆေးမှုကိစ္စ #${shortId(item?.id)}`
+  `စစ်ဆေးမှုCase #${shortId(item?.id)}`
 );
 
 const apiErrorMessage = (err, fallback) => {
@@ -145,7 +145,7 @@ const adminStatusPolicy = (inspectionCase) => {
     return {
       editable: true,
       options: ['REOPENED'],
-      reason: 'ပြီးစီးထားသော ကိစ္စကို အကြောင်းပြချက်ဖြင့် Admin ကသာ ပြန်ဖွင့်နိုင်ပါသည်။',
+      reason: 'ပြီးစီးထားသော Caseကို အကြောင်းပြချက်ဖြင့် Admin ကသာ ပြန်ဖွင့်နိုင်ပါသည်။',
     };
   }
 
@@ -153,7 +153,7 @@ const adminStatusPolicy = (inspectionCase) => {
     return {
       editable: false,
       options: [],
-      reason: 'Track Engineer က ကိစ္စကို လက်ခံပြီးနောက် လုပ်ငန်းစဉ်အခြေအနေကို အင်ဂျင်နီယာကသာ ဆက်လက်ပြောင်းလဲရပါမည်။ Admin သည် စောင့်ကြည့်ခြင်း၊ တာဝန်ပြောင်းပေးခြင်း၊ မှတ်ချက်ပေးခြင်းနှင့် AI သုံးသပ်ချက်ကြည့်ခြင်းသာ ပြုလုပ်နိုင်ပါသည်။',
+      reason: 'Track Engineer က Caseကို လက်ခံပြီးနောက် လုပ်ငန်းစဉ်အခြေအနေကို အင်ဂျင်နီယာကသာ ဆက်လက်ပြောင်းလဲရပါမည်။ Admin သည် စောင့်ကြည့်ခြင်း၊ တာဝန်ပြောင်းပေးခြင်း၊ မှတ်ချက်ပေးခြင်းနှင့် သုံးသပ်ချက်ကြည့်ခြင်းသာ ပြုလုပ်နိုင်ပါသည်။',
     };
   }
 
@@ -161,7 +161,7 @@ const adminStatusPolicy = (inspectionCase) => {
     return {
       editable: true,
       options: ['BLOCKED'],
-      reason: 'အင်ဂျင်နီယာ မလက်ခံမီ Admin က လိုအပ်ပါက ကိစ္စကို ရပ်တန့်ထားနိုင်ပါသည်။',
+      reason: 'အင်ဂျင်နီယာ မလက်ခံမီ Admin က လိုအပ်ပါက Caseကို ရပ်တန့်ထားနိုင်ပါသည်။',
     };
   }
 
@@ -169,7 +169,7 @@ const adminStatusPolicy = (inspectionCase) => {
     return {
       editable: true,
       options: ['OPEN'],
-      reason: 'အင်ဂျင်နီယာ မလက်ခံရသေးသော ရပ်တန့်ထားသည့် ကိစ္စကို Admin က ပြန်ဖွင့်နိုင်ပါသည်။',
+      reason: 'အင်ဂျင်နီယာ မလက်ခံရသေးသော ရပ်တန့်ထားသည့် Caseကို Admin က ပြန်ဖွင့်နိုင်ပါသည်။',
     };
   }
 
@@ -279,7 +279,7 @@ const TrackIssuesAdminPage = () => {
         setSelectedInspection(inspectionData[0].id);
       }
     } catch (err) {
-      setError(apiErrorMessage(err, 'စစ်ဆေးမှု ပြုပြင်ထိန်းသိမ်းရေးကိစ္စများကို မရယူနိုင်ပါ။'));
+      setError(apiErrorMessage(err, 'စစ်ဆေးမှု ပြုပြင်ထိန်းသိမ်းရေးCaseများကို မရယူနိုင်ပါ။'));
     } finally {
       setLoading(false);
     }
@@ -300,7 +300,7 @@ const TrackIssuesAdminPage = () => {
       setEditingCaseName(false);
       setAdminStatusNote('');
     } catch (err) {
-      setError(apiErrorMessage(err, 'စစ်ဆေးမှုကိစ္စကို မရယူနိုင်ပါ။'));
+      setError(apiErrorMessage(err, 'စစ်ဆေးမှုCaseကို မရယူနိုင်ပါ။'));
     } finally {
       setBusy(false);
     }
@@ -328,7 +328,7 @@ const TrackIssuesAdminPage = () => {
       await load();
       await openCase(result.case_id);
     } catch (err) {
-      setError(apiErrorMessage(err, 'AI စစ်ဆေးမှုကို ချိတ်ဆက်၍ ကိစ္စမဖန်တီးနိုင်ပါ။'));
+      setError(apiErrorMessage(err, 'AI စစ်ဆေးမှုကို ချိတ်ဆက်၍ Caseမဖန်တီးနိုင်ပါ။'));
     } finally {
       setBusy(false);
     }
@@ -353,7 +353,7 @@ const TrackIssuesAdminPage = () => {
     if (!selectedCase) return;
     const name = caseNameDraft.trim();
     if (!name) {
-      setError('ကိစ္စအမည်ကို ထည့်ပါ။');
+      setError('Caseအမည်ကို ထည့်ပါ။');
       return;
     }
 
@@ -365,10 +365,10 @@ const TrackIssuesAdminPage = () => {
       setSelectedCase(updated);
       setCaseNameDraft(updated.case_name || name);
       setEditingCaseName(false);
-      setSuccess('ကိစ္စအမည်ကို ပြောင်းလဲပြီးပါပြီ။');
+      setSuccess('Caseအမည်ကို ပြောင်းလဲပြီးပါပြီ။');
       await load();
     } catch (err) {
-      setError(apiErrorMessage(err, 'ကိစ္စအမည်ကို မပြောင်းလဲနိုင်ပါ။'));
+      setError(apiErrorMessage(err, 'Caseအမည်ကို မပြောင်းလဲနိုင်ပါ။'));
     } finally {
       setBusy(false);
     }
@@ -398,10 +398,10 @@ const TrackIssuesAdminPage = () => {
       );
       setSelectedCase(updated);
       setAdminStatusNote('');
-      setSuccess('ကိစ္စအခြေအနေကို အပ်ဒိတ်လုပ်ပြီးပါပြီ။');
+      setSuccess('Caseအခြေအနေကို အပ်ဒိတ်လုပ်ပြီးပါပြီ။');
       await load();
     } catch (err) {
-      setError(apiErrorMessage(err, 'ကိစ္စအခြေအနေကို မပြောင်းလဲနိုင်ပါ။'));
+      setError(apiErrorMessage(err, 'Caseအခြေအနေကို မပြောင်းလဲနိုင်ပါ။'));
     } finally {
       setBusy(false);
     }
@@ -421,7 +421,7 @@ const TrackIssuesAdminPage = () => {
       setComment('');
       setCommentKind('COMMENT');
     } catch (err) {
-      setError(apiErrorMessage(err, 'ကိစ္စစာတိုကို မပို့နိုင်ပါ။'));
+      setError(apiErrorMessage(err, 'Caseစာတိုကို မပို့နိုင်ပါ။'));
     } finally {
       setBusy(false);
     }
@@ -487,7 +487,7 @@ const TrackIssuesAdminPage = () => {
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <div>
           <p className="mt-1 text-sm text-gray-500">
-            AI စစ်ဆေးမှုကိစ္စများကို Track Engineer များထံ တာဝန်ပေးပြီး ချို့ယွင်းချက်တိုင်း၏ ကွင်းဆင်းစစ်ဆေးမှုနှင့် ပြုပြင်မှုရလဒ်ကို စောင့်ကြည့်ပါ။
+           စစ်ဆေးမှုCaseများကို Track Engineer များထံ တာဝန်ပေးပြီး ချို့ယွင်းချက်တိုင်း၏ ကွင်းဆင်းစစ်ဆေးမှုနှင့် ပြုပြင်မှုရလဒ်ကို စောင့်ကြည့်ပါ။
           </p>
         </div>
         <Button variant="outline" onClick={load} disabled={loading || busy}>
@@ -509,7 +509,7 @@ const TrackIssuesAdminPage = () => {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         {[
-          ['ကိစ္စအားလုံး', stats?.total_cases ?? 0, ClipboardCheck],
+          ['Caseအားလုံး', stats?.total_cases ?? 0, ClipboardCheck],
           ['ဆောင်ရွက်ဆဲ', stats?.open_cases ?? 0, Wrench],
           ['တာဝန်မပေးရသေး', stats?.unassigned_cases ?? 0, UserRoundCog],
           ['ကွင်းဆင်းစစ်ရန်လို', stats?.needs_field_check ?? 0, AlertTriangle],
@@ -528,7 +528,7 @@ const TrackIssuesAdminPage = () => {
         <div className="flex flex-col gap-3 md:flex-row md:items-end">
           <div className="flex-1">
             <label className="text-xs font-semibold text-gray-600">
-              AI စစ်ဆေးမှု
+              စစ်ဆေးမှု
             </label>
             <select
               value={selectedInspection}
@@ -547,7 +547,7 @@ const TrackIssuesAdminPage = () => {
             disabled={busy || !selectedInspection}
             className="w-full md:w-auto"
           >
-            AI စစ်ဆေးမှုကို ချိတ်ဆက် / ကိစ္စဖန်တီးရန်
+            စစ်ဆေးမှုကို ချိတ်ဆက် / Caseဖန်တီးရန်
           </Button>
         </div>
       </Card>
@@ -561,7 +561,7 @@ const TrackIssuesAdminPage = () => {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="ကိစ္စအမည်၊ ID၊ အင်ဂျင်နီယာဖြင့် ရှာရန်…"
+                placeholder="Caseအမည်၊ ID၊ အင်ဂျင်နီယာဖြင့် ရှာရန်…"
                 className="w-full rounded-xl border py-2 pl-9 pr-3 text-sm"
               />
             </div>
@@ -614,7 +614,7 @@ const TrackIssuesAdminPage = () => {
                       {statusLabel(item.status)}
                     </span>
                     <span className="text-[10px] text-gray-500">
-                      AI ဦးစားပေး: {priorityLabel(item.ai_overall_priority)}
+                      ဦးစားပေး: {priorityLabel(item.ai_overall_priority)}
                     </span>
                   </div>
                   <p className="mt-2 break-words text-base font-semibold leading-6 text-gray-900">
@@ -637,7 +637,7 @@ const TrackIssuesAdminPage = () => {
               ))
             ) : (
               <p className="py-8 text-center text-sm text-gray-500">
-                သတ်မှတ်ထားသော စစ်ထုတ်မှုနှင့် ကိုက်ညီသည့် ကိစ္စမရှိပါ။
+                သတ်မှတ်ထားသော စစ်ထုတ်မှုနှင့် ကိုက်ညီသည့် Caseမရှိပါ။
               </p>
             )}
             </div>
@@ -646,12 +646,12 @@ const TrackIssuesAdminPage = () => {
           <Card padding="p-4" hover={false}>
             <h3 className="flex items-center gap-2 font-bold">
                 <MessageSquare className="h-4 w-4" />
-                ကိစ္စဆွေးနွေးမှုနှင့် မှတ်တမ်း
+                Caseဆွေးနွေးမှုနှင့် မှတ်တမ်း
               </h3>
 
               {!selectedCase ? (
                 <p className="mt-4 text-sm text-gray-500">
-                  ဆွေးနွေးမှုကို ကြည့်ရန် ကိစ္စတစ်ခုကို ရွေးပါ။
+                  ဆွေးနွေးမှုကို ကြည့်ရန် Caseတစ်ခုကို ရွေးပါ။
                 </p>
               ) : (
                 <>
@@ -696,7 +696,7 @@ const TrackIssuesAdminPage = () => {
                     <input
                       value={comment}
                       onChange={(event) => setComment(event.target.value)}
-                      placeholder="တာဝန်ပေးထားသော အင်ဂျင်နီယာထံ ကိစ္စအကြောင်း စာတိုရေးပါ…"
+                      placeholder="တာဝန်ပေးထားသော အင်ဂျင်နီယာထံ Caseအကြောင်း စာတိုရေးပါ…"
                       className="rounded-xl border px-3 py-2 text-sm"
                     />
                     <Button
@@ -717,7 +717,7 @@ const TrackIssuesAdminPage = () => {
             <Card padding="p-10" hover={false} className="text-center">
               <ClipboardCheck className="mx-auto h-12 w-12 text-gray-300" />
               <p className="mt-3 text-gray-600">
-                Track Engineer နှင့် ချို့ယွင်းချက်စာရင်းကို သုံးသပ်ရန် စစ်ဆေးမှုကိစ္စတစ်ခုကို ရွေးပါ။
+                Track Engineer နှင့် ချို့ယွင်းချက်စာရင်းကို သုံးသပ်ရန် စစ်ဆေးမှုCaseတစ်ခုကို ရွေးပါ။
               </p>
             </Card>
           ) : (
@@ -731,14 +731,14 @@ const TrackIssuesAdminPage = () => {
                           {statusLabel(selectedCase.status)}
                         </span>
                         <span className="text-xs text-gray-500 sm:text-sm">
-                          AI ဦးစားပေး: {priorityLabel(selectedCase.ai_overall_priority)}
+                         ဦးစားပေး: {priorityLabel(selectedCase.ai_overall_priority)}
                         </span>
                         <button
                           type="button"
                           onClick={() => setCaseAIReviewOpen(true)}
                           className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:bg-violet-100"
-                          title="AI ကိစ္စသုံးသပ်ချက်"
-                          aria-label="AI ကိစ္စသုံးသပ်ချက်"
+                          title="AI Caseသုံးသပ်ချက်"
+                          aria-label="AI Caseသုံးသပ်ချက်"
                         >
                           <Bot className="h-4 w-4" />
                         </button>
@@ -767,7 +767,7 @@ const TrackIssuesAdminPage = () => {
 
                   <div className="border-t border-slate-100 pt-4">
                     <p className="text-xs font-semibold text-slate-500">
-                      ကိစ္စအမည်
+                      Caseအမည်
                     </p>
 
                     {editingCaseName ? (
@@ -778,7 +778,7 @@ const TrackIssuesAdminPage = () => {
                           maxLength={160}
                           autoFocus
                           className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-lg font-semibold text-slate-900 outline-none focus:border-slate-600 sm:text-xl"
-                          placeholder="ကိစ္စအမည်"
+                          placeholder="Caseအမည်"
                         />
 
                         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -815,8 +815,8 @@ const TrackIssuesAdminPage = () => {
                             setEditingCaseName(true);
                           }}
                           className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-transparent text-slate-500 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-900"
-                          title="ကိစ္စအမည်ပြောင်းရန်"
-                          aria-label="ကိစ္စအမည်ပြောင်းရန်"
+                          title="Caseအမည်ပြောင်းရန်"
+                          aria-label="Caseအမည်ပြောင်းရန်"
                         >
                           <PencilLine className="h-5 w-5" />
                         </button>
@@ -846,7 +846,7 @@ const TrackIssuesAdminPage = () => {
               </Card>
 
               <Card padding="p-5" hover={false}>
-                <h3 className="font-bold">ကိစ္စ စီမံခန့်ခွဲမှု</h3>
+                <h3 className="font-bold">Case စီမံခန့်ခွဲမှု</h3>
 
                 {statusPolicy.editable ? (
                   <div className="mt-3 space-y-3">
@@ -908,7 +908,7 @@ const TrackIssuesAdminPage = () => {
                   <div>
                     <h3 className="font-bold">ချို့ယွင်းချက် စစ်ဆေးစာရင်း</h3>
                     <p className="mt-1 text-xs text-gray-500">
-                      Robot အိုင်ကွန်ကို နှိပ်မှ AI သုံးသပ်ချက် popup ပေါ်လာပါမည်။
+                      Robot အိုင်ကွန်ကို နှိပ်မှ သုံးသပ်ချက် popup ပေါ်လာပါမည်။
                     </p>
                   </div>
                 </div>
@@ -1026,7 +1026,7 @@ const TrackIssuesAdminPage = () => {
       <ReviewModal
         open={caseAIReviewOpen && Boolean(selectedCase)}
         onClose={() => setCaseAIReviewOpen(false)}
-        title="AI ကိစ္စသုံးသပ်ချက်"
+        title="AI Caseသုံးသပ်ချက်"
         subtitle={selectedCase ? caseDisplayName(selectedCase) : ''}
       >
         {selectedCase && (

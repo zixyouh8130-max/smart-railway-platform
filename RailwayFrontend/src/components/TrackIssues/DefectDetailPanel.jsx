@@ -306,7 +306,7 @@ const DefectDetailPanel = ({
             {defectLocation && (
               <div className="mt-3 flex items-center gap-2 text-sm text-slate-600">
                 <MapPin className="h-4 w-4 text-emerald-600" />
-                AI တွေ့ရှိချက်တွင် GPS တည်နေရာ ရှိသည်
+                တွေ့ရှိချက်တွင် GPS တည်နေရာ ရှိသည်
               </div>
             )}
           </div>
@@ -317,7 +317,7 @@ const DefectDetailPanel = ({
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
           >
             <Bot className="h-4 w-4" />
-            AI တွေ့ရှိချက် သုံးသပ်ရန်
+            တွေ့ရှိချက် သုံးသပ်ရန်
           </button>
 
           <section className="rounded-xl border border-slate-200 p-4">

@@ -102,7 +102,7 @@ const ACTIVITY_TYPE_LABELS = {
   FIELD_VERIFICATION: 'ကွင်းဆင်း အတည်ပြုမှု',
   MAINTENANCE_UPDATE: 'ပြုပြင်ထိန်းသိမ်းမှု အပ်ဒိတ်',
   STATUS_CHANGE: 'အခြေအနေ ပြောင်းလဲမှု',
-  CASE_CREATED: 'ကိစ္စ ဖန်တီးမှု',
+  CASE_CREATED: 'Case ဖန်တီးမှု',
   ISSUE_CREATED: 'တွေ့ရှိချက် ဖန်တီးမှု',
   AI_REVIEW: 'AI သုံးသပ်ချက်',
 };
@@ -266,7 +266,7 @@ export function caseDisplayName(caseItem = {}) {
   const runId = String(caseItem.run_id || '').trim();
   if (runId) return runId;
 
-  return `စစ်ဆေးမှုကိစ္စ #${shortId(caseItem.id)}`;
+  return `စစ်ဆေးမှုCase #${shortId(caseItem.id)}`;
 }
 
 export function staffRoleLabel(value) {

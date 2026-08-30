@@ -6,7 +6,7 @@ const CaseAIReviewDialog = ({ inspectionCase, open, onClose }) => (
   <ModalShell
     open={open}
     onClose={onClose}
-    title="စစ်ဆေးမှုတစ်ခုလုံးအတွက် AI သုံးသပ်ချက်"
+    title="စစ်ဆေးမှုတစ်ခုလုံးအတွက် သုံးသပ်ချက်"
   >
     {inspectionCase ? (
       <InspectionCaseAIReview inspectionCase={inspectionCase} />

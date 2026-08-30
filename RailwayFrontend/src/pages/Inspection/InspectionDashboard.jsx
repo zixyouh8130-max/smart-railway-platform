@@ -123,7 +123,7 @@ const AI_STATUS_META = {
     classes: 'bg-slate-100 text-slate-600 border-slate-200',
   },
   processing: {
-    label: 'AI Review ပြုလုပ်နေသည်',
+    label: 'Review ပြုလုပ်နေသည်',
     classes: 'bg-amber-50 text-amber-700 border-amber-200',
   },
   completed: {
@@ -787,10 +787,10 @@ function AiAdvisoryPanel({ inspection, onGenerate, generating = false }) {
               </div>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
                 {isFailed
-                  ? 'ယခင် AI Review ထုတ်ပေးမှု မအောင်မြင်ခဲ့ပါ။ MongoDB တွင် စစ်ဆေးမှုဒေတာများ ဆက်လက်ရှိနေသောကြောင့် ထပ်မံကြိုးစားနိုင်ပါသည်။'
+                  ? 'ယခင် Review ထုတ်ပေးမှု မအောင်မြင်ခဲ့ပါ။ MongoDB တွင် စစ်ဆေးမှုဒေတာများ ဆက်လက်ရှိနေသောကြောင့် ထပ်မံကြိုးစားနိုင်ပါသည်။'
                   : isProcessing
-                  ? 'စစ်ဆေးမှုနှင့် GPS ချို့ယွင်းချက်ဒေတာများကို အသုံးပြု၍ မြန်မာဘာသာ AI ပြုပြင်ထိန်းသိမ်းရေး သုံးသပ်ချက်ကို ပြုလုပ်နေပါသည်။'
-                  : 'ဤစစ်ဆေးမှုအတွက် AI Review မထုတ်ပေးရသေးပါ။ ဗီဒီယိုကို ပြန်လည်စစ်ဆေးခြင်းမပြုဘဲ MongoDB ရှိ ချို့ယွင်းချက်နှင့် GPS ဒေတာများမှ Review ထုတ်ပေးနိုင်ပါသည်။'}
+                  ? 'စစ်ဆေးမှုနှင့် GPS ချို့ယွင်းချက်ဒေတာများကို အသုံးပြု၍ မြန်မာဘာသာ ပြုပြင်ထိန်းသိမ်းရေး သုံးသပ်ချက်ကို ပြုလုပ်နေပါသည်။'
+                  : 'ဤစစ်ဆေးမှုအတွက် Review မထုတ်ပေးရသေးပါ။ ဗီဒီယိုကို ပြန်လည်စစ်ဆေးခြင်းမပြုဘဲ MongoDB ရှိ ချို့ယွင်းချက်နှင့် GPS ဒေတာများမှ Review ထုတ်ပေးနိုင်ပါသည်။'}
               </p>
             </div>
           </div>
@@ -834,7 +834,7 @@ function AiAdvisoryPanel({ inspection, onGenerate, generating = false }) {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h4 className="text-lg font-semibold text-slate-900">
-                  AI ရထားလမ်း ထိန်းသိမ်းမှု အကြံပြုချက်
+                 ရထားလမ်း ထိန်းသိမ်းမှု အကြံပြုချက်
                 </h4>
                 <PriorityBadge priority={advisory?.overall_priority} />
               </div>
@@ -1116,7 +1116,7 @@ function AiAdvisoryPanel({ inspection, onGenerate, generating = false }) {
         )}
 
         <div className="border-t border-slate-100 pt-4 text-xs leading-5 text-slate-400">
-          AI မှ ထုတ်ပေးသော ထိန်းသိမ်းမှုအကြံပြုချက်။ နောက်ဆုံးပြုပြင်ထိန်းသိမ်းမှု ဆုံးဖြတ်ချက်များကို
+          ထိန်းသိမ်းမှုအကြံပြုချက်။ နောက်ဆုံးပြုပြင်ထိန်းသိမ်းမှု ဆုံးဖြတ်ချက်များကို
           အရည်အချင်းပြည့်မီသော ရထားလမ်းဝန်ထမ်းများနှင့် သက်ဆိုင်ရာ ရထားလမ်းထိန်းသိမ်းမှုစံနှုန်းများဖြင့်
           အတည်ပြုသင့်သည်။
         </div>
@@ -1190,7 +1190,7 @@ function EventCard({ event, index, selected, onSelect }) {
       {findings.length > 0 && (
         <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50 p-3">
           <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
-            AI မှ ထပ်ဆောင်း လေ့လာတွေ့ရှိချက်
+          ထပ်ဆောင်း လေ့လာတွေ့ရှိချက်
           </p>
 
           {findings.map((finding, findingIndex) => (
@@ -1378,7 +1378,7 @@ const InspectionDashboard = () => {
         const failedDetail = await inspectionApi.getInspectionDetail(inspectionId);
         setAiDialogData(failedDetail);
       } catch (refreshError) {
-        console.warn('Could not refresh failed AI review status:', refreshError);
+        console.warn('Could not refresh failed review status:', refreshError);
       }
     } finally {
       setAiGeneratingId(null);
@@ -1458,7 +1458,7 @@ const InspectionDashboard = () => {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <p className="mt-1 text-sm text-slate-500">
-              ချို့ယွင်းချက်ရှာဖွေတွေ့ရှိမှုများ၊ လမ်းကြောင်းတည်နေရာများနှင့် AI ထိန်းသိမ်းမှု အကြံပြုချက်များ
+              ချို့ယွင်းချက်ရှာဖွေတွေ့ရှိမှုများ၊ လမ်းကြောင်းတည်နေရာများနှင့် ထိန်းသိမ်းမှု အကြံပြုချက်များ
             </p>
           </div>
 
@@ -1631,7 +1631,7 @@ const InspectionDashboard = () => {
               <div>
                 <h3 className="font-semibold text-slate-900">မကြာသေးမီက စစ်ဆေးမှုများ</h3>
                 <p className="mt-1 text-sm text-slate-500">
-                  စစ်ဆေးမှုတစ်ခုကို ဖွင့်ရန် ၎င်း၏ အသေးစိတ်နှင့် AI အကြံပြုချက်ကို ကြည့်ရှုပါ။
+                  စစ်ဆေးမှုတစ်ခုကို ဖွင့်ရန် ၎င်း၏ အသေးစိတ်နှင့် အကြံပြုချက်ကို ကြည့်ရှုပါ။
                 </p>
               </div>
 
@@ -1742,7 +1742,7 @@ const InspectionDashboard = () => {
                       ချို့ယွင်းချက်များ
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      AI အကြံပြုချက်
+                     အကြံပြုချက်
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
                       ဖန်တီးချိန်
@@ -2197,7 +2197,7 @@ const InspectionDashboard = () => {
                               <div className="mt-4">
                                 <EmptyState
                                   title="တည်နေရာအလိုက် အကျဉ်းချုပ် မရှိပါ"
-                                  description="စစ်ဆေးမှုအသေးစိတ်တွင် ai_spatial_summary မပါဝင်ပါ။"
+                                  description="စစ်ဆေးမှုအသေးစိတ်တွင် Spatial Summary မပါဝင်ပါ။"
                                 />
                               </div>
                             )}
@@ -2278,9 +2278,9 @@ const InspectionDashboard = () => {
                     <Bot className="h-5 w-5 text-violet-700" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-slate-900">AI ထိန်းသိမ်းမှု တုံ့ပြန်ချက်</h3>
+                    <h3 className="font-semibold text-slate-900"> ထိန်းသိမ်းမှု တုံ့ပြန်ချက်</h3>
                     <p className="mt-0.5 text-xs text-slate-500">
-                      ဤစစ်ဆေးမှုအတွက် MongoDB တွင် သိမ်းဆည်းထားသော AI ထိန်းသိမ်းမှု အကြံပြုချက်
+                      ဤစစ်ဆေးမှုအတွက် Database တွင် သိမ်းဆည်းထားသော ထိန်းသိမ်းမှု အကြံပြုချက်
                     </p>
                   </div>
                 </div>
