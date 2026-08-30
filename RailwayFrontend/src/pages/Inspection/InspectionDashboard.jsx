@@ -117,6 +117,28 @@ const PRIORITY_META = {
   },
 };
 
+const AI_STATUS_META = {
+  pending: {
+    label: 'မထုတ်ပေးရသေး',
+    classes: 'bg-slate-100 text-slate-600 border-slate-200',
+  },
+  processing: {
+    label: 'AI Review ပြုလုပ်နေသည်',
+    classes: 'bg-amber-50 text-amber-700 border-amber-200',
+  },
+  completed: {
+    label: 'ထုတ်ပေးပြီး',
+    classes: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  },
+  failed: {
+    label: 'မအောင်မြင်ပါ',
+    classes: 'bg-red-50 text-red-700 border-red-200',
+  },
+};
+
+const getAiStatusMeta = (status) =>
+  AI_STATUS_META[status] || AI_STATUS_META.pending;
+
 const getDefectMeta = (type) => DEFECT_META[type] || FALLBACK_DEFECT_META;
 
 const getPriorityMeta = (priority) =>
@@ -735,36 +757,60 @@ function EmptyState({ title, description }) {
 // AI advisory panel
 // -----------------------------------------------------------------------------
 
-function AiAdvisoryPanel({ inspection }) {
+function AiAdvisoryPanel({ inspection, onGenerate, generating = false }) {
   const advisory = getAiAdvisory(inspection);
-  const status = getAiStatus(inspection);
+  const status = getAiStatus(inspection) || 'pending';
   const model = getAiModel(inspection);
   const generatedAt = getAiGeneratedAt(inspection);
   const spatial = getAiSpatialSummary(inspection);
+  const statusMeta = getAiStatusMeta(status);
 
   if (!advisory) {
+    const isProcessing = status === 'processing' || generating;
+    const isFailed = status === 'failed';
+
     return (
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50">
-            <Bot className="h-5 w-5 text-violet-600" />
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50">
+              <Bot className="h-5 w-5 text-violet-600" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="font-semibold text-slate-900">AI ထိန်းသိမ်းမှု အကြံပြုချက်</h4>
+                <span
+                  className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusMeta.classes}`}
+                >
+                  {statusMeta.label}
+                </span>
+              </div>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                {isFailed
+                  ? 'ယခင် AI Review ထုတ်ပေးမှု မအောင်မြင်ခဲ့ပါ။ MongoDB တွင် စစ်ဆေးမှုဒေတာများ ဆက်လက်ရှိနေသောကြောင့် ထပ်မံကြိုးစားနိုင်ပါသည်။'
+                  : isProcessing
+                  ? 'စစ်ဆေးမှုနှင့် GPS ချို့ယွင်းချက်ဒေတာများကို အသုံးပြု၍ မြန်မာဘာသာ AI ပြုပြင်ထိန်းသိမ်းရေး သုံးသပ်ချက်ကို ပြုလုပ်နေပါသည်။'
+                  : 'ဤစစ်ဆေးမှုအတွက် AI Review မထုတ်ပေးရသေးပါ။ ဗီဒီယိုကို ပြန်လည်စစ်ဆေးခြင်းမပြုဘဲ MongoDB ရှိ ချို့ယွင်းချက်နှင့် GPS ဒေတာများမှ Review ထုတ်ပေးနိုင်ပါသည်။'}
+              </p>
+            </div>
           </div>
-          <div>
-            <h4 className="font-semibold text-slate-900">AI ထိန်းသိမ်းမှု အကြံပြုချက်</h4>
-            <p className="text-sm text-slate-500">
-              စစ်ဆေးမှုရလဒ်များအတွက် ဉာဏ်ရည်တုအခြေပြု ပြုပြင်ထိန်းသိမ်းမှု အကြံပြုချက်
-            </p>
-          </div>
-        </div>
 
-        <EmptyState
-          title={status === 'failed' ? 'AI အကြံပြုချက် မအောင်မြင်ပါ' : 'AI အကြံပြုချက် မရှိသေးပါ'}
-          description={
-            status === 'failed'
-              ? 'စစ်ဆေးမှုဒေတာ ရှိနေသော်လည်း AI အကြံပြုချက် ထုတ်ပေးခြင်း မပြီးမြောက်ပါ။'
-              : 'ဤစစ်ဆေးမှုတွင် AI အကြံပြုချက် မပါဝင်သေးပါ။'
-          }
-        />
+          {onGenerate && (
+            <button
+              type="button"
+              onClick={onGenerate}
+              disabled={isProcessing}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+              {isProcessing
+                ? 'AI Review ပြုလုပ်နေသည်...'
+                : isFailed
+                ? 'AI Review ပြန်လည်ဖန်တီးရန်'
+                : 'AI Review ဖန်တီးရန်'}
+            </button>
+          )}
+        </div>
       </section>
     );
   }
@@ -798,7 +844,7 @@ function AiAdvisoryPanel({ inspection }) {
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
                 {model && <span>မော်ဒယ်: {model}</span>}
                 {generatedAt && <span>ထုတ်ပေးချိန်: {formatDate(generatedAt)}</span>}
-                {status && <span>အခြေအနေ: {status}</span>}
+                {status && <span>အခြေအနေ: {getAiStatusMeta(status).label}</span>}
               </div>
             </div>
           </div>
@@ -1187,6 +1233,7 @@ const InspectionDashboard = () => {
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [aiDialogData, setAiDialogData] = useState(null);
   const [aiDialogLoading, setAiDialogLoading] = useState(false);
+  const [aiGeneratingId, setAiGeneratingId] = useState(null);
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [videoDialogData, setVideoDialogData] = useState(null);
@@ -1273,6 +1320,68 @@ const InspectionDashboard = () => {
       console.error(err);
       setError('AI အကြံပြုချက် ရယူရာတွင် မအောင်မြင်ပါ။');
     } finally {
+      setAiDialogLoading(false);
+    }
+  };
+
+  const handleGenerateAiReview = async (inspectionId, force = false) => {
+    if (!inspectionId || aiGeneratingId === inspectionId) return;
+
+    setAiGeneratingId(inspectionId);
+    setAiDialogOpen(true);
+    setAiDialogLoading(true);
+    setError(null);
+
+    try {
+      // First show the latest inspection state in the dialog.
+      const before = await inspectionApi.getInspectionDetail(inspectionId);
+      setAiDialogData(before);
+
+      // The LLM call happens in FastAPI, never in the browser.
+      await inspectionApi.generateAiReview(inspectionId, force);
+
+      // Fetch the saved MongoDB result so every part of the UI uses the same
+      // persisted advisory rather than only the POST response.
+      const [updatedDetail, updatedInspections] = await Promise.all([
+        inspectionApi.getInspectionDetail(inspectionId),
+        inspectionApi.getInspections(20, 0),
+      ]);
+
+      setAiDialogData(updatedDetail);
+      setInspections(Array.isArray(updatedInspections) ? updatedInspections : []);
+
+      // If the main detail dialog is open for this inspection, update it too.
+      const openDetailInspection = detailData?.inspection || detailData;
+      if (getInspectionId(openDetailInspection) === inspectionId) {
+        setDetailData(updatedDetail);
+      }
+
+      // Refresh overview count without forcing a full-page loading state.
+      try {
+        const stats = await inspectionApi.getOverviewStatistics();
+        setOverviewStats(stats || {});
+      } catch (statsError) {
+        console.warn('Overview refresh after AI review failed:', statsError);
+      }
+    } catch (err) {
+      console.error(err);
+
+      const message =
+        err?.response?.data?.detail ||
+        'AI Review ထုတ်ပေးရာတွင် မအောင်မြင်ပါ။ ထပ်မံကြိုးစားနိုင်ပါသည်။';
+
+      setError(message);
+
+      // The backend marks failed generations as retryable. Fetch that status
+      // so the dialog immediately changes to the Retry button.
+      try {
+        const failedDetail = await inspectionApi.getInspectionDetail(inspectionId);
+        setAiDialogData(failedDetail);
+      } catch (refreshError) {
+        console.warn('Could not refresh failed AI review status:', refreshError);
+      }
+    } finally {
+      setAiGeneratingId(null);
       setAiDialogLoading(false);
     }
   };
@@ -1679,17 +1788,16 @@ const InspectionDashboard = () => {
                           {advisory?.overall_priority ? (
                             <PriorityBadge priority={advisory.overall_priority} compact />
                           ) : (
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                                status === 'failed'
-                                  ? 'bg-red-50 text-red-700'
-                                  : status === 'processing'
-                                  ? 'bg-amber-50 text-amber-700'
-                                  : 'bg-slate-100 text-slate-500'
-                              }`}
-                            >
-                              {status || 'မထုတ်ပေးရသေး'}
-                            </span>
+                            (() => {
+                              const aiStatus = getAiStatusMeta(status || 'pending');
+                              return (
+                                <span
+                                  className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${aiStatus.classes}`}
+                                >
+                                  {aiStatus.label}
+                                </span>
+                              );
+                            })()
                           )}
                         </td>
 
@@ -1709,11 +1817,28 @@ const InspectionDashboard = () => {
 
                             <button
                               type="button"
-                              onClick={() => handleViewAiResponse(inspectionId)}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
+                              onClick={() => {
+                                if (advisory || status === 'completed') {
+                                  handleViewAiResponse(inspectionId);
+                                } else if (status !== 'processing') {
+                                  handleGenerateAiReview(inspectionId, status === 'failed');
+                                }
+                              }}
+                              disabled={status === 'processing' || aiGeneratingId === inspectionId}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                              <Bot className="h-3.5 w-3.5" />
-                              AI အကြံပြုချက်
+                              {status === 'processing' || aiGeneratingId === inspectionId ? (
+                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Bot className="h-3.5 w-3.5" />
+                              )}
+                              {advisory || status === 'completed'
+                                ? 'AI Review ကြည့်ရန်'
+                                : status === 'failed'
+                                ? 'AI Review ပြန်လုပ်ရန်'
+                                : status === 'processing' || aiGeneratingId === inspectionId
+                                ? 'AI Review ပြုလုပ်နေသည်'
+                                : 'AI Review ဖန်တီးရန်'}
                             </button>
 
                             <button
@@ -1980,7 +2105,13 @@ const InspectionDashboard = () => {
                         )}
 
                         {/* AI advisory */}
-                        <AiAdvisoryPanel inspection={inspection} />
+                        <AiAdvisoryPanel
+                          inspection={inspection}
+                          generating={aiGeneratingId === inspectionId}
+                          onGenerate={() =>
+                            handleGenerateAiReview(inspectionId, getAiStatus(inspection) === 'failed')
+                          }
+                        />
 
                         {/* Map + spatial summary */}
                         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
@@ -2149,7 +2280,7 @@ const InspectionDashboard = () => {
                   <div>
                     <h3 className="font-semibold text-slate-900">AI ထိန်းသိမ်းမှု တုံ့ပြန်ချက်</h3>
                     <p className="mt-0.5 text-xs text-slate-500">
-                      ဤစစ်ဆေးမှုအတွက် သိမ်းဆည်းထားသော Qwen ထိန်းသိမ်းမှု အကြံပြုချက်
+                      ဤစစ်ဆေးမှုအတွက် MongoDB တွင် သိမ်းဆည်းထားသော AI ထိန်းသိမ်းမှု အကြံပြုချက်
                     </p>
                   </div>
                 </div>
@@ -2169,7 +2300,22 @@ const InspectionDashboard = () => {
                     <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-violet-600" />
                   </div>
                 ) : aiDialogData ? (
-                  <AiAdvisoryPanel inspection={aiDialogData?.inspection || aiDialogData} />
+                  (() => {
+                    const inspection = aiDialogData?.inspection || aiDialogData || {};
+                    const inspectionId = getInspectionId(inspection);
+                    return (
+                      <AiAdvisoryPanel
+                        inspection={inspection}
+                        generating={aiGeneratingId === inspectionId}
+                        onGenerate={() =>
+                          handleGenerateAiReview(
+                            inspectionId,
+                            getAiStatus(inspection) === 'failed'
+                          )
+                        }
+                      />
+                    );
+                  })()
                 ) : (
                   <EmptyState
                     title="AI အကြံပြုချက် မရှိပါ"

@@ -1,15 +1,18 @@
 # backend/app/api/inspection.py
 
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import hmac
 import time
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
 import asyncio
+import json
+import mimetypes
 import os
 
 from bson import ObjectId
+from pymongo import ReturnDocument
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import StreamingResponse
@@ -24,6 +27,11 @@ from ..core.config import settings
 from ..core.database import get_db
 from ..core.security import decode_access_token
 from ..models.user import User, UserRole
+from ..services.inspection_ai_review_service import (
+    AI_SPECIAL_VISION_CLASSES,
+    generate_inspection_ai_review,
+    generate_targeted_visual_review,
+)
 
 
 # HTML <video src="..."> requests cannot attach the Axios Authorization
@@ -222,6 +230,14 @@ GOOGLE_DRIVE_OAUTH_TOKEN_FILE = (
     or os.getenv("GOOGLE_DRIVE_OAUTH_TOKEN_FILE")
 )
 
+# Cloud Run-ready option. Put the CONTENTS of the authorized-user token.json
+# in Secret Manager and expose it as this environment variable. Local Windows
+# development may continue using GOOGLE_DRIVE_OAUTH_TOKEN_FILE.
+GOOGLE_DRIVE_OAUTH_TOKEN_JSON = (
+    getattr(settings, "GOOGLE_DRIVE_OAUTH_TOKEN_JSON", None)
+    or os.getenv("GOOGLE_DRIVE_OAUTH_TOKEN_JSON")
+)
+
 GOOGLE_DRIVE_INSPECTION_ROOT_FOLDER_ID = (
     getattr(settings, "GOOGLE_DRIVE_INSPECTION_ROOT_FOLDER_ID", None)
     or os.getenv("GOOGLE_DRIVE_INSPECTION_ROOT_FOLDER_ID")
@@ -312,12 +328,18 @@ def _candidate_video_names(
 
 
 def _save_drive_token(credentials: Credentials) -> None:
+    """Persist refreshed OAuth credentials only for local file-based mode."""
+    if GOOGLE_DRIVE_OAUTH_TOKEN_JSON:
+        # Cloud/Secret-Manager mode is intentionally read-only. The refreshed
+        # access token remains valid in this running instance; the refresh token
+        # from the secret is reused again by a future instance.
+        return
+
     if not GOOGLE_DRIVE_OAUTH_TOKEN_FILE:
         return
 
     token_path = os.path.abspath(GOOGLE_DRIVE_OAUTH_TOKEN_FILE)
     token_dir = os.path.dirname(token_path)
-
     if token_dir:
         os.makedirs(token_dir, exist_ok=True)
 
@@ -326,25 +348,24 @@ def _save_drive_token(credentials: Credentials) -> None:
 
 
 async def _get_drive_access_token() -> str:
-    """
-    Load the previously-authorized Google user token and refresh it when needed.
-
-    The API server never launches an OAuth browser window. If token.json is
-    missing/invalid, run google_drive_authorize.py manually once.
-    """
-
+    """Load/refresh Drive OAuth from Cloud secret JSON or local token file."""
     global _drive_credentials
 
-    if not GOOGLE_DRIVE_OAUTH_TOKEN_FILE:
+    if not GOOGLE_DRIVE_OAUTH_TOKEN_JSON and not GOOGLE_DRIVE_OAUTH_TOKEN_FILE:
         raise HTTPException(
             status_code=503,
             detail=(
-                "Google Drive OAuth is not configured. "
-                "Set GOOGLE_DRIVE_OAUTH_TOKEN_FILE."
+                "Google Drive OAuth is not configured. Set "
+                "GOOGLE_DRIVE_OAUTH_TOKEN_JSON for Cloud Run or "
+                "GOOGLE_DRIVE_OAUTH_TOKEN_FILE for local development."
             ),
         )
 
-    if not os.path.isfile(GOOGLE_DRIVE_OAUTH_TOKEN_FILE):
+    if (
+        not GOOGLE_DRIVE_OAUTH_TOKEN_JSON
+        and GOOGLE_DRIVE_OAUTH_TOKEN_FILE
+        and not os.path.isfile(GOOGLE_DRIVE_OAUTH_TOKEN_FILE)
+    ):
         raise HTTPException(
             status_code=503,
             detail=(
@@ -357,17 +378,21 @@ async def _get_drive_access_token() -> str:
     async with _drive_credentials_lock:
         if _drive_credentials is None:
             try:
-                _drive_credentials = Credentials.from_authorized_user_file(
-                    GOOGLE_DRIVE_OAUTH_TOKEN_FILE,
-                    scopes=[GOOGLE_DRIVE_READ_SCOPE],
-                )
+                if GOOGLE_DRIVE_OAUTH_TOKEN_JSON:
+                    token_info = json.loads(GOOGLE_DRIVE_OAUTH_TOKEN_JSON)
+                    _drive_credentials = Credentials.from_authorized_user_info(
+                        token_info,
+                        scopes=[GOOGLE_DRIVE_READ_SCOPE],
+                    )
+                else:
+                    _drive_credentials = Credentials.from_authorized_user_file(
+                        GOOGLE_DRIVE_OAUTH_TOKEN_FILE,
+                        scopes=[GOOGLE_DRIVE_READ_SCOPE],
+                    )
             except Exception as exc:
                 raise HTTPException(
                     status_code=503,
-                    detail=(
-                        "Failed to load Google Drive OAuth token. "
-                        f"Re-run google_drive_authorize.py. Error: {exc}"
-                    ),
+                    detail=f"Failed to load Google Drive OAuth credentials: {exc}",
                 ) from exc
 
         if not _drive_credentials.valid:
@@ -386,17 +411,13 @@ async def _get_drive_access_token() -> str:
                         status_code=503,
                         detail=(
                             "Failed to refresh Google Drive OAuth credentials. "
-                            "Re-run google_drive_authorize.py if authorization "
-                            f"was revoked. Error: {exc}"
+                            f"Re-authorize if access was revoked. Error: {exc}"
                         ),
                     ) from exc
             else:
                 raise HTTPException(
                     status_code=503,
-                    detail=(
-                        "Google Drive OAuth credentials are no longer usable. "
-                        "Run google_drive_authorize.py again."
-                    ),
+                    detail="Google Drive OAuth credentials are no longer usable.",
                 )
 
         if not _drive_credentials.token:
@@ -453,6 +474,266 @@ async def _drive_list_files(
 
     return response.json().get("files", [])
 
+
+
+def _safe_drive_relative_parts(relative_path: str) -> List[str]:
+    normalized = str(relative_path or "").replace("\\", "/").strip()
+    path = PurePosixPath(normalized)
+    parts = [part for part in path.parts if part not in {"", ".", "/"}]
+
+    if not parts or path.is_absolute() or ".." in parts:
+        raise ValueError(f"Unsafe or empty Drive relative path: {relative_path!r}")
+
+    return parts
+
+
+async def _resolve_drive_relative_file(
+    inspection: Dict[str, Any],
+    relative_path: str,
+    folder_cache: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Resolve inspection_results/<run_id>/<relative_path> to a Drive file."""
+    if not GOOGLE_DRIVE_INSPECTION_ROOT_FOLDER_ID:
+        raise RuntimeError("GOOGLE_DRIVE_INSPECTION_ROOT_FOLDER_ID is not configured.")
+
+    run_id = _extract_run_id_from_inspection(inspection)
+    if not run_id:
+        raise RuntimeError("Could not determine the inspection run folder.")
+
+    cache = folder_cache if folder_cache is not None else {}
+    run_cache_key = f"run:{run_id}"
+    run_folder_id = cache.get(run_cache_key)
+
+    if not run_folder_id:
+        run_folders = await _drive_list_files(
+            parent_id=GOOGLE_DRIVE_INSPECTION_ROOT_FOLDER_ID,
+            name=run_id,
+            mime_type="application/vnd.google-apps.folder",
+        )
+        if not run_folders:
+            raise FileNotFoundError(
+                f"Drive inspection run folder '{run_id}' was not found."
+            )
+        run_folder_id = run_folders[0]["id"]
+        cache[run_cache_key] = run_folder_id
+
+    parts = _safe_drive_relative_parts(relative_path)
+    parent_id = run_folder_id
+
+    for folder_name in parts[:-1]:
+        cache_key = f"{parent_id}/{folder_name}"
+        child_id = cache.get(cache_key)
+        if not child_id:
+            folders = await _drive_list_files(
+                parent_id=parent_id,
+                name=folder_name,
+                mime_type="application/vnd.google-apps.folder",
+            )
+            if not folders:
+                raise FileNotFoundError(
+                    f"Drive evidence folder '{folder_name}' was not found "
+                    f"while resolving '{relative_path}'."
+                )
+            child_id = folders[0]["id"]
+            cache[cache_key] = child_id
+        parent_id = child_id
+
+    matches = await _drive_list_files(
+        parent_id=parent_id,
+        name=parts[-1],
+    )
+    if not matches:
+        raise FileNotFoundError(
+            f"Drive evidence image '{relative_path}' was not found."
+        )
+    return matches[0]
+
+
+async def _download_drive_file_bytes(
+    file_id: str,
+    *,
+    max_bytes: int = 3 * 1024 * 1024,
+) -> Dict[str, Any]:
+    """Download one small evidence image from Drive into memory."""
+    token = await _get_drive_access_token()
+    url = (
+        "https://www.googleapis.com/drive/v3/files/"
+        f"{file_id}?alt=media&supportsAllDrives=true"
+    )
+
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as http_client:
+        response = await http_client.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    if response.status_code != 200:
+        raise RuntimeError(
+            "Failed to download Drive evidence image "
+            f"({response.status_code}): {response.text[:300]}"
+        )
+
+    data = response.content
+    if not data:
+        raise RuntimeError("Drive evidence image was empty.")
+    if len(data) > max_bytes:
+        raise RuntimeError(
+            f"Drive evidence image is too large ({len(data)} bytes)."
+        )
+
+    return {
+        "data": data,
+        "mime_type": response.headers.get("content-type") or "image/jpeg",
+    }
+
+
+async def _load_event_visual_evidence(
+    inspection: Dict[str, Any],
+    event: Dict[str, Any],
+    folder_cache: Optional[Dict[str, str]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    media = event.get("media") or {}
+    context_relpath = media.get("context_relpath")
+    crop_relpath = media.get("crop_relpath")
+
+    if not context_relpath or not crop_relpath:
+        raise FileNotFoundError(
+            "Targeted visual check requires both context_relpath and crop_relpath."
+        )
+
+    context_file = await _resolve_drive_relative_file(
+        inspection,
+        context_relpath,
+        folder_cache,
+    )
+    crop_file = await _resolve_drive_relative_file(
+        inspection,
+        crop_relpath,
+        folder_cache,
+    )
+
+    context_image, crop_image = await asyncio.gather(
+        _download_drive_file_bytes(context_file["id"]),
+        _download_drive_file_bytes(crop_file["id"]),
+    )
+
+    # Google Drive normally returns image/jpeg for these artifacts. Fall back
+    # to the stored filename extension if an upstream proxy reports a generic
+    # content type.
+    for image, relpath in (
+        (context_image, context_relpath),
+        (crop_image, crop_relpath),
+    ):
+        if not str(image.get("mime_type") or "").startswith("image/"):
+            image["mime_type"] = mimetypes.guess_type(str(relpath))[0] or "image/jpeg"
+
+    return {
+        "context": context_image,
+        "crop": crop_image,
+    }
+
+
+async def _run_targeted_visual_checks(
+    inspection: Dict[str, Any],
+    event_docs: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Run image analysis ONLY for Rail Break and Missing Fishplate Bolt."""
+    folder_cache: Dict[str, str] = {}
+    summary = {
+        "eligible_event_count": 0,
+        "reused_existing_count": 0,
+        "performed_count": 0,
+        "failed_count": 0,
+        "positive_fishplate_loose_nut_findings": 0,
+        "rail_break_severity_assessments": 0,
+        "classes_using_images": sorted(AI_SPECIAL_VISION_CLASSES),
+    }
+
+    for event in event_docs:
+        defect_type = event.get("defect_type")
+        if defect_type not in AI_SPECIAL_VISION_CLASSES:
+            continue
+
+        summary["eligible_event_count"] += 1
+        existing = event.get("supplementary_visual_review") or {}
+        if existing.get("performed") is True:
+            summary["reused_existing_count"] += 1
+            if existing.get("findings"):
+                summary["positive_fishplate_loose_nut_findings"] += len(
+                    existing.get("findings") or []
+                )
+            if existing.get("rail_break_visual_severity"):
+                summary["rail_break_severity_assessments"] += 1
+            continue
+
+        try:
+            evidence = await _load_event_visual_evidence(
+                inspection,
+                event,
+                folder_cache,
+            )
+
+            review = await asyncio.to_thread(
+                generate_targeted_visual_review,
+                event,
+                evidence["context"],
+                evidence["crop"],
+            )
+
+            event["supplementary_visual_review"] = review
+            event["supplementary_visual_reviewed_at"] = datetime.now(timezone.utc)
+            summary["performed_count"] += 1
+
+            if review.get("findings"):
+                summary["positive_fishplate_loose_nut_findings"] += len(
+                    review.get("findings") or []
+                )
+            if review.get("rail_break_visual_severity"):
+                summary["rail_break_severity_assessments"] += 1
+
+            raw_event_id = event.get("_id") or event.get("id")
+            if raw_event_id and ObjectId.is_valid(str(raw_event_id)):
+                await inspection_events_collection.update_one(
+                    {"_id": ObjectId(str(raw_event_id))},
+                    {
+                        "$set": {
+                            "supplementary_visual_review": review,
+                            "supplementary_visual_reviewed_at": datetime.now(timezone.utc),
+                        },
+                        "$unset": {"supplementary_visual_review_error": ""},
+                    },
+                )
+
+        except Exception as exc:
+            summary["failed_count"] += 1
+            error_text = f"{type(exc).__name__}: {exc}"[:1000]
+            event["supplementary_visual_review"] = {
+                "review_version": "targeted_visual_check_failed",
+                "performed": False,
+                "scope": (
+                    "rail_break_visual_severity"
+                    if defect_type == "Rail Break"
+                    else "fishplate_nut_visual_check"
+                ),
+                "error": error_text,
+            }
+
+            raw_event_id = event.get("_id") or event.get("id")
+            if raw_event_id and ObjectId.is_valid(str(raw_event_id)):
+                await inspection_events_collection.update_one(
+                    {"_id": ObjectId(str(raw_event_id))},
+                    {
+                        "$set": {
+                            "supplementary_visual_review": event[
+                                "supplementary_visual_review"
+                            ],
+                            "supplementary_visual_review_error": error_text,
+                            "supplementary_visual_reviewed_at": datetime.now(timezone.utc),
+                        }
+                    },
+                )
+
+    return summary
 
 async def _resolve_drive_video(
     inspection: Dict[str, Any],
@@ -767,6 +1048,20 @@ class InspectionDetail(BaseModel):
 
     inspection: Dict[str, Any]
     events: List[InspectionEvent]
+
+
+class AIReviewGenerationResponse(BaseModel):
+    inspection_id: str
+    status: str
+    ai_advisory_version: Optional[str] = None
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    ai_fallback_used: Optional[bool] = None
+    ai_advisory_generated_at: Optional[datetime] = None
+    ai_spatial_summary: Optional[Dict[str, Any]] = None
+    supplementary_visual_summary: Optional[Dict[str, Any]] = None
+    ai_advisory: Optional[Dict[str, Any]] = None
+    message: Optional[str] = None
 
 
 class DefectStatistics(BaseModel):
@@ -1237,6 +1532,269 @@ async def get_inspection_events(
         )
 
     return events
+
+
+@router.post(
+    "/inspections/{inspection_id}/ai-review",
+    response_model=AIReviewGenerationResponse,
+)
+async def generate_inspection_ai_review_endpoint(
+    inspection_id: str,
+    force: bool = Query(False),
+):
+    """
+    Generate the Myanmar-language railway maintenance advisory from the
+    inspection + event data already stored in MongoDB.
+
+    This endpoint does NOT rerun YOLO/RF-DETR and does NOT reopen the videos.
+    It downloads saved event evidence images from Google Drive ONLY for two
+    narrow checks: Rail Break apparent severity and clearly loose/backed-off
+    remaining fishplate nuts on Missing Fishplate Bolt events. Existing
+    Colab/Gradio supplementary visual findings are reused.
+
+    Status flow:
+        pending/failed -> processing -> completed
+        processing     -> HTTP 409
+        completed      -> return existing advisory unless force=true
+    """
+
+    if not ObjectId.is_valid(inspection_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid inspection ID",
+        )
+
+    object_id = ObjectId(inspection_id)
+
+    inspection = await inspections_collection.find_one(
+        {"_id": object_id}
+    )
+
+    if not inspection:
+        raise HTTPException(
+            status_code=404,
+            detail="Inspection not found",
+        )
+
+    current_status = inspection.get("ai_advisory_status")
+    existing_advisory = inspection.get("ai_advisory")
+
+    if (
+        current_status == "completed"
+        and isinstance(existing_advisory, dict)
+        and existing_advisory
+        and not force
+    ):
+        return AIReviewGenerationResponse(
+            inspection_id=inspection_id,
+            status="completed",
+            ai_advisory_version=inspection.get("ai_advisory_version"),
+            ai_provider=inspection.get("ai_provider"),
+            ai_model=inspection.get("ai_model"),
+            ai_fallback_used=inspection.get("ai_fallback_used"),
+            ai_advisory_generated_at=inspection.get(
+                "ai_advisory_generated_at"
+            ),
+            ai_spatial_summary=serialize_mongo_value(
+                inspection.get("ai_spatial_summary") or {}
+            ),
+            supplementary_visual_summary=serialize_mongo_value(
+                inspection.get("supplementary_visual_summary") or {}
+            ),
+            ai_advisory=serialize_mongo_value(existing_advisory),
+            message="AI review already exists.",
+        )
+
+    if current_status == "processing":
+        raise HTTPException(
+            status_code=409,
+            detail="AI review generation is already in progress.",
+        )
+
+    # Atomically claim this inspection so two Admin clicks cannot start two
+    # LLM generations at the same time.
+    claim_filter: Dict[str, Any] = {
+        "_id": object_id,
+        "ai_advisory_status": {"$ne": "processing"},
+    }
+
+    if not force:
+        claim_filter["$or"] = [
+            {"ai_advisory_status": {"$exists": False}},
+            {"ai_advisory_status": None},
+            {"ai_advisory_status": "pending"},
+            {"ai_advisory_status": "failed"},
+        ]
+
+    started_at = datetime.now(timezone.utc)
+
+    claimed = await inspections_collection.find_one_and_update(
+        claim_filter,
+        {
+            "$set": {
+                "ai_advisory_status": "processing",
+                "ai_advisory_started_at": started_at,
+            },
+            "$unset": {
+                "ai_advisory_error": "",
+            },
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+
+    if not claimed:
+        latest = await inspections_collection.find_one(
+            {"_id": object_id}
+        )
+        latest_status = (latest or {}).get("ai_advisory_status")
+
+        if latest_status == "processing":
+            raise HTTPException(
+                status_code=409,
+                detail="AI review generation is already in progress.",
+            )
+
+        if latest_status == "completed" and not force:
+            latest_advisory = (latest or {}).get("ai_advisory") or {}
+            return AIReviewGenerationResponse(
+                inspection_id=inspection_id,
+                status="completed",
+                ai_advisory_version=(latest or {}).get(
+                    "ai_advisory_version"
+                ),
+                ai_provider=(latest or {}).get("ai_provider"),
+                ai_model=(latest or {}).get("ai_model"),
+                ai_fallback_used=(latest or {}).get(
+                    "ai_fallback_used"
+                ),
+                ai_advisory_generated_at=(latest or {}).get(
+                    "ai_advisory_generated_at"
+                ),
+                ai_spatial_summary=serialize_mongo_value(
+                    (latest or {}).get("ai_spatial_summary") or {}
+                ),
+                supplementary_visual_summary=serialize_mongo_value(
+                    (latest or {}).get("supplementary_visual_summary") or {}
+                ),
+                ai_advisory=serialize_mongo_value(latest_advisory),
+                message="AI review already exists.",
+            )
+
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Inspection could not be claimed for AI review generation. "
+                f"Current status: {latest_status or 'unknown'}"
+            ),
+        )
+
+    try:
+        event_docs: List[Dict[str, Any]] = []
+        cursor = (
+            inspection_events_collection
+            .find({"inspection_id": inspection_id})
+            .sort([
+                ("rail_side", 1),
+                ("start_timestamp", 1),
+            ])
+        )
+
+        async for event_doc in cursor:
+            event_docs.append(
+                serialize_mongo_value(dict(event_doc))
+            )
+
+        inspection_for_ai = serialize_mongo_value(dict(claimed))
+        inspection_for_ai["id"] = inspection_id
+        inspection_for_ai.pop("_id", None)
+
+        # ------------------------------------------------------------
+        # TARGETED IMAGE ANALYSIS ONLY
+        # ------------------------------------------------------------
+        # Images are downloaded/sent to the LLM ONLY for:
+        #   - Rail Break -> apparent visual severity
+        #   - Missing Fishplate Bolt -> clearly loose/backed-off remaining nut
+        # All other classes remain data/text-only.
+        # Existing Colab/Gradio supplementary reviews are reused.
+        supplementary_visual_summary = await _run_targeted_visual_checks(
+            inspection_for_ai,
+            event_docs,
+        )
+
+        # The whole-inspection maintenance advisory is text-only. It receives
+        # only positive/high-confidence targeted findings through event_docs.
+        # google-genai and groq SDK calls are synchronous, so run this final
+        # advisory call in a worker thread.
+        ai_result = await asyncio.to_thread(
+            generate_inspection_ai_review,
+            inspection_for_ai,
+            event_docs,
+        )
+
+        generated_at = datetime.now(timezone.utc)
+        advisory = ai_result["overall_advisory"]
+        spatial_summary = ai_result["spatial_summary"]
+
+        await inspections_collection.update_one(
+            {"_id": object_id},
+            {
+                "$set": {
+                    "ai_advisory_status": "completed",
+                    "ai_advisory_version": ai_result["version"],
+                    "ai_provider": ai_result["provider"],
+                    "ai_model": ai_result["model"],
+                    "ai_fallback_used": ai_result["fallback_used"],
+                    "ai_execution": ai_result["execution"],
+                    "ai_spatial_summary": spatial_summary,
+                    "supplementary_visual_summary": supplementary_visual_summary,
+                    "ai_advisory": advisory,
+                    "ai_advisory_generated_at": generated_at,
+                },
+                "$unset": {
+                    "ai_advisory_error": "",
+                    "ai_review_status": "",
+                },
+            },
+        )
+
+        return AIReviewGenerationResponse(
+            inspection_id=inspection_id,
+            status="completed",
+            ai_advisory_version=ai_result["version"],
+            ai_provider=ai_result["provider"],
+            ai_model=ai_result["model"],
+            ai_fallback_used=ai_result["fallback_used"],
+            ai_advisory_generated_at=generated_at,
+            ai_spatial_summary=spatial_summary,
+            supplementary_visual_summary=supplementary_visual_summary,
+            ai_advisory=advisory,
+            message="Myanmar-language AI maintenance review generated.",
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        error_text = f"{type(exc).__name__}: {exc}"
+
+        await inspections_collection.update_one(
+            {"_id": object_id},
+            {
+                "$set": {
+                    "ai_advisory_status": "failed",
+                    "ai_advisory_error": error_text[:1500],
+                    "ai_advisory_failed_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "AI review generation failed. The inspection was marked "
+                f"as retryable 'failed'. Error: {error_text[:500]}"
+            ),
+        ) from exc
 
 
 @router.get(
