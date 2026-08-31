@@ -718,6 +718,14 @@ async def _run_targeted_visual_checks(
         if existing.get("performed") is True:
             summary["reused_existing_count"] += 1
 
+            print(
+                "AI VISION REUSE | "
+                f"event_id={event.get('_id') or event.get('id')} | "
+                f"class={defect_type} | "
+                f"provider={existing.get('provider')} | "
+                f"model={existing.get('model')}"
+            )
+
             if existing.get("findings"):
                 summary["positive_fishplate_loose_nut_findings"] += len(
                     existing.get("findings") or []
@@ -733,11 +741,15 @@ async def _run_targeted_visual_checks(
     pending_total = len(pending_events)
     started = time.perf_counter()
 
+    skipped_count = len(event_docs) - summary["eligible_event_count"]
     print(
-        "AI targeted visual checks: "
-        f"eligible={summary['eligible_event_count']}, "
-        f"reused={summary['reused_existing_count']}, "
-        f"pending={pending_total}, "
+        "AI VISION FILTER | "
+        f"total_events={len(event_docs)} | "
+        f"eligible={summary['eligible_event_count']} | "
+        f"skipped_non_visual={skipped_count} | "
+        f"reused={summary['reused_existing_count']} | "
+        f"pending={pending_total} | "
+        f"allowed_classes={sorted(AI_SPECIAL_VISION_CLASSES)} | "
         f"concurrency={visual_concurrency}"
     )
 
@@ -757,11 +769,51 @@ async def _run_targeted_visual_checks(
                     folder_cache,
                 )
 
+                media = event.get("media") or {}
+                context_data = evidence["context"].get("data") or b""
+                crop_data = evidence["crop"].get("data") or b""
+
+                # Safe audit log: proves which event/class reached the visual
+                # pipeline and that both image payloads are non-empty.
+                # Never log image bytes or base64 content.
+                print(
+                    "AI VISION INPUT READY | "
+                    f"event_id={raw_event_id} | "
+                    f"class={defect_type} | "
+                    f"context_relpath={media.get('context_relpath')} | "
+                    f"crop_relpath={media.get('crop_relpath')} | "
+                    f"context_bytes={len(context_data)} | "
+                    f"crop_bytes={len(crop_data)} | "
+                    f"context_mime={evidence['context'].get('mime_type')} | "
+                    f"crop_mime={evidence['crop'].get('mime_type')}"
+                )
+
+                # This is immediately before generate_targeted_visual_review().
+                # That service function contains a second class allow-list check
+                # and sends the context + crop image bytes to Gemini (or fallback).
+                print(
+                    "AI VISION CALL START | "
+                    f"event_id={raw_event_id} | "
+                    f"class={defect_type} | "
+                    f"two_images_present={bool(context_data and crop_data)}"
+                )
+
                 review = await asyncio.to_thread(
                     generate_targeted_visual_review,
                     event,
                     evidence["context"],
                     evidence["crop"],
+                )
+
+                print(
+                    "AI VISION RESULT | "
+                    f"event_id={raw_event_id} | "
+                    f"class={defect_type} | "
+                    f"performed={review.get('performed')} | "
+                    f"provider={review.get('provider')} | "
+                    f"model={review.get('model')} | "
+                    f"scope={review.get('scope')} | "
+                    f"fallback_used={review.get('fallback_used')}"
                 )
 
                 reviewed_at = datetime.now(timezone.utc)
@@ -784,7 +836,7 @@ async def _run_targeted_visual_checks(
 
                 elapsed = round(time.perf_counter() - event_started, 2)
                 print(
-                    "AI targeted visual check completed: "
+                    "AI VISION EVENT COMPLETE | "
                     f"{index}/{pending_total}, "
                     f"class={defect_type}, "
                     f"elapsed={elapsed}s"
@@ -833,7 +885,7 @@ async def _run_targeted_visual_checks(
 
                 elapsed = round(time.perf_counter() - event_started, 2)
                 print(
-                    "AI targeted visual check failed: "
+                    "AI VISION FAILED | "
                     f"{index}/{pending_total}, "
                     f"class={defect_type}, "
                     f"elapsed={elapsed}s, "
@@ -871,7 +923,7 @@ async def _run_targeted_visual_checks(
     )
 
     print(
-        "AI targeted visual checks finished: "
+        "AI VISION SUMMARY | "
         f"performed={summary['performed_count']}, "
         f"failed={summary['failed_count']}, "
         f"elapsed={summary['visual_check_elapsed_seconds']}s"
