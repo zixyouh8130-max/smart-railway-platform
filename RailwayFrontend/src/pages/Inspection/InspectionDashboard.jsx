@@ -44,7 +44,6 @@ import {
   Marker,
   Popup,
   Polyline,
-  CircleMarker,
   useMap,
 } from 'react-leaflet';
 import L from 'leaflet';
@@ -123,7 +122,7 @@ const AI_STATUS_META = {
     classes: 'bg-slate-100 text-slate-600 border-slate-200',
   },
   processing: {
-    label: 'AI Review ပြုလုပ်နေသည်',
+    label: 'Review ပြုလုပ်နေသည်',
     classes: 'bg-amber-50 text-amber-700 border-amber-200',
   },
   completed: {
@@ -436,26 +435,79 @@ const getRoutePolyline = (route) => {
 // Leaflet components
 // -----------------------------------------------------------------------------
 
-function FitBounds({ positions }) {
+function FitBounds({ positions, enabled = true }) {
   const map = useMap();
 
   useEffect(() => {
-    if (!positions?.length) return;
+    if (!enabled || !positions?.length) return;
+
     const bounds = L.latLngBounds(positions);
     if (bounds.isValid()) {
       map.fitBounds(bounds, {
         padding: [40, 40],
-        maxZoom: 18,
+        maxZoom: 17,
       });
     }
-  }, [map, positions]);
+  }, [enabled, map, positions]);
+
+  return null;
+}
+
+function SelectedDefectFocus({ event }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!event) return;
+
+    const coords = getEventCoordinates(event);
+    if (!coords) return;
+
+    map.flyTo([coords.latitude, coords.longitude], 18, {
+      duration: 0.8,
+      easeLinearity: 0.25,
+    });
+  }, [event, map]);
 
   return null;
 }
 
 const createDefectIcon = (defectType, isSelected = false) => {
   const meta = getDefectMeta(defectType);
-  const size = isSelected ? 34 : 28;
+
+  if (isSelected) {
+    const size = 40;
+
+    return L.divIcon({
+      className: 'custom-defect-marker',
+      html: `
+        <div style="position:relative; width:${size}px; height:${size + 12}px; display:flex; align-items:flex-start; justify-content:center; overflow:visible;">
+          <style>
+            @keyframes defectJump {
+              0%, 100% { transform: translateY(0) scale(1); }
+              50% { transform: translateY(-8px) scale(1.08); }
+            }
+          </style>
+          <div style="
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-size:${size}px;
+            line-height:1;
+            filter: drop-shadow(0 8px 14px rgba(15,23,42,.28));
+            animation:defectJump 1s ease-in-out infinite;
+            transform-origin:center bottom;
+          ">
+            🔻
+          </div>
+        </div>
+      `,
+      iconSize: [size, size + 12],
+      iconAnchor: [size / 2, size + 2],
+      popupAnchor: [0, -(size + 2)],
+    });
+  }
+
+  const size = 28;
 
   return L.divIcon({
     className: 'custom-defect-marker',
@@ -471,7 +523,6 @@ const createDefectIcon = (defectType, isSelected = false) => {
         align-items:center;
         justify-content:center;
         font-size:${Math.round(size * 0.48)}px;
-        transform:${isSelected ? 'scale(1.12)' : 'scale(1)'};
       ">
         ${meta.icon}
       </div>
@@ -488,45 +539,56 @@ function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
     [events]
   );
 
+  const selectedEvent = useMemo(
+    () =>
+      validEvents.find((event, index) => getEventId(event, index) === selectedEventId) ||
+      null,
+    [selectedEventId, validEvents]
+  );
+
   const routePolyline = useMemo(() => getRoutePolyline(route), [route]);
 
-  const allPositions = useMemo(() => {
-    const positions = validEvents
+  const routePositions = useMemo(() => {
+    if (routePolyline.length) return routePolyline;
+
+    const gpsPositions = validEvents
       .map((event) => {
         const coords = getEventCoordinates(event);
         return coords ? [coords.latitude, coords.longitude] : null;
       })
       .filter(Boolean);
-    routePolyline.forEach((point) => positions.push(point));
-    return positions;
-  }, [validEvents, routePolyline]);
+
+    return gpsPositions;
+  }, [routePolyline, validEvents]);
 
   const center = useMemo(() => {
-    if (!allPositions.length) return [16.8409, 96.1735];
-    const latitude = allPositions.reduce((sum, point) => sum + point[0], 0) / allPositions.length;
-    const longitude = allPositions.reduce((sum, point) => sum + point[1], 0) / allPositions.length;
+    if (!routePositions.length) return [16.8409, 96.1735];
+
+    const latitude =
+      routePositions.reduce((sum, point) => sum + point[0], 0) /
+      routePositions.length;
+    const longitude =
+      routePositions.reduce((sum, point) => sum + point[1], 0) /
+      routePositions.length;
+
     return [latitude, longitude];
-  }, [allPositions]);
+  }, [routePositions]);
 
-  const defectTypes = useMemo(() => {
-    return validEvents.reduce((acc, event) => {
-      const type = event?.defect_type || 'Unknown';
-      acc[type] = (acc[type] || 0) + 1;
-      return acc;
-    }, {});
-  }, [validEvents]);
-
-  if (!allPositions.length) {
+  if (!routePositions.length && !selectedEvent) {
     return (
       <div className="flex h-full min-h-[360px] flex-col items-center justify-center rounded-xl bg-slate-50">
         <MapPin className="mb-3 h-10 w-10 text-slate-300" />
         <p className="font-medium text-slate-600">GPS ဒေတာ မရှိပါ</p>
-        <p className="mt-1 text-sm text-slate-400">
-          ချို့ယွင်းချက်များကို မြေပုံပေါ်တွင် ပြသရန် တည်နေရာ လိုအပ်ပါသည်။
+        <p className="mt-1 max-w-sm px-4 text-center text-sm text-slate-400">
+          ချို့ယွင်းချက်တစ်ခုကို ရွေးချယ်ပါက ၎င်း၏တည်နေရာကို မြေပုံပေါ်တွင် ပြသပါမည်။
         </p>
       </div>
     );
   }
+
+  const selectedCoords = selectedEvent
+    ? getEventCoordinates(selectedEvent)
+    : null;
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl">
@@ -546,126 +608,260 @@ function DefectMap({ events, selectedEventId, onMarkerClick, route }) {
             positions={routePolyline}
             pathOptions={{
               color: '#2563EB',
-              weight: 4,
-              opacity: 0.8,
+              weight: 5,
+              opacity: 0.75,
             }}
           />
         )}
 
-        {route?.start?.latitude != null && route?.start?.longitude != null && (
-          <CircleMarker
-            center={[Number(route.start.latitude), Number(route.start.longitude)]}
-            radius={7}
-            pathOptions={{
-              color: '#059669',
-              fillColor: '#10B981',
-              fillOpacity: 1,
-              weight: 2,
+        {selectedEvent && selectedCoords && (
+          <Marker
+            position={[selectedCoords.latitude, selectedCoords.longitude]}
+            icon={createDefectIcon(selectedEvent.defect_type, true)}
+            eventHandlers={{
+              click: () => onMarkerClick(selectedEventId),
             }}
           >
             <Popup>
-              <strong>စတင်ရာ</strong>
-            </Popup>
-          </CircleMarker>
-        )}
+              <div className="min-w-[235px] p-1">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="text-xl">
+                    {getDefectMeta(selectedEvent.defect_type).icon}
+                  </span>
+                  <strong>{selectedEvent.defect_type || 'ချို့ယွင်းချက်'}</strong>
+                </div>
 
-        {route?.end?.latitude != null && route?.end?.longitude != null && (
-          <CircleMarker
-            center={[Number(route.end.latitude), Number(route.end.longitude)]}
-            radius={7}
-            pathOptions={{
-              color: '#B91C1C',
-              fillColor: '#EF4444',
-              fillOpacity: 1,
-              weight: 2,
-            }}
-          >
-            <Popup>
-              <strong>အဆုံးသတ်</strong>
-            </Popup>
-          </CircleMarker>
-        )}
-
-        {validEvents.map((event, index) => {
-          const coords = getEventCoordinates(event);
-          const eventId = getEventId(event, index);
-          const isSelected = eventId === selectedEventId;
-
-          return (
-            <Marker
-              key={eventId}
-              position={[coords.latitude, coords.longitude]}
-              icon={createDefectIcon(event.defect_type, isSelected)}
-              eventHandlers={{
-                click: () => onMarkerClick(eventId),
-              }}
-            >
-              <Popup>
-                <div className="min-w-[220px] p-1">
-                  <div className="mb-2 flex items-center gap-2">
-                    <span className="text-lg">{getDefectMeta(event.defect_type).icon}</span>
-                    <strong>{event.defect_type}</strong>
+                <div className="space-y-1.5 text-sm">
+                  <div>
+                    <span className="text-gray-500">သံလမ်း: </span>
+                    <span className="font-medium">
+                      {selectedEvent?.rail_side?.toUpperCase?.() || 'N/A'}
+                    </span>
                   </div>
-                  <div className="space-y-1 text-sm">
-                    <div>
-                      <span className="text-gray-500">သံလမ်း: </span>
-                      <span className="font-medium">
-                        {event?.rail_side?.toUpperCase?.() || 'N/A'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">အတည်ပြုနှုန်း: </span>
-                      <span className="font-medium">
-                        {formatConfidence(event?.confidence)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">အကွာအဝေး: </span>
-                      <span className="font-medium">
-                        {formatDistance(getEventRouteDistance(event))}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">အချိန်: </span>
-                      <span className="font-medium">
-                        {asNumber(event?.start_timestamp, 0).toFixed(1)}s
-                      </span>
-                    </div>
+                  <div>
+                    <span className="text-gray-500">အကွာအဝေး: </span>
+                    <span className="font-medium">
+                      {formatDistance(getEventRouteDistance(selectedEvent))}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">အတည်ပြုနှုန်း: </span>
+                    <span className="font-medium">
+                      {formatConfidence(selectedEvent.confidence)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">အချိန်: </span>
+                    <span className="font-medium">
+                      {asNumber(selectedEvent.start_timestamp, 0).toFixed(1)}s
+                    </span>
                   </div>
                 </div>
-              </Popup>
-            </Marker>
-          );
-        })}
+              </div>
+            </Popup>
+          </Marker>
+        )}
 
-        <FitBounds positions={allPositions} />
+        {!selectedEvent && routePositions.length > 0 && (
+          <FitBounds positions={routePositions} />
+        )}
+
+        {selectedEvent && <SelectedDefectFocus event={selectedEvent} />}
       </MapContainer>
 
-      <div className="absolute bottom-4 right-4 z-[1000] max-w-[220px] rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          ချို့ယွင်းချက်များ
-        </p>
-        <div className="space-y-1.5">
-          {Object.entries(defectTypes).map(([type, count]) => {
-            const meta = getDefectMeta(type);
-            return (
-              <div key={type} className="flex items-center gap-2 text-xs">
-                <span
-                  className="h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: meta.color }}
-                />
-                <span className="flex-1 truncate text-slate-700">{type}</span>
-                <span className="font-medium text-slate-500">{count}</span>
-              </div>
-            );
-          })}
-        </div>
+      <div className="absolute left-4 top-4 z-[1000] max-w-[280px] rounded-xl border border-slate-200 bg-white/95 px-3 py-2.5 shadow-lg backdrop-blur">
+        {selectedEvent ? (
+          <div className="flex items-center gap-2">
+            <span className="text-lg">
+              {getDefectMeta(selectedEvent.defect_type).icon}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-slate-900">
+                {selectedEvent.defect_type || 'ချို့ယွင်းချက်'}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {formatDistance(getEventRouteDistance(selectedEvent))} ·{' '}
+                {String(selectedEvent.rail_side || 'N/A').toUpperCase()} သံလမ်း
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
+            <MapPin className="h-4 w-4 text-blue-600" />
+            ချို့ယွင်းချက်တစ်ခုကို ရွေးချယ်ပါ
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// -----------------------------------------------------------------------------
+function RailDefectList({ side, events, selectedEventId, onSelect }) {
+  const sideEvents = useMemo(() => {
+    return events
+      .map((event, index) => ({
+        event,
+        index,
+        eventId: getEventId(event, index),
+        distance: asNumber(getEventRouteDistance(event), null),
+      }))
+      .filter(
+        ({ event }) => String(event?.rail_side || '').toLowerCase() === side
+      )
+      .sort((a, b) => {
+        if (a.distance === null && b.distance === null) return 0;
+        if (a.distance === null) return 1;
+        if (b.distance === null) return -1;
+        return a.distance - b.distance;
+      });
+  }, [events, side]);
+
+  const railLabel = side === 'left' ? 'ဘယ်သံလမ်း' : 'ညာသံလမ်း';
+  const isLeft = side === 'left';
+  const accentText = isLeft ? 'text-blue-600' : 'text-violet-600';
+  const accentBg = isLeft ? 'bg-blue-50' : 'bg-violet-50';
+  const timelineColor = isLeft ? '#93C5FD' : '#C4B5FD';
+
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      {/* Header stays visible while the event list scrolls */}
+      <div className="shrink-0 border-b border-slate-100 bg-white px-3 py-3">
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <div
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${accentBg}`}
+            >
+              <Route className={`h-4 w-4 ${accentText}`} />
+            </div>
+
+            <div className="min-w-0">
+              <h4 className="truncate text-sm font-semibold text-slate-900">
+                {railLabel}
+              </h4>
+              <p className="truncate text-[10px] text-slate-400">
+                အကွာအဝေးအလိုက် စီထားသည်
+              </p>
+            </div>
+          </div>
+
+          <span className="flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 px-2 text-[11px] font-semibold text-slate-600">
+            {sideEvents.length}
+          </span>
+        </div>
+      </div>
+
+      {/*
+        IMPORTANT: use normal document flow for events.
+        The previous version absolutely positioned every item by route distance.
+        With 40-60+ defects that caused cards to overlap and become almost invisible.
+      */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-2 py-2 [scrollbar-gutter:stable]">
+        {sideEvents.length ? (
+          <div className="relative min-w-0 pb-2">
+            <div
+              className="pointer-events-none absolute bottom-4 left-[57px] top-4 w-px"
+              style={{ backgroundColor: timelineColor }}
+            />
+
+            <div className="relative space-y-1.5">
+              {sideEvents.map(({ event, eventId, distance }) => {
+                const meta = getDefectMeta(event?.defect_type);
+                const selected = selectedEventId === eventId;
+
+                return (
+                  <button
+                    key={eventId}
+                    id={`event-${eventId}`}
+                    type="button"
+                    onClick={() => onSelect(eventId)}
+                    className={`group relative grid w-full min-w-0 grid-cols-[46px_24px_minmax(0,1fr)] items-center gap-1.5 rounded-xl px-1.5 py-2 text-left transition-all duration-150 ${
+                      selected
+                        ? 'bg-blue-50/80 shadow-sm ring-1 ring-blue-200'
+                        : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    {/* Distance */}
+                    <div className="min-w-0 text-right">
+                      <p className="truncate text-[9px] font-bold leading-none text-slate-600">
+                        {distance === null ? '—' : distance.toFixed(2)}
+                      </p>
+                      <p className="mt-1 text-[8px] leading-none text-slate-400">
+                        မီတာ
+                      </p>
+                    </div>
+
+                    {/* Timeline marker */}
+                    <span
+                      className="relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-white bg-white shadow-sm"
+                      style={{
+                        boxShadow: selected
+                          ? `0 0 0 3px ${meta.color}30, 0 2px 5px rgba(15,23,42,.15)`
+                          : '0 1px 4px rgba(15,23,42,.14)',
+                      }}
+                    >
+                      <span
+                        className="inline-block h-0 w-0"
+                        style={{
+                          borderLeft: '5px solid transparent',
+                          borderRight: '5px solid transparent',
+                          borderTop: `8px solid ${meta.color}`,
+                        }}
+                      />
+                    </span>
+
+                    {/* Event details */}
+                    <div className="min-w-0 overflow-hidden pl-0.5">
+                      <p
+                        className="truncate text-[10px] font-semibold leading-4 text-slate-800"
+                        title={event?.defect_type || 'ချို့ယွင်းချက်'}
+                      >
+                        {event?.defect_type || 'ချို့ယွင်းချက်'}
+                      </p>
+
+                      <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                        <span
+                          className="truncate rounded-full px-1.5 py-0.5 text-[8px] font-semibold"
+                          style={{
+                            backgroundColor: `${meta.color}12`,
+                            color: meta.color,
+                          }}
+                        >
+                          {formatConfidence(event?.confidence)}
+                        </span>
+                        <span className="shrink-0 text-[8px] text-slate-400">
+                          {asNumber(event?.start_timestamp, 0).toFixed(1)}s
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-full min-h-[220px] flex-col items-center justify-center px-3 text-center">
+            <Route className="mb-2 h-7 w-7 text-slate-300" />
+            <p className="text-xs font-medium text-slate-500">
+              ချို့ယွင်းချက် မရှိပါ
+            </p>
+            <p className="mt-1 text-[11px] text-slate-400">
+              {railLabel} တွင် မတွေ့ရှိပါ။
+            </p>
+          </div>
+        )}
+      </div>
+
+      {sideEvents.length > 0 && (
+        <div className="shrink-0 border-t border-slate-100 bg-white px-3 py-2 text-center">
+          <span className="text-[9px] font-medium text-slate-400">
+            အောက်သို့ scroll လုပ်၍ ဆက်လက်ကြည့်နိုင်သည်
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Small UI components
 // -----------------------------------------------------------------------------
 
@@ -748,10 +944,7 @@ function AiAdvisoryPanel({ inspection, onGenerate, generating = false }) {
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h4 className="font-semibold text-slate-900">AI ထိန်းသိမ်းမှု အကြံပြုချက်</h4>
-                <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500">
-                  Data-only · No image LLM
-                </span>
+                <h4 className="font-semibold text-slate-900">ထိန်းသိမ်းမှု အကြံပြုချက်</h4>
                 <span
                   className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusMeta.classes}`}
                 >
@@ -760,10 +953,10 @@ function AiAdvisoryPanel({ inspection, onGenerate, generating = false }) {
               </div>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
                 {isFailed
-                  ? 'ယခင် AI Review ထုတ်ပေးမှု မအောင်မြင်ခဲ့ပါ။ MongoDB တွင် စစ်ဆေးမှုဒေတာများ ဆက်လက်ရှိနေသောကြောင့် ထပ်မံကြိုးစားနိုင်ပါသည်။'
+                  ? 'ယခင် Review ထုတ်ပေးမှု မအောင်မြင်ခဲ့ပါ။ MongoDB တွင် စစ်ဆေးမှုဒေတာများ ဆက်လက်ရှိနေသောကြောင့် ထပ်မံကြိုးစားနိုင်ပါသည်။'
                   : isProcessing
-                  ? 'Database ရှိ ချို့ယွင်းချက်၊ confidence၊ rail side နှင့် GPS/route ဒေတာများကိုသာ အသုံးပြု၍ AI ပြုပြင်ထိန်းသိမ်းရေး သုံးသပ်ချက်ကို ပြုလုပ်နေပါသည်။ ပုံများကို LLM သို့ မပို့ပါ။'
-                  : 'ဤစစ်ဆေးမှုအတွက် AI Review မထုတ်ပေးရသေးပါ။ MongoDB ရှိ ချို့ယွင်းချက်၊ confidence၊ rail side နှင့် GPS/route ဒေတာများကိုသာ အသုံးပြုမည်ဖြစ်ပြီး ပုံများကို LLM သို့ မပို့ပါ။'}
+                  ? 'MongoDB ရှိ ချို့ယွင်းချက်အမျိုးအစား၊ confidence၊ rail side နှင့် GPS/route ဒေတာများကိုသာ အသုံးပြု၍ ပြုပြင်ထိန်းသိမ်းရေး Review ကို ပြုလုပ်နေပါသည်။ ပုံများကို LLM သို့ မပို့ပါ။'
+                  : 'ဤစစ်ဆေးမှုအတွက် Review မထုတ်ပေးရသေးပါ။ MongoDB ရှိ ချို့ယွင်းချက်အမျိုးအစား၊ confidence၊ rail side နှင့် GPS/route ဒေတာများကိုသာ အသုံးပြု၍ Review ထုတ်ပေးပါမည်။ ပုံများကို LLM သို့ မပို့ပါ။'}
               </p>
             </div>
           </div>
@@ -777,10 +970,10 @@ function AiAdvisoryPanel({ inspection, onGenerate, generating = false }) {
             >
               <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
               {isProcessing
-                ? 'AI Review ပြုလုပ်နေသည်...'
+                ? 'Review ပြုလုပ်နေသည်...'
                 : isFailed
-                ? 'AI Review ပြန်လည်ဖန်တီးရန်'
-                : 'AI Review ဖန်တီးရန်'}
+                ? 'Review ပြန်လည်ဖန်တီးရန်'
+                : 'Review ဖန်တီးရန်'}
             </button>
           )}
         </div>
@@ -807,12 +1000,15 @@ function AiAdvisoryPanel({ inspection, onGenerate, generating = false }) {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h4 className="text-lg font-semibold text-slate-900">
-                  AI ရထားလမ်း ထိန်းသိမ်းမှု အကြံပြုချက်
+                 ရထားလမ်း ထိန်းသိမ်းမှု အကြံပြုချက်
                 </h4>
+                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+                  Data-only · No image LLM
+                </span>
                 <PriorityBadge priority={advisory?.overall_priority} />
               </div>
               <p className="mt-1 text-sm text-slate-500">
-                ချို့ယွင်းချက်အမျိုးအစား၊ တည်နေရာ၊ ပြုပြင်ထိန်းသိမ်းမှု အရေးပါမှုတို့ကို ခွဲခြမ်းစိတ်ဖြာထားသည်။
+                Database ရှိ ချို့ယွင်းချက်အမျိုးအစား၊ confidence၊ rail side၊ GPS/route တည်နေရာနှင့် event ဒေတာများကို ခွဲခြမ်းစိတ်ဖြာထားသည်။
               </p>
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
                 {model && <span>မော်ဒယ်: {model}</span>}
@@ -1089,9 +1285,10 @@ function AiAdvisoryPanel({ inspection, onGenerate, generating = false }) {
         )}
 
         <div className="border-t border-slate-100 pt-4 text-xs leading-5 text-slate-400">
-          AI မှ ထုတ်ပေးသော ထိန်းသိမ်းမှုအကြံပြုချက်။ နောက်ဆုံးပြုပြင်ထိန်းသိမ်းမှု ဆုံးဖြတ်ချက်များကို
-          အရည်အချင်းပြည့်မီသော ရထားလမ်းဝန်ထမ်းများနှင့် သက်ဆိုင်ရာ ရထားလမ်းထိန်းသိမ်းမှုစံနှုန်းများဖြင့်
-          အတည်ပြုသင့်သည်။
+          ဤ Review သည် Database ရှိ detector/event/GPS/route ဒေတာများကိုသာ အသုံးပြုထားပြီး
+          event ပုံများကို LLM သို့ ပေးပို့၍ ထပ်မံစစ်ဆေးခြင်း မပြုလုပ်ပါ။
+          နောက်ဆုံးပြုပြင်ထိန်းသိမ်းမှု ဆုံးဖြတ်ချက်များကို အရည်အချင်းပြည့်မီသော
+          ရထားလမ်းဝန်ထမ်းများနှင့် သက်ဆိုင်ရာ ရထားလမ်းထိန်းသိမ်းမှုစံနှုန်းများဖြင့် အတည်ပြုသင့်သည်။
         </div>
       </div>
     </section>
@@ -1158,7 +1355,11 @@ function EventCard({ event, index, selected, onSelect }) {
           {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
         </div>
       )}
-
+              {finding.description}
+            </div>
+          ))}
+        </div>
+      )}
     </button>
   );
 }
@@ -1271,7 +1472,7 @@ const InspectionDashboard = () => {
       setAiDialogData(data);
     } catch (err) {
       console.error(err);
-      setError('AI အကြံပြုချက် ရယူရာတွင် မအောင်မြင်ပါ။');
+      setError('အကြံပြုချက် ရယူရာတွင် မအောင်မြင်ပါ။');
     } finally {
       setAiDialogLoading(false);
     }
@@ -1290,7 +1491,7 @@ const InspectionDashboard = () => {
       const before = await inspectionApi.getInspectionDetail(inspectionId);
       setAiDialogData(before);
 
-      // The LLM call happens in FastAPI, never in the browser.
+      // The data-only maintenance-advisory LLM call happens in FastAPI, never in the browser.
       await inspectionApi.generateAiReview(inspectionId, force);
 
       // Fetch the saved MongoDB result so every part of the UI uses the same
@@ -1321,7 +1522,7 @@ const InspectionDashboard = () => {
 
       const message =
         err?.response?.data?.detail ||
-        'AI Review ထုတ်ပေးရာတွင် မအောင်မြင်ပါ။ ထပ်မံကြိုးစားနိုင်ပါသည်။';
+        'Review ထုတ်ပေးရာတွင် မအောင်မြင်ပါ။ ထပ်မံကြိုးစားနိုင်ပါသည်။';
 
       setError(message);
 
@@ -1331,7 +1532,7 @@ const InspectionDashboard = () => {
         const failedDetail = await inspectionApi.getInspectionDetail(inspectionId);
         setAiDialogData(failedDetail);
       } catch (refreshError) {
-        console.warn('Could not refresh failed AI review status:', refreshError);
+        console.warn('Could not refresh failed review status:', refreshError);
       }
     } finally {
       setAiGeneratingId(null);
@@ -1360,11 +1561,14 @@ const InspectionDashboard = () => {
 
   const handleEventSelect = (eventId) => {
     if (!eventId) return;
+
     setSelectedEventId(eventId);
+
     window.setTimeout(() => {
       document.getElementById(`event-${eventId}`)?.scrollIntoView({
         behavior: 'smooth',
-        block: 'nearest',
+        block: 'center',
+        inline: 'nearest',
       });
     }, 50);
   };
@@ -1411,7 +1615,7 @@ const InspectionDashboard = () => {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <p className="mt-1 text-sm text-slate-500">
-              ချို့ယွင်းချက်ရှာဖွေတွေ့ရှိမှုများ၊ လမ်းကြောင်းတည်နေရာများနှင့် AI ထိန်းသိမ်းမှု အကြံပြုချက်များ
+              ချို့ယွင်းချက်ရှာဖွေတွေ့ရှိမှုများ၊ လမ်းကြောင်းတည်နေရာများနှင့် ထိန်းသိမ်းမှု အကြံပြုချက်များ
             </p>
           </div>
 
@@ -1464,7 +1668,7 @@ const InspectionDashboard = () => {
           />
 
           <StatCard
-            label="AI အကြံပြုချက်များ"
+            label="အကြံပြုချက်များ"
             value={completedAiCount}
             helper={`ဒေတာ ${inspections.length} ခုအနက်`}
             icon={Bot}
@@ -1584,7 +1788,7 @@ const InspectionDashboard = () => {
               <div>
                 <h3 className="font-semibold text-slate-900">မကြာသေးမီက စစ်ဆေးမှုများ</h3>
                 <p className="mt-1 text-sm text-slate-500">
-                  စစ်ဆေးမှုတစ်ခုကို ဖွင့်ရန် ၎င်း၏ အသေးစိတ်နှင့် AI အကြံပြုချက်ကို ကြည့်ရှုပါ။
+                  စစ်ဆေးမှုတစ်ခုကို ဖွင့်ရန် ၎င်း၏ အသေးစိတ်နှင့် အကြံပြုချက်ကို ကြည့်ရှုပါ။
                 </p>
               </div>
 
@@ -1695,7 +1899,7 @@ const InspectionDashboard = () => {
                       ချို့ယွင်းချက်များ
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      AI အကြံပြုချက်
+                     အကြံပြုချက်
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
                       ဖန်တီးချိန်
@@ -1786,12 +1990,12 @@ const InspectionDashboard = () => {
                                 <Bot className="h-3.5 w-3.5" />
                               )}
                               {advisory || status === 'completed'
-                                ? 'AI Review ကြည့်ရန်'
+                                ? 'Review ကြည့်ရန်'
                                 : status === 'failed'
-                                ? 'AI Review ပြန်လုပ်ရန်'
+                                ? 'Review ပြန်လုပ်ရန်'
                                 : status === 'processing' || aiGeneratingId === inspectionId
-                                ? 'AI Review ပြုလုပ်နေသည်'
-                                : 'AI Review ဖန်တီးရန်'}
+                                ? 'Review ပြုလုပ်နေသည်'
+                                : 'Review ဖန်တီးရန်'}
                             </button>
 
                             <button
@@ -1908,11 +2112,16 @@ const InspectionDashboard = () => {
               onClick={() => setDetailDialogOpen(false)}
             />
 
-            <div className="relative z-10 w-full max-w-7xl overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
-              <div className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
+            <div className="relative z-10 w-full max-w-[1500px] overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
+              <div className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
                 <div>
-                  <h3 className="font-semibold text-slate-900">စစ်ဆေးမှု အသေးစိတ်</h3>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50">
+                      <Route className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <h3 className="font-semibold text-slate-900">စစ်ဆေးမှု အသေးစိတ်</h3>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
                     ချို့ယွင်းချက်အထောက်အထား၊ လမ်းကြောင်းတည်နေရာနှင့် ထိန်းသိမ်းမှု အကြံပြုချက်
                   </p>
                 </div>
@@ -1937,11 +2146,8 @@ const InspectionDashboard = () => {
                     const events = getInspectionEvents(detailData);
                     const route = getRoute(inspection);
                     const advisory = getAiAdvisory(inspection);
-                    const spatial = getAiSpatialSummary(inspection);
                     const inspectionId = getInspectionId(inspection);
-                    const gpsCount = events.filter((event) =>
-                      getEventCoordinates(event)
-                    ).length;
+                    const gpsCount = events.filter((event) => getEventCoordinates(event)).length;
 
                     return (
                       <div className="space-y-6">
@@ -1970,16 +2176,12 @@ const InspectionDashboard = () => {
 
                           <div className="rounded-xl border border-slate-200 bg-white p-4">
                             <p className="text-xs text-slate-500">ချို့ယွင်းချက်များ</p>
-                            <p className="mt-1 text-sm font-semibold text-red-600">
-                              {events.length}
-                            </p>
+                            <p className="mt-1 text-sm font-semibold text-red-600">{events.length}</p>
                           </div>
 
                           <div className="rounded-xl border border-slate-200 bg-white p-4">
                             <p className="text-xs text-slate-500">GPS ပါသော</p>
-                            <p className="mt-1 text-sm font-semibold text-slate-900">
-                              {gpsCount}
-                            </p>
+                            <p className="mt-1 text-sm font-semibold text-slate-900">{gpsCount}</p>
                           </div>
 
                           <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -1999,59 +2201,39 @@ const InspectionDashboard = () => {
                           <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
                             <div className="flex items-center gap-2">
                               <MapPin className="h-4 w-4 text-blue-600" />
-                              <h4 className="text-sm font-semibold text-slate-900">
-                                လမ်းကြောင်းအချက်အလက်
-                              </h4>
+                              <h4 className="text-sm font-semibold text-slate-900">လမ်းကြောင်းအချက်အလက်</h4>
                             </div>
 
                             <div className="mt-3 grid grid-cols-2 gap-4 text-sm lg:grid-cols-5">
                               <div>
                                 <p className="text-xs text-slate-500">အကွာအဝေး</p>
-                                <p className="mt-1 font-medium text-slate-800">
-                                  {formatDistance(route?.distance_m)}
-                                </p>
+                                <p className="mt-1 font-medium text-slate-800">{formatDistance(route?.distance_m)}</p>
                               </div>
-
                               <div>
                                 <p className="text-xs text-slate-500">အမှတ်များ</p>
                                 <p className="mt-1 font-medium text-slate-800">
                                   {route?.point_count ?? getInspectionPointCount(inspection) ?? 'N/A'}
                                 </p>
                               </div>
-
                               <div>
                                 <p className="text-xs text-slate-500">စတင်ရာ</p>
                                 <p className="mt-1 text-xs font-medium text-slate-800">
-                                  {route?.start?.latitude != null &&
-                                  route?.start?.longitude != null
-                                    ? `${Number(route.start.latitude).toFixed(
-                                        6
-                                      )}, ${Number(route.start.longitude).toFixed(
-                                        6
-                                      )}`
+                                  {route?.start?.latitude != null && route?.start?.longitude != null
+                                    ? `${Number(route.start.latitude).toFixed(6)}, ${Number(route.start.longitude).toFixed(6)}`
                                     : 'N/A'}
                                 </p>
                               </div>
-
                               <div>
                                 <p className="text-xs text-slate-500">အဆုံးသတ်</p>
                                 <p className="mt-1 text-xs font-medium text-slate-800">
-                                  {route?.end?.latitude != null &&
-                                  route?.end?.longitude != null
-                                    ? `${Number(route.end.latitude).toFixed(
-                                        6
-                                      )}, ${Number(route.end.longitude).toFixed(
-                                        6
-                                      )}`
+                                  {route?.end?.latitude != null && route?.end?.longitude != null
+                                    ? `${Number(route.end.latitude).toFixed(6)}, ${Number(route.end.longitude).toFixed(6)}`
                                     : 'N/A'}
                                 </p>
                               </div>
-
                               <div>
                                 <p className="text-xs text-slate-500">စစ်ဆေးမှု ID</p>
-                                <p className="mt-1 truncate text-xs font-medium text-slate-800">
-                                  {inspectionId || 'N/A'}
-                                </p>
+                                <p className="mt-1 truncate text-xs font-medium text-slate-800">{inspectionId || 'N/A'}</p>
                               </div>
                             </div>
                           </div>
@@ -2062,14 +2244,49 @@ const InspectionDashboard = () => {
                           inspection={inspection}
                           generating={aiGeneratingId === inspectionId}
                           onGenerate={() =>
-                            handleGenerateAiReview(inspectionId, getAiStatus(inspection) === 'failed')
+                            handleGenerateAiReview(
+                              inspectionId,
+                              getAiStatus(inspection) === 'failed'
+                            )
                           }
                         />
 
-                        {/* Map + spatial summary */}
-                        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-                          <div className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-                            <div className="h-[470px]">
+                        {/* Railway visualization */}
+                        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <Route className="h-5 w-5 text-blue-600" />
+                                <h4 className="font-semibold text-slate-900">ရထားလမ်း ချို့ယွင်းချက်မြေပုံ</h4>
+                              </div>
+                              <p className="mt-1 text-xs leading-5 text-slate-500">
+                                ဘယ်/ညာ သံလမ်းရှိ ချို့ယွင်းချက်များကို အကွာအဝေးအလိုက် ပြသထားပါသည်။
+                                ချို့ယွင်းချက်တစ်ခုကို နှိပ်၍ မြေပုံပေါ်တွင် ၎င်း၏တည်နေရာကို ကြည့်နိုင်ပါသည်။
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-semibold text-slate-600">
+                                <MapPin className="h-3.5 w-3.5" />
+                                {events.length} အဖြစ်အပျက်
+                              </span>
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-blue-700">
+                                {selectedEventId ? 'တစ်ခုရွေးထားသည်' : 'ရွေးချယ်ရန်'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="grid min-h-[600px] min-w-0 grid-cols-1 gap-3 lg:grid-cols-[250px_minmax(0,1fr)_250px] xl:grid-cols-[270px_minmax(0,1fr)_270px]">
+                            <div className="h-[600px] min-h-0 min-w-0">
+                              <RailDefectList
+                                side="left"
+                                events={events}
+                                selectedEventId={selectedEventId}
+                                onSelect={handleEventSelect}
+                              />
+                            </div>
+
+                            <div className="h-[600px] min-h-0 min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
                               <DefectMap
                                 events={events}
                                 selectedEventId={selectedEventId}
@@ -2077,128 +2294,76 @@ const InspectionDashboard = () => {
                                 route={route}
                               />
                             </div>
+
+                            <div className="h-[600px] min-h-0 min-w-0">
+                              <RailDefectList
+                                side="right"
+                                events={events}
+                                selectedEventId={selectedEventId}
+                                onSelect={handleEventSelect}
+                              />
+                            </div>
                           </div>
 
-                          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <h4 className="font-semibold text-slate-900">
-                                  တည်နေရာအလိုက် အကျဉ်းချုပ်
-                                </h4>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  လမ်းကြောင်းအကွာအဝေးများအလိုက် စုစည်းထားမှု
-                                </p>
-                              </div>
-                              <Layers className="h-5 w-5 text-slate-400" />
-                            </div>
+                          {selectedEventId && (() => {
+                            const selectedIndex = events.findIndex(
+                              (event, index) => getEventId(event, index) === selectedEventId
+                            );
+                            const selectedEvent = selectedIndex >= 0 ? events[selectedIndex] : null;
+                            if (!selectedEvent) return null;
 
-                            {spatial ? (
-                              <div className="mt-4 space-y-4">
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div className="rounded-xl bg-slate-50 p-3">
-                                    <p className="text-xs text-slate-500">
-                                      အဖြစ်အပျက် / ၁၀ မီတာ
-                                    </p>
-                                    <p className="mt-1 text-lg font-bold text-slate-900">
-                                      {spatial?.events_per_10m ?? 'N/A'}
-                                    </p>
+                            const meta = getDefectMeta(selectedEvent.defect_type);
+                            const coords = getEventCoordinates(selectedEvent);
+
+                            return (
+                              <div
+                                className="mt-4 rounded-xl border p-4"
+                                style={{
+                                  borderColor: `${meta.color}45`,
+                                  backgroundColor: `${meta.color}08`,
+                                }}
+                              >
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div
+                                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg"
+                                      style={{ backgroundColor: `${meta.color}18` }}
+                                    >
+                                      {meta.icon}
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-semibold text-slate-900">
+                                        {selectedEvent.defect_type || 'ချို့ယွင်းချက်'}
+                                      </p>
+                                      <p className="mt-0.5 text-xs text-slate-500">
+                                        {String(selectedEvent.rail_side || 'N/A').toUpperCase()} သံလမ်း ·{' '}
+                                        {formatDistance(getEventRouteDistance(selectedEvent))}
+                                      </p>
+                                    </div>
                                   </div>
 
-                                  <div className="rounded-xl bg-slate-50 p-3">
-                                    <p className="text-xs text-slate-500">
-                                      အစုအဝေးများ
-                                    </p>
-                                    <p className="mt-1 text-lg font-bold text-slate-900">
-                                      {spatial?.clusters?.length ?? 0}
-                                    </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    <span className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm">
+                                      ယုံကြည်မှု {formatConfidence(selectedEvent.confidence)}
+                                    </span>
+                                    <span className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm">
+                                      {asNumber(selectedEvent.start_timestamp, 0).toFixed(1)}s
+                                    </span>
                                   </div>
                                 </div>
 
-                                <div className="space-y-2">
-                                  {(spatial?.clusters || []).map(
-                                    (cluster, index) => (
-                                      <div
-                                        key={`${cluster?.rail_side}-${cluster?.start_distance_m}-${index}`}
-                                        className="rounded-xl border border-slate-200 p-3"
-                                      >
-                                        <p className="text-sm font-semibold text-slate-800">
-                                          {(cluster?.rail_side || 'Unknown').toUpperCase()}{' '}
-                                          သံလမ်း
-                                        </p>
-                                        <p className="mt-1 text-xs text-slate-500">
-                                          {formatDistance(cluster?.start_distance_m)} →{' '}
-                                          {formatDistance(cluster?.end_distance_m)}
-                                        </p>
-                                        <p className="mt-2 text-xs text-slate-600">
-                                          {cluster?.event_count ?? 0} အဖြစ်အပျက် ·{' '}
-                                          {Object.entries(cluster?.defect_counts || {})
-                                            .map(([type, count]) => `${type}: ${count}`)
-                                            .join(' · ')}
-                                        </p>
-                                      </div>
-                                    )
-                                  )}
-                                </div>
-
-                                {spatial?.important_note && (
-                                  <p className="text-xs leading-5 text-slate-400">
-                                    {spatial.important_note}
-                                  </p>
+                                {coords && (
+                                  <div className="mt-3 flex items-center gap-1.5 text-xs text-slate-400">
+                                    <MapPin className="h-3.5 w-3.5" />
+                                    {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
+                                  </div>
                                 )}
                               </div>
-                            ) : (
-                              <div className="mt-4">
-                                <EmptyState
-                                  title="တည်နေရာအလိုက် အကျဉ်းချုပ် မရှိပါ"
-                                  description="စစ်ဆေးမှုအသေးစိတ်တွင် ai_spatial_summary မပါဝင်ပါ။"
-                                />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Events */}
-                        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <h4 className="font-semibold text-slate-900">
-                                တွေ့ရှိထားသော ချို့ယွင်းချက်များ
-                              </h4>
-                              <p className="mt-1 text-sm text-slate-500">
-                                အဖြစ်အပျက်တစ်ခုကို ရွေးချယ်ရန် ၎င်း၏ မြေပုံပေါ်ရှိ အမှတ်အသားကို
-                                မီးမောင်းထိုးပြသည်။
-                              </p>
-                            </div>
-
-                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                              {events.length} အဖြစ်အပျက်
-                            </span>
-                          </div>
-
-                          {events.length ? (
-                            <div className="grid gap-3 lg:grid-cols-2">
-                              {events.map((event, index) => {
-                                const eventId = getEventId(event, index);
-
-                                return (
-                                  <EventCard
-                                    key={eventId}
-                                    event={event}
-                                    index={index}
-                                    selected={selectedEventId === eventId}
-                                    onSelect={handleEventSelect}
-                                  />
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <EmptyState
-                              title="ချို့ယွင်းချက်များ မတွေ့ရှိပါ"
-                              description="ဤစစ်ဆေးမှုတွင် ချို့ယွင်းချက်အဖြစ်အပျက်များ မပါဝင်ပါ။"
-                            />
-                          )}
+                            );
+                          })()}
                         </section>
                       </div>
+
                     );
                   })()
                 ) : (
@@ -2219,7 +2384,7 @@ const InspectionDashboard = () => {
           <div className="flex min-h-screen items-start justify-center px-3 py-6 sm:px-6">
             <button
               type="button"
-              aria-label="Close AI response"
+              aria-label="Close response"
               className="fixed inset-0 cursor-default bg-slate-950/55"
               onClick={() => setAiDialogOpen(false)}
             />
@@ -2231,9 +2396,9 @@ const InspectionDashboard = () => {
                     <Bot className="h-5 w-5 text-violet-700" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-slate-900">AI ထိန်းသိမ်းမှု တုံ့ပြန်ချက်</h3>
+                    <h3 className="font-semibold text-slate-900"> ထိန်းသိမ်းမှု တုံ့ပြန်ချက်</h3>
                     <p className="mt-0.5 text-xs text-slate-500">
-                      ဤစစ်ဆေးမှုအတွက် MongoDB တွင် သိမ်းဆည်းထားသော AI ထိန်းသိမ်းမှု အကြံပြုချက်
+                      ဤစစ်ဆေးမှုအတွက် Database တွင် သိမ်းဆည်းထားသော ထိန်းသိမ်းမှု အကြံပြုချက်
                     </p>
                   </div>
                 </div>
@@ -2271,7 +2436,7 @@ const InspectionDashboard = () => {
                   })()
                 ) : (
                   <EmptyState
-                    title="AI အကြံပြုချက် မရှိပါ"
+                    title="အကြံပြုချက် မရှိပါ"
                     description="စစ်ဆေးမှုအသေးစိတ်မှ အကြံပြုချက် မပြန်လာပါ။"
                   />
                 )}
