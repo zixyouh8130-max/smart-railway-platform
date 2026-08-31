@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from ..core.config import settings
 
 
-AI_ADVISORY_VERSION = "railway_advisory_v7_compact_advisory_gemini_structured"
+AI_ADVISORY_VERSION = "railway_advisory_v8_gemini35_minimal_thinking_compact"
 AI_CLUSTER_GAP_M = 3.0
 AI_CLUSTER_MIN_EVENTS = 2
 AI_EVENT_AGGREGATION_GAP_M = 0.5
@@ -402,7 +402,7 @@ def _gemini_generate_structured_json(
     temperature: float,
     max_output_tokens: int,
     label: str,
-    thinking_budget: Optional[int] = None,
+    thinking_level: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     One controlled Vertex/Gemini JSON call.
@@ -422,8 +422,8 @@ def _gemini_generate_structured_json(
             response_mime_type="application/json",
             response_json_schema=response_json_schema,
             thinking_config=(
-                genai_types.ThinkingConfig(thinking_budget=thinking_budget)
-                if thinking_budget is not None
+                genai_types.ThinkingConfig(thinking_level=thinking_level)
+                if thinking_level is not None
                 else None
             ),
             automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(
@@ -1280,10 +1280,16 @@ def _call_gemini(prompt: str) -> Dict[str, Any]:
         temperature=0.1,
         max_output_tokens=8192,
         label="maintenance-advisory",
-        thinking_budget=0,
+        thinking_level="MINIMAL",
     )
 
-    return _validate_advisory(payload)
+    validated = _validate_advisory(payload)
+    print(
+        "GEMINI FINAL ADVISORY SUCCESS | "
+        f"model={model} | "
+        f"overall_priority={validated.get('overall_priority')}"
+    )
+    return validated
 
 
 @lru_cache(maxsize=1)
