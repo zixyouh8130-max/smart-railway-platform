@@ -237,7 +237,7 @@ const DefectLocationMap = ({ issue, engineerLocation }) => {
             >
               <Popup>
                 <div className="text-sm">
-                  <strong>AI တွေ့ရှိချက် တည်နေရာ</strong>
+                  <strong>တွေ့ရှိချက် တည်နေရာ</strong>
                   <div className="mt-1 text-xs">
                     {Number(issue.latitude).toFixed(6)}, {Number(issue.longitude).toFixed(6)}
                   </div>

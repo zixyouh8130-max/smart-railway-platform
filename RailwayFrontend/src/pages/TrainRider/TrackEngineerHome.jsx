@@ -195,7 +195,7 @@ const TrackEngineerHome = () => {
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search inspection, run, status or AI priority…" className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 bg-white outline-none focus:ring-2 focus:ring-emerald-500" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search inspection, run, status or priority…" className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 bg-white outline-none focus:ring-2 focus:ring-emerald-500" />
       </div>
 
       <section>
@@ -204,7 +204,7 @@ const TrackEngineerHome = () => {
           <Card padding="p-8" hover={false} className="text-center">
             <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto" />
             <p className="font-semibold text-gray-800 mt-3">No active inspection cases</p>
-            <p className="text-sm text-gray-500 mt-1">Use nearby search to discover an unassigned AI inspection case around you.</p>
+            <p className="text-sm text-gray-500 mt-1">Use nearby search to discover an unassigned inspection case around you.</p>
           </Card>
         ) : (
           <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">

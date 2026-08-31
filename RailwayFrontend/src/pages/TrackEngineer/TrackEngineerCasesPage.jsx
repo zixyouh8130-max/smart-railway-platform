@@ -52,8 +52,8 @@ const TrackEngineerCasesPage = () => {
               <p className="text-xs font-semibold text-slate-400">
                 လမ်းကြောင်းအင်ဂျင်နီယာ
               </p>
-              <h1 className="mt-1 text-2xl font-bold text-slate-900">
-                ကျွန်ုပ်၏ စစ်ဆေးမှုCaseများ
+              <h1 className="mt-1 text-sm font-bold text-slate-900">
+                တာဝန်ချထားသော စစ်ဆေးမှုCaseများ
               </h1>
               <p className="mt-1 text-sm text-slate-500">
                 စစ်ဆေးမှုတစ်ခုစီကို Caseတစ်ခုအဖြစ် ကိုင်တွယ်ပြီး၊ တွေ့ရှိချက်များကို လုပ်ငန်းစဉ် Dashboard မှတစ်ဆင့် ဆောင်ရွက်ပါ။

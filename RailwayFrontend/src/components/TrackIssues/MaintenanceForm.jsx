@@ -28,7 +28,7 @@ const MaintenanceForm = ({ issue, onSave, saving }) => {
     }
 
     if (fieldStatus === 'NOT_CONFIRMED') {
-      return 'AI တွေ့ရှိချက်ကို မတွေ့ရှိကြောင်း အတည်ပြုထားသောကြောင့် ပြုပြင်ရန် မလိုပါ။ Backend က NO_ACTION_REQUIRED ကို အလိုအလျောက် သတ်မှတ်ပေးမည်။';
+      return 'တွေ့ရှိချက်ကို မတွေ့ရှိကြောင်း အတည်ပြုထားသောကြောင့် ပြုပြင်ရန် မလိုပါ။ Backend က NO_ACTION_REQUIRED ကို အလိုအလျောက် သတ်မှတ်ပေးမည်။';
     }
 
     if (fieldStatus === 'UNABLE_TO_VERIFY') {

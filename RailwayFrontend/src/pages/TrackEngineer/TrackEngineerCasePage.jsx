@@ -217,7 +217,7 @@ const TrackEngineerCasePage = () => {
                   <p className="text-xs font-semibold text-slate-400">
                     လမ်းကြောင်းစစ်ဆေး ပြုပြင်ထိန်းသိမ်းမှု Case
                   </p>
-                  <h1 className="mt-1 break-words text-2xl font-bold text-slate-900">
+                  <h1 className="mt-1 break-words text-sm font-bold text-slate-900">
                     {caseDisplayName(inspectionCase)}
                   </h1>
 
@@ -244,7 +244,7 @@ const TrackEngineerCasePage = () => {
                     onClick={() => setShowCaseAI(true)}
                     className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100"
                   >
-                    🤖 Caseသုံးသပ်ချက်
+                    Caseသုံးသပ်ချက်
                   </button>
 
                   <button
@@ -258,7 +258,7 @@ const TrackEngineerCasePage = () => {
                     ) : (
                       <RefreshCw className="h-4 w-4" />
                     )}
-                    ပြန်လည်တင်ရန်
+                    Refresh
                   </button>
                 </div>
               </div>

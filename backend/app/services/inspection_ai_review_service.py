@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from ..core.config import settings
 
 
-AI_ADVISORY_VERSION = "railway_advisory_v6_targeted_vision_event_aggregator"
+AI_ADVISORY_VERSION = "railway_advisory_v7_compact_advisory_gemini_structured"
 AI_CLUSTER_GAP_M = 3.0
 AI_CLUSTER_MIN_EVENTS = 2
 AI_EVENT_AGGREGATION_GAP_M = 0.5
@@ -298,6 +298,27 @@ ADVISORY_JSON_SCHEMA: Dict[str, Any] = {
 }
 
 
+# Keep the final maintenance advisory concise enough that structured JSON does
+# not hit the model output-token ceiling. These are presentation limits, not
+# railway-safety thresholds.
+def _apply_advisory_schema_limits() -> None:
+    props = ADVISORY_JSON_SCHEMA["properties"]
+    props["key_findings"]["maxItems"] = 6
+    props["areas_of_attention"]["maxItems"] = 8
+    props["individual_high_priority_events"]["maxItems"] = 8
+    props["defect_type_assessments"]["maxItems"] = 4
+    props["possible_contributing_factors"]["maxItems"] = 4
+    props["recommended_actions"]["maxItems"] = 8
+    props["limitations"]["maxItems"] = 6
+
+    props["areas_of_attention"]["items"]["properties"]["recommended_checks"]["maxItems"] = 5
+    props["individual_high_priority_events"]["items"]["properties"]["recommended_checks"]["maxItems"] = 5
+    props["possible_contributing_factors"]["items"]["properties"]["factors"]["maxItems"] = 5
+
+
+_apply_advisory_schema_limits()
+
+
 def _targeted_visual_schema(defect_type: str) -> Dict[str, Any]:
     if defect_type == "Missing Fishplate Bolt":
         return FISHPLATE_VISUAL_JSON_SCHEMA
@@ -381,6 +402,7 @@ def _gemini_generate_structured_json(
     temperature: float,
     max_output_tokens: int,
     label: str,
+    thinking_budget: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     One controlled Vertex/Gemini JSON call.
@@ -399,6 +421,11 @@ def _gemini_generate_structured_json(
             max_output_tokens=max_output_tokens,
             response_mime_type="application/json",
             response_json_schema=response_json_schema,
+            thinking_config=(
+                genai_types.ThinkingConfig(thinking_budget=thinking_budget)
+                if thinking_budget is not None
+                else None
+            ),
             automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(
                 disable=True
             ),
@@ -716,66 +743,75 @@ def build_advisory_prompt(
     events: List[Dict[str, Any]],
     spatial_summary: Dict[str, Any],
 ) -> str:
+    """Build a compact whole-inspection prompt.
+
+    The raw event list is intentionally NOT repeated here. The final advisory
+    uses deterministic counts, compact event-aggregator groups, localized
+    concentrations, and positive targeted-vision findings. This keeps the
+    request comfortably below Groq's token limits and reduces Gemini truncation.
+    """
     route = inspection.get("route") or {}
+    defect_events = [event for event in events if event.get("defect_type")]
+    event_aggregation = build_event_aggregation_summary(events)
 
-    event_data = []
-    for event in events:
-        if not event.get("defect_type"):
-            continue
-        gps = event.get("gps") or {}
-        event_data.append(
-            {
-                "rail_side": event.get("rail_side"),
-                "defect_type": event.get("defect_type"),
-                "confidence": event.get("confidence"),
-                "route_distance_m": (
-                    gps.get("distance_from_start_m")
-                    if gps.get("distance_from_start_m") is not None
-                    else event.get("distance_from_route_start_m")
-                ),
-            }
-        )
-
-    compact_clusters = [
-        {
-            "rail_side": cluster.get("rail_side"),
-            "start_distance_m": cluster.get("start_distance_m"),
-            "end_distance_m": cluster.get("end_distance_m"),
-            "span_m": cluster.get("span_m"),
-            "event_count": cluster.get("event_count"),
-            "defect_counts": cluster.get("defect_counts") or {},
-        }
-        for cluster in spatial_summary.get("clusters") or []
+    # Compact arrays avoid repeating long JSON key names for every event/group.
+    # Row format:
+    # [rail_side, defect_type, start_m, end_m, member_count, representative_confidence]
+    compact_issue_groups = [
+        [
+            group.get("rail_side"),
+            group.get("defect_type"),
+            group.get("start_distance_m"),
+            group.get("end_distance_m"),
+            group.get("member_event_count"),
+            group.get("representative_confidence"),
+        ]
+        for group in event_aggregation.get("groups") or []
     ]
 
-    event_aggregation = build_event_aggregation_summary(events)
-    compact_issue_groups = [
-        {
-            "group_id": group.get("group_id"),
-            "rail_side": group.get("rail_side"),
-            "defect_type": group.get("defect_type"),
-            "start_distance_m": group.get("start_distance_m"),
-            "end_distance_m": group.get("end_distance_m"),
-            "span_m": group.get("span_m"),
-            "member_event_count": group.get("member_event_count"),
-        }
-        for group in event_aggregation.get("groups") or []
+    # Spatial clusters are already ordered by importance/event count. Limit the
+    # prompt to the strongest 20 concentrations while retaining deterministic
+    # full-route counts separately.
+    compact_clusters = [
+        [
+            cluster.get("rail_side"),
+            cluster.get("start_distance_m"),
+            cluster.get("end_distance_m"),
+            cluster.get("event_count"),
+            cluster.get("defect_counts") or {},
+        ]
+        for cluster in (spatial_summary.get("clusters") or [])[:20]
     ]
 
     factual_input = {
         "inspection_model": inspection.get("model") or {},
         "route_distance_m": route.get("distance_m"),
-        "raw_total_defect_events": len(event_data),
+        "raw_total_defect_events": len(defect_events),
         "raw_class_counts": spatial_summary.get("class_counts") or {},
+        "raw_rail_counts": spatial_summary.get("rail_counts") or {},
+        "events_per_10m": spatial_summary.get("events_per_10m"),
+        "aggregation_gap_m": event_aggregation.get("group_gap_m"),
         "aggregated_issue_group_count": event_aggregation.get("aggregated_group_count"),
         "aggregated_grouped_class_counts": event_aggregation.get("grouped_class_counts") or {},
-        "aggregation_gap_m": event_aggregation.get("group_gap_m"),
         "aggregation_reduction_event_count": event_aggregation.get("reduction_event_count"),
-        "rail_counts": spatial_summary.get("rail_counts") or {},
-        "events_per_10m": spatial_summary.get("events_per_10m"),
-        "localized_defect_concentrations": compact_clusters,
+        "aggregated_issue_group_row_format": [
+            "rail_side",
+            "defect_type",
+            "start_distance_m",
+            "end_distance_m",
+            "member_event_count",
+            "representative_confidence",
+        ],
         "aggregated_issue_groups": compact_issue_groups,
-        "defect_events": event_data,
+        "localized_concentration_row_format": [
+            "rail_side",
+            "start_distance_m",
+            "end_distance_m",
+            "raw_event_count",
+            "defect_counts",
+        ],
+        "localized_defect_concentrations": compact_clusters,
+        "localized_concentration_total_count": len(spatial_summary.get("clusters") or []),
         "supplementary_visual_findings": _supplementary_findings(events),
     }
 
@@ -784,152 +820,46 @@ You are an AI railway maintenance advisory assistant.
 
 {MYANMAR_OUTPUT_RULES}
 
-You are NOT performing object detection.
+Analyze the supplied inspection facts. Object detection has already been done.
+Do not verify or reject detector classes.
 
-The defect events below were already produced by the railway inspection system.
-Treat those events as the inspection data to be analyzed.
+CORE INTERPRETATION:
+- raw_total_defect_events is the detector-event count.
+- aggregated_issue_groups are a 0.5 m same-class/same-rail heuristic and are a
+  better approximation of likely distinct physical issue locations.
+- Do not treat every raw event as a separate physical defect.
+- Use localized_defect_concentrations only for the exact supplied ranges.
 
-Your job is to analyze the RESULTED DATA like a railway maintenance advisor.
+PRIORITY ENUMS:
+routine, monitor, priority_inspection, urgent_manual_review.
 
-Focus on:
-1. defect quantity,
-2. defect type,
-3. spatial concentration,
-4. whether defects are isolated or grouped,
-5. whether the same type repeats within a short track section,
-6. relationships between nearby defect types,
-7. railway-maintenance significance,
-8. which locations deserve greater maintenance attention,
-9. recommended field inspection and maintenance checks,
-10. possible contributing causes ONLY when they provide useful engineering context,
-11. treat aggregated_issue_groups as the better approximation of likely physical issue groups than raw event count alone.
+SAFETY / ENGINEERING RULES:
+- Do not certify the track safe or unsafe.
+- Do not invent thresholds, dimensions, torque values, crack depth, or speed restrictions.
+- Do not diagnose causes; describe them only as possible contributing factors.
+- A Rail Break supplementary severity, when present, is apparent visual severity only.
+- A fishplate-nut supplementary finding is visual only and cannot establish torque/tightness.
+- Final actions require applicable operator procedures and qualified field inspection.
 
-PRIORITY LEVELS:
+OUTPUT RULES:
+- Return valid JSON only.
+- Follow the required structured schema exactly.
+- Keep Myanmar prose concise: normally one short sentence per text field.
+- key_findings: at most 6 concise items.
+- areas_of_attention: at most 8 strongest locations.
+- individual_high_priority_events: at most 8; include only when genuinely warranted.
+- recommended_actions: at most 8 concise actions.
+- limitations: at most 6 concise items.
+- Keep defect_type values exactly as supplied by the detector.
 
-routine
-    No unusual concentration or immediate pattern requiring priority above
-    normal maintenance inspection.
+Required top-level keys:
+overall_priority, executive_summary, key_findings, areas_of_attention,
+individual_high_priority_events, defect_type_assessments,
+possible_contributing_factors, recommended_actions, trend_assessment, limitations.
 
-monitor
-    Worth monitoring or checking during planned inspection.
-
-priority_inspection
-    The pattern or defect type warrants prioritized field inspection and
-    maintenance assessment.
-
-urgent_manual_review
-    The detected defect type/pattern may have significant implications and
-    warrants prompt qualified-person review. This is NOT permission to declare
-    the railway unsafe or impose an operating restriction.
-
-IMPORTANT RULES:
-
-- Do not discuss whether the detector's detections are true or false.
-- Do not perform visual verification.
-- Do not expose chain-of-thought or reasoning steps.
-- Do not call a location historically "defect-prone" from only one inspection.
-- For one inspection, use terms such as "localized defect concentration",
-  "area of elevated defect occurrence", or "section requiring attention".
-- Do not invent official numerical defect thresholds.
-- Do not invent speed restrictions.
-- Do not certify the track as safe or unsafe.
-- Do not invent measurements.
-- Final action must be confirmed against the railway operator's applicable
-  maintenance standard and qualified field inspection.
-
-SUPPLEMENTARY VISUAL FINDINGS:
-
-- These are optional observations that may already have been saved by the
-  inspection-stage workflow.
-- Only mention a supplementary finding when it is explicitly present in
-  supplementary_visual_findings.
-- If supplementary_visual_findings is empty, NEVER mention supplementary visual
-  inspection, loose nuts, visual severity, missing image evidence, or absence
-  of findings.
-- If a Rail Break visual severity is supplied, describe it as an apparent visual
-  assessment, not a structural measurement.
-
-OUTPUT DISCIPLINE:
-
-- Avoid words such as "critical", "structural failure", "unsafe" or
-  "compromised structural integrity" unless an applicable supplied maintenance
-  standard explicitly supports that conclusion.
-- Prefer wording such as "may affect", "may reduce intended restraint",
-  "warrants inspection", "requires field verification", and
-  "priority maintenance attention".
-- Recommend restoring/replacing confirmed missing components according to the
-  applicable railway maintenance procedure.
-- For fasteners, recommend checking presence, seating, tightness and physical
-  condition. Do not assume a specific torque requirement.
-- When discussing spatial concentrations, use ONLY the exact ranges supplied in
-  localized_defect_concentrations. Do not invent or merge ranges.
-- Possible causes must always be described as possible contributing factors,
-  never as diagnosed causes.
-- Do not attribute a defect to poor maintenance, neglect, incorrect installation
-  or a specific environmental cause unless supporting evidence is supplied.
-
-AGGREGATION NOTE:
-
-- raw_total_defect_events is the raw detector event count.
-- aggregated_issue_group_count and aggregated_issue_groups are the heuristic event-aggregator output and are a better approximation of likely distinct physical issue locations.
-- Do not simply equate every raw detector event with a distinct physical defect.
-- Use aggregated_issue_groups when judging whether issues are isolated or repeated in a short section.
-
-INSPECTION DATA:
-
+INSPECTION FACTS:
 {json.dumps(factual_input, ensure_ascii=False, separators=(",", ":"))}
-
-Return VALID JSON only.
-
-Use exactly this general structure:
-
-{{
-  "overall_priority": "routine | monitor | priority_inspection | urgent_manual_review",
-  "executive_summary": "မြန်မာဘာသာဖြင့် ရေးထားသော တိုတောင်းသည့် ပြုပြင်ထိန်းသိမ်းရေး အနှစ်ချုပ်",
-  "key_findings": ["မြန်မာဘာသာဖြင့် ရေးထားသော အရေးကြီး တွေ့ရှိချက်"],
-  "areas_of_attention": [
-    {{
-      "rail_side": "left or right",
-      "start_distance_m": 0,
-      "end_distance_m": 0,
-      "event_count": 0,
-      "defect_counts": {{}},
-      "priority": "routine | monitor | priority_inspection | urgent_manual_review",
-      "assessment": "မြန်မာဘာသာဖြင့် ဤနေရာကို အဆိုပါ ဦးစားပေးအဆင့်ဖြင့် စစ်ဆေးသင့်သည့် အကြောင်းရင်း",
-      "recommended_checks": ["မြန်မာဘာသာဖြင့် သီးသန့် ပြုပြင်ထိန်းသိမ်းရေး စစ်ဆေးချက်"]
-    }}
-  ],
-  "individual_high_priority_events": [
-    {{
-      "rail_side": "left or right",
-      "route_distance_m": 0,
-      "defect_type": "",
-      "priority": "priority_inspection | urgent_manual_review",
-      "assessment": "",
-      "recommended_checks": []
-    }}
-  ],
-  "defect_type_assessments": [
-    {{
-      "defect_type": "",
-      "event_count": 0,
-      "maintenance_significance": "",
-      "recommended_response": ""
-    }}
-  ],
-  "possible_contributing_factors": [
-    {{
-      "defect_type": "",
-      "factors": ["မြန်မာဘာသာဖြင့် ဖြစ်နိုင်ခြေရှိသော အထောက်အကူပြု အကြောင်းအရင်း"],
-      "context": "မြန်မာဘာသာဖြင့် ဤအကြောင်းအရင်းများ ဆက်စပ်နိုင်ပုံ"
-    }}
-  ],
-  "recommended_actions": ["မြန်မာဘာသာဖြင့် စစ်ဆေးရေး သို့မဟုတ် ပြုပြင်ထိန်းသိမ်းရေး လုပ်ဆောင်ချက်"],
-  "trend_assessment": "မြန်မာဘာသာဖြင့် ဤစစ်ဆေးမှုမှ သတ်မှတ်နိုင်သည့်အရာနှင့် မသတ်မှတ်နိုင်သည့်အရာကို ရှင်းပြချက်",
-  "limitations": ["မြန်မာဘာသာဖြင့် အရေးကြီး ကန့်သတ်ချက်"]
-}}
 """
-
 
 
 def _special_event_metadata(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -1348,8 +1278,9 @@ def _call_gemini(prompt: str) -> Dict[str, Any]:
         contents=prompt,
         response_json_schema=ADVISORY_JSON_SCHEMA,
         temperature=0.1,
-        max_output_tokens=4096,
+        max_output_tokens=8192,
         label="maintenance-advisory",
+        thinking_budget=0,
     )
 
     return _validate_advisory(payload)
@@ -1374,7 +1305,7 @@ def _call_groq(prompt: str) -> Dict[str, Any]:
         response_format={"type": "json_object"},
         reasoning_effort="none",
         temperature=0.2,
-        max_completion_tokens=1800,
+        max_completion_tokens=1600,
     )
 
     content = response.choices[0].message.content or ""
@@ -1391,7 +1322,15 @@ def generate_inspection_ai_review(
     """Generate a Myanmar-language review with Gemini -> Qwen fallback."""
 
     spatial_summary = build_spatial_defect_summary(inspection, events)
+    event_aggregation_summary = build_event_aggregation_summary(events)
     prompt = build_advisory_prompt(inspection, events, spatial_summary)
+
+    print(
+        "AI FINAL ADVISORY INPUT | "
+        f"raw_events={len([e for e in events if e.get('defect_type')])} | "
+        f"aggregated_groups={event_aggregation_summary.get('aggregated_group_count')} | "
+        f"prompt_chars={len(prompt)}"
+    )
 
     gemini_model = _setting("GEMINI_MODEL", "gemini-3.5-flash") or "gemini-3.5-flash"
     groq_model = _setting("GROQ_MODEL", "qwen/qwen3.6-27b") or "qwen/qwen3.6-27b"
@@ -1414,7 +1353,7 @@ def generate_inspection_ai_review(
             },
             "version": AI_ADVISORY_VERSION,
             "spatial_summary": spatial_summary,
-            "event_aggregation_summary": build_event_aggregation_summary(events),
+            "event_aggregation_summary": event_aggregation_summary,
             "overall_advisory": advisory,
         }
     except Exception as exc:
@@ -1440,7 +1379,7 @@ def generate_inspection_ai_review(
             },
             "version": AI_ADVISORY_VERSION,
             "spatial_summary": spatial_summary,
-            "event_aggregation_summary": build_event_aggregation_summary(events),
+            "event_aggregation_summary": event_aggregation_summary,
             "overall_advisory": advisory,
         }
     except Exception as fallback_exc:

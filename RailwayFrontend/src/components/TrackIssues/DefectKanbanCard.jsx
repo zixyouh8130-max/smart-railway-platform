@@ -38,8 +38,8 @@ const DefectKanbanCard = ({ issue, onOpen, onOpenAI }) => {
             onOpenAI?.(issue);
           }}
           className="shrink-0 rounded-lg border border-violet-200 bg-violet-50 p-1.5 text-violet-700 transition hover:bg-violet-100"
-          title="AI တွေ့ရှိချက် သုံးသပ်ရန်"
-          aria-label="AI တွေ့ရှိချက် သုံးသပ်ရန်"
+          title="တွေ့ရှိချက် သုံးသပ်ရန်"
+          aria-label="တွေ့ရှိချက် သုံးသပ်ရန်"
         >
           <Bot className="h-4 w-4" />
         </button>

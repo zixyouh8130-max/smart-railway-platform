@@ -9,8 +9,8 @@ const AIReviewDialog = ({ issue, open, onClose }) => (
     onClose={onClose}
     title={
       issue
-        ? `AI သုံးသပ်ချက် — ${defectTypeLabel(issue.defect_type)}`
-        : 'AI တွေ့ရှိချက် သုံးသပ်ချက်'
+        ? `သုံးသပ်ချက် — ${defectTypeLabel(issue.defect_type)}`
+        : 'တွေ့ရှိချက် သုံးသပ်ချက်'
     }
   >
     {issue ? (

@@ -24,7 +24,7 @@ const AIReviewPanel = ({ issue, compact = false }) => {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Bot className="w-5 h-5 text-purple-600" />
-        <h3 className="font-bold text-gray-900">AI finding review</h3>
+        <h3 className="font-bold text-gray-900">finding review</h3>
         <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${priorityClass(issue?.ai_priority)}`}>
           {humanize(issue?.ai_priority)}
         </span>
@@ -32,7 +32,7 @@ const AIReviewPanel = ({ issue, compact = false }) => {
 
       <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-sm text-blue-900 flex gap-2">
         <Info className="w-4 h-4 shrink-0 mt-0.5" />
-        <p>This is event-specific AI evidence. The inspection-wide summary is shown once at case level. Field personnel must confirm the physical condition.</p>
+        <p>This is event-specific evidence. The inspection-wide summary is shown once at case level. Field personnel must confirm the physical condition.</p>
       </div>
 
       <div className={`grid gap-3 ${compact ? '' : 'md:grid-cols-2'}`}>
@@ -74,7 +74,7 @@ const AIReviewPanel = ({ issue, compact = false }) => {
 
       {(matchedArea || highPriorityEvent) && (
         <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-          <div className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-700" /><p className="font-semibold text-amber-900">AI context around this finding</p></div>
+          <div className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-700" /><p className="font-semibold text-amber-900">context around this finding</p></div>
           {matchedArea && <>
             <p className="text-sm text-gray-700 mt-2">{matchedArea.assessment || 'This finding belongs to an AI-identified area of attention.'}</p>
             <div className="mt-2 text-xs text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
@@ -84,7 +84,7 @@ const AIReviewPanel = ({ issue, compact = false }) => {
             </div>
             {matchedArea.defect_counts && <div className="mt-2 flex flex-wrap gap-2">{Object.entries(matchedArea.defect_counts).map(([name, count]) => <span key={name} className="px-2 py-1 rounded bg-white border border-amber-200 text-xs">{name} × {count}</span>)}</div>}
           </>}
-          {highPriorityEvent && !matchedArea && <p className="text-sm text-gray-700 mt-2">{highPriorityEvent.assessment || 'The AI advisory identifies this as an individual high-priority event.'}</p>}
+          {highPriorityEvent && !matchedArea && <p className="text-sm text-gray-700 mt-2">{highPriorityEvent.assessment || 'The advisory identifies this as an individual high-priority event.'}</p>}
         </div>
       )}
 

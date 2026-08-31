@@ -5,13 +5,17 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Info,
+  Loader2,
   LockKeyhole,
   MessageSquare,
   PencilLine,
+  PlusCircle,
   RefreshCw,
   RotateCcw,
   Save,
   Search,
+  Sparkles,
+  UserCheck,
   UserRoundCog,
   Wrench,
   X,
@@ -109,7 +113,7 @@ const inspectionLabel = (inspection) => (
   inspection?.gpx_name ||
   inspection?.video_name ||
   inspection?.id ||
-  'AI စစ်ဆေးမှု'
+  'စစ်ဆေးမှု'
 );
 
 const shortId = (value) => String(value || '').slice(0, 8);
@@ -236,6 +240,46 @@ const ReviewModal = ({ open, title, subtitle, onClose, children }) => {
   );
 };
 
+const InlineOperationStatus = ({ status, compact = false }) => {
+  if (!status?.message || status.state === 'idle') return null;
+
+  const meta = {
+    loading: {
+      classes: 'border-blue-200 bg-blue-50/80 text-blue-700',
+      icon: Loader2,
+      iconClasses: 'animate-spin text-blue-600',
+    },
+    success: {
+      classes: 'border-emerald-200 bg-emerald-50/80 text-emerald-700',
+      icon: CheckCircle2,
+      iconClasses: 'text-emerald-600',
+    },
+    error: {
+      classes: 'border-red-200 bg-red-50/80 text-red-700',
+      icon: AlertTriangle,
+      iconClasses: 'text-red-600',
+    },
+  }[status.state] || {
+    classes: 'border-slate-200 bg-slate-50 text-slate-600',
+    icon: Info,
+    iconClasses: 'text-slate-500',
+  };
+
+  const Icon = meta.icon;
+
+  return (
+    <div
+      aria-live="polite"
+      className={`flex items-center gap-2 rounded-xl border ${meta.classes} ${
+        compact ? 'px-3 py-2 text-xs' : 'px-3.5 py-2.5 text-sm'
+      }`}
+    >
+      <Icon className={`h-4 w-4 shrink-0 ${meta.iconClasses}`} />
+      <span className="min-w-0 leading-5">{status.message}</span>
+    </div>
+  );
+};
+
 const TrackIssuesAdminPage = () => {
   const [cases, setCases] = useState([]);
   const [engineers, setEngineers] = useState([]);
@@ -260,6 +304,15 @@ const TrackIssuesAdminPage = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [caseCreationStatus, setCaseCreationStatus] = useState({
+    state: 'idle',
+    message: '',
+  });
+  const [assignmentStatus, setAssignmentStatus] = useState({
+    state: 'idle',
+    message: '',
+    caseId: null,
+  });
 
   const load = async () => {
     setLoading(true);
@@ -299,6 +352,11 @@ const TrackIssuesAdminPage = () => {
       setCaseNameDraft(detail.case_name || '');
       setEditingCaseName(false);
       setAdminStatusNote('');
+      setAssignmentStatus((current) =>
+        current.caseId === id
+          ? current
+          : { state: 'idle', message: '', caseId: id },
+      );
     } catch (err) {
       setError(apiErrorMessage(err, 'စစ်ဆေးမှုCaseကို မရယူနိုင်ပါ။'));
     } finally {
@@ -320,15 +378,23 @@ const TrackIssuesAdminPage = () => {
     setBusy(true);
     setError('');
     setSuccess('');
+    setCaseCreationStatus({
+      state: 'loading',
+      message: 'စစ်ဆေးမှုဒေတာကို ချိတ်ဆက်ပြီး Case ဖန်တီးနေပါသည်…',
+    });
     try {
       const result = await trackIssuesApi.syncInspection(selectedInspection);
+      const successMessage = `Case ဖန်တီးပြီးပါပြီ။ အသစ် ${result.issues_created} ခု၊ ပြန်လည်တင်ထားမှု ${result.issues_updated} ခု။`;
       setSuccess(
-        `AI စစ်ဆေးမှုကို ချိတ်ဆက်ပြီးပါပြီ။ အသစ် ${result.issues_created} ခု၊ ပြန်လည်တင်ထားမှု ${result.issues_updated} ခု။`,
+        `စစ်ဆေးမှုကို ချိတ်ဆက်ပြီးပါပြီ။ အသစ် ${result.issues_created} ခု၊ ပြန်လည်တင်ထားမှု ${result.issues_updated} ခု။`,
       );
+      setCaseCreationStatus({ state: 'success', message: successMessage });
       await load();
       await openCase(result.case_id);
     } catch (err) {
-      setError(apiErrorMessage(err, 'AI စစ်ဆေးမှုကို ချိတ်ဆက်၍ Caseမဖန်တီးနိုင်ပါ။'));
+      const message = apiErrorMessage(err, 'AI စစ်ဆေးမှုကို ချိတ်ဆက်၍ Caseမဖန်တီးနိုင်ပါ။');
+      setError(message);
+      setCaseCreationStatus({ state: 'error', message });
     } finally {
       setBusy(false);
     }
@@ -336,14 +402,34 @@ const TrackIssuesAdminPage = () => {
 
   const assign = async (staffId) => {
     if (!selectedCase) return;
+
+    const caseId = selectedCase.id;
+    const targetEngineer = engineers.find((engineer) => engineer.id === staffId);
     setBusy(true);
     setError('');
+    setAssignmentStatus({
+      state: 'loading',
+      caseId,
+      message: staffId
+        ? `${targetEngineer?.name || 'Track Engineer'} ကို တာဝန်ပေးနေပါသည်…`
+        : 'Track Engineer တာဝန်ပေးမှုကို ဖြုတ်နေပါသည်…',
+    });
+
     try {
-      const updated = await trackIssuesApi.assign(selectedCase.id, staffId || null);
+      const updated = await trackIssuesApi.assign(caseId, staffId || null);
       setSelectedCase(updated);
+      setAssignmentStatus({
+        state: 'success',
+        caseId,
+        message: staffId
+          ? `${updated?.assigned_staff_name || targetEngineer?.name || 'Track Engineer'} ကို တာဝန်ပေးပြီးပါပြီ။`
+          : 'Track Engineer တာဝန်ပေးမှုကို ဖြုတ်ပြီးပါပြီ။',
+      });
       await load();
     } catch (err) {
-      setError(apiErrorMessage(err, 'Track Engineer တာဝန်ပေးမှုကို မပြောင်းလဲနိုင်ပါ။'));
+      const message = apiErrorMessage(err, 'Track Engineer တာဝန်ပေးမှုကို မပြောင်းလဲနိုင်ပါ။');
+      setError(message);
+      setAssignmentStatus({ state: 'error', caseId, message });
     } finally {
       setBusy(false);
     }
@@ -497,64 +583,120 @@ const TrackIssuesAdminPage = () => {
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {typeof error === 'string' ? error : JSON.stringify(error)}
+        <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50/90 px-4 py-3.5 text-sm text-red-700 shadow-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{typeof error === 'string' ? error : JSON.stringify(error)}</span>
         </div>
       )}
       {success && (
-        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-          {success}
+        <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/90 px-4 py-3.5 text-sm text-emerald-700 shadow-sm">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{success}</span>
         </div>
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         {[
-          ['Caseအားလုံး', stats?.total_cases ?? 0, ClipboardCheck],
-          ['ဆောင်ရွက်ဆဲ', stats?.open_cases ?? 0, Wrench],
-          ['တာဝန်မပေးရသေး', stats?.unassigned_cases ?? 0, UserRoundCog],
-          ['ကွင်းဆင်းစစ်ရန်လို', stats?.needs_field_check ?? 0, AlertTriangle],
-          ['ထပ်မံစစ်ဆေးရန်လို', stats?.follow_up_findings ?? 0, MessageSquare],
-          ['ပြီးစီး', stats?.completed_cases ?? 0, CheckCircle2],
-        ].map(([label, value, Icon]) => (
-          <Card key={label} padding="p-4" hover={false}>
-            <Icon className="h-5 w-5 text-emerald-600" />
-            <p className="mt-2 text-2xl font-bold">{value}</p>
-            <p className="text-xs text-gray-500">{label}</p>
+          ['Caseအားလုံး', stats?.total_cases ?? 0, ClipboardCheck, 'bg-slate-100 text-slate-700'],
+          ['ဆောင်ရွက်ဆဲ', stats?.open_cases ?? 0, Wrench, 'bg-blue-50 text-blue-700'],
+          ['တာဝန်မပေးရသေး', stats?.unassigned_cases ?? 0, UserRoundCog, 'bg-amber-50 text-amber-700'],
+          ['ကွင်းဆင်းစစ်ရန်လို', stats?.needs_field_check ?? 0, AlertTriangle, 'bg-orange-50 text-orange-700'],
+          ['ထပ်မံစစ်ဆေးရန်လို', stats?.follow_up_findings ?? 0, MessageSquare, 'bg-violet-50 text-violet-700'],
+          ['ပြီးစီး', stats?.completed_cases ?? 0, CheckCircle2, 'bg-emerald-50 text-emerald-700'],
+        ].map(([label, value, Icon, tone]) => (
+          <Card
+            key={label}
+            padding="p-4"
+            hover={false}
+            className="border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-2xl font-bold tracking-tight text-slate-950">{value}</p>
+                <p className="mt-1 text-xs font-medium leading-5 text-slate-500">{label}</p>
+              </div>
+              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tone}`}>
+                <Icon className="h-5 w-5" />
+              </div>
+            </div>
           </Card>
         ))}
       </div>
 
-      <Card padding="p-4" hover={false}>
-        <div className="flex flex-col gap-3 md:flex-row md:items-end">
-          <div className="flex-1">
-            <label className="text-xs font-semibold text-gray-600">
-              စစ်ဆေးမှု
-            </label>
-            <select
-              value={selectedInspection}
-              onChange={(event) => setSelectedInspection(event.target.value)}
-              className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
-            >
-              {inspections.map((inspection) => (
-                <option key={inspection.id} value={inspection.id}>
-                  {inspectionLabel(inspection)}
-                </option>
-              ))}
-            </select>
+      <Card
+        padding="p-0"
+        hover={false}
+        className="overflow-hidden border-slate-200 bg-white shadow-sm"
+      >
+        <div className="border-b border-slate-100 bg-gradient-to-r from-blue-50/80 via-white to-violet-50/60 px-4 py-4 sm:px-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-200">
+              <PlusCircle className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-slate-950">စစ်ဆေးမှုမှ Case ဖန်တီးရန်</h2>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                စစ်ဆေးမှုတစ်ခုကို ရွေးပြီး ပြုပြင်ထိန်းသိမ်းရေး Case နှင့် တွေ့ရှိချက်များကို ချိတ်ဆက်ပါ။
+              </p>
+            </div>
           </div>
-          <Button
-            onClick={syncInspection}
-            disabled={busy || !selectedInspection}
-            className="w-full md:w-auto"
-          >
-            စစ်ဆေးမှုကို ချိတ်ဆက် / Caseဖန်တီးရန်
-          </Button>
+        </div>
+
+        <div className="space-y-3 p-4 sm:p-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+            <div className="min-w-0 flex-1">
+              <label className="text-xs font-semibold text-slate-600">စစ်ဆေးမှု</label>
+              <select
+                value={selectedInspection}
+                onChange={(event) => {
+                  setSelectedInspection(event.target.value);
+                  setCaseCreationStatus({ state: 'idle', message: '' });
+                }}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
+              >
+                {inspections.map((inspection) => (
+                  <option key={inspection.id} value={inspection.id}>
+                    {inspectionLabel(inspection)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <Button
+              onClick={syncInspection}
+              disabled={busy || !selectedInspection}
+              className="min-h-11 w-full px-5 lg:w-auto"
+            >
+              {caseCreationStatus.state === 'loading' ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Case ဖန်တီးနေပါသည်…
+                </>
+              ) : (
+                <>
+                  <PlusCircle className="mr-2 h-4 w-4" />
+                  စစ်ဆေးမှုကို ချိတ်ဆက် / Case ဖန်တီးရန်
+                </>
+              )}
+            </Button>
+          </div>
+
+          <InlineOperationStatus status={caseCreationStatus} />
         </div>
       </Card>
 
       <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(280px,1fr)_minmax(0,3fr)]">
         <aside className="min-w-0 space-y-5">
-          <Card padding="p-4" hover={false}>
+          <Card padding="p-4" hover={false} className="border-slate-200 bg-white shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-slate-950">Case စာရင်း</h3>
+                <p className="mt-0.5 text-xs text-slate-500">{filtered.length} Case ပြသထားသည်</p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                {cases.length}
+              </span>
+            </div>
             <div className="mb-3 grid grid-cols-1 gap-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -562,14 +704,14 @@ const TrackIssuesAdminPage = () => {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Caseအမည်၊ ID၊ အင်ဂျင်နီယာဖြင့် ရှာရန်…"
-                className="w-full rounded-xl border py-2 pl-9 pr-3 text-sm"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-50"
               />
             </div>
 
             <select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
-              className="rounded-xl border px-3 py-2 text-sm"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
             >
               <option value="ALL">အခြေအနေအားလုံး</option>
               {STATUSES.map((status) => (
@@ -582,7 +724,7 @@ const TrackIssuesAdminPage = () => {
             <select
               value={engineerFilter}
               onChange={(event) => setEngineerFilter(event.target.value)}
-              className="rounded-xl border px-3 py-2 text-sm"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
             >
               <option value="ALL">အင်ဂျင်နီယာအားလုံး</option>
               <option value="UNASSIGNED">တာဝန်မပေးရသေး</option>
@@ -603,10 +745,10 @@ const TrackIssuesAdminPage = () => {
                   type="button"
                   key={item.id}
                   onClick={() => openCase(item.id)}
-                  className={`w-full rounded-xl border p-3 text-left transition ${
+                  className={`group w-full rounded-2xl border p-3.5 text-left transition-all duration-200 ${
                     selectedCase?.id === item.id
-                      ? 'border-emerald-400 bg-emerald-50/40'
-                      : 'border-gray-200 hover:bg-gray-50'
+                      ? 'border-blue-300 bg-blue-50/60 shadow-sm ring-2 ring-blue-100'
+                      : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md'
                   }`}
                 >
                   <div className="flex flex-wrap gap-2">
@@ -627,9 +769,9 @@ const TrackIssuesAdminPage = () => {
                     ပြီးစီး {item.completed_findings}/{item.total_findings} ·{' '}
                     {item.assigned_staff_name || 'တာဝန်မပေးရသေး'}
                   </p>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100">
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
                     <div
-                      className="h-full bg-emerald-500"
+                      className="h-full rounded-full bg-gradient-to-r from-blue-500 to-emerald-500 transition-all duration-500"
                       style={{ width: `${item.progress_percent || 0}%` }}
                     />
                   </div>
@@ -643,11 +785,16 @@ const TrackIssuesAdminPage = () => {
             </div>
           </Card>
 
-          <Card padding="p-4" hover={false}>
-            <h3 className="flex items-center gap-2 font-bold">
+          <Card padding="p-4" hover={false} className="border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-50 text-violet-700">
                 <MessageSquare className="h-4 w-4" />
-                Caseဆွေးနွေးမှုနှင့် မှတ်တမ်း
-              </h3>
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-950">Case ဆွေးနွေးမှုနှင့် မှတ်တမ်း</h3>
+                <p className="mt-0.5 text-xs text-slate-500">Case activity နှင့် ဆက်သွယ်မှုများ</p>
+              </div>
+            </div>
 
               {!selectedCase ? (
                 <p className="mt-4 text-sm text-gray-500">
@@ -657,7 +804,7 @@ const TrackIssuesAdminPage = () => {
                 <>
                   <div className="mt-3 max-h-80 space-y-3 overflow-auto">
                     {activities.length ? activities.map((activity) => (
-                      <div key={activity.id} className="border-l-2 pl-3">
+                      <div key={activity.id} className="relative rounded-xl border border-slate-100 bg-slate-50/70 p-3 pl-4">
                         <div className="flex flex-wrap gap-2 text-xs text-gray-500">
                           <strong className="text-gray-700">
                             {activity.actor_name || activity.actor_staff_id || 'စနစ်'}
@@ -714,15 +861,17 @@ const TrackIssuesAdminPage = () => {
 
         <div className="min-w-0 space-y-5">
           {!selectedCase ? (
-            <Card padding="p-10" hover={false} className="text-center">
-              <ClipboardCheck className="mx-auto h-12 w-12 text-gray-300" />
+            <Card padding="p-10" hover={false} className="border-slate-200 bg-gradient-to-br from-white to-slate-50 text-center shadow-sm">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100">
+                <ClipboardCheck className="h-8 w-8 text-slate-400" />
+              </div>
               <p className="mt-3 text-gray-600">
                 Track Engineer နှင့် ချို့ယွင်းချက်စာရင်းကို သုံးသပ်ရန် စစ်ဆေးမှုCaseတစ်ခုကို ရွေးပါ။
               </p>
             </Card>
           ) : (
             <>
-              <Card padding="p-4 sm:p-5" hover={false}>
+              <Card padding="p-4 sm:p-5" hover={false} className="overflow-hidden border-slate-200 bg-white shadow-sm">
                 <div className="space-y-5">
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0 flex-1">
@@ -736,24 +885,34 @@ const TrackIssuesAdminPage = () => {
                         <button
                           type="button"
                           onClick={() => setCaseAIReviewOpen(true)}
-                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:bg-violet-100"
-                          title="AI Caseသုံးသပ်ချက်"
-                          aria-label="AI Caseသုံးသပ်ချက်"
+                          className="inline-flex h-9 items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
+                          title="Caseသုံးသပ်ချက်"
+                          aria-label="Caseသုံးသပ်ချက်"
                         >
                           <Bot className="h-4 w-4" />
+                          Review
                         </button>
                       </div>
                     </div>
 
-                    <div className="w-full xl:w-[360px] xl:shrink-0">
-                      <label className="text-xs font-semibold text-gray-600">
-                        တာဝန်ပေးထားသော Track Engineer
-                      </label>
+                    <div className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 xl:w-[390px] xl:shrink-0">
+                      <div className="mb-2 flex items-center gap-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                          <UserCheck className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700">
+                            တာဝန်ပေးထားသော Track Engineer
+                          </label>
+                          <p className="text-[11px] text-slate-400">Engineer assignment</p>
+                        </div>
+                      </div>
+
                       <select
                         value={selectedCase.assigned_staff_id || ''}
                         onChange={(event) => assign(event.target.value || null)}
                         disabled={busy}
-                        className="mt-1 w-full rounded-xl border bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-slate-100 sm:text-base"
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:bg-slate-100 sm:text-base"
                       >
                         <option value="">တာဝန်မပေးရသေး</option>
                         {engineers.map((engineer) => (
@@ -762,6 +921,17 @@ const TrackIssuesAdminPage = () => {
                           </option>
                         ))}
                       </select>
+
+                      <div className="mt-2">
+                        <InlineOperationStatus
+                          compact
+                          status={
+                            assignmentStatus.caseId === selectedCase.id
+                              ? assignmentStatus
+                              : null
+                          }
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -833,7 +1003,7 @@ const TrackIssuesAdminPage = () => {
                       ['တွေ့ရှိချက်', selectedCase.total_findings],
                       ['ကွင်းဆင်းစစ်ပြီး', selectedCase.checked_findings],
                       ['ပြီးစီး', selectedCase.completed_findings],
-                      ['AI မှားယွင်းတွေ့ရှိ', selectedCase.false_positive_count],
+                      ['မှားယွင်းတွေ့ရှိ', selectedCase.false_positive_count],
                       ['ထပ်မံစစ်ရန်', selectedCase.follow_up_count],
                     ].map(([label, value]) => (
                       <div key={label} className="min-w-0 rounded-xl bg-gray-50 p-3 sm:p-4">
@@ -845,8 +1015,16 @@ const TrackIssuesAdminPage = () => {
                 </div>
               </Card>
 
-              <Card padding="p-5" hover={false}>
-                <h3 className="font-bold">Case စီမံခန့်ခွဲမှု</h3>
+              <Card padding="p-5" hover={false} className="border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                    <UserRoundCog className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-slate-950">Case စီမံခန့်ခွဲမှု</h3>
+                    <p className="mt-0.5 text-xs text-slate-500">Admin အတွက် Case workflow controls</p>
+                  </div>
+                </div>
 
                 {statusPolicy.editable ? (
                   <div className="mt-3 space-y-3">
@@ -903,7 +1081,7 @@ const TrackIssuesAdminPage = () => {
                 )}
               </Card>
 
-              <Card padding="p-5" hover={false}>
+              <Card padding="p-5" hover={false} className="border-slate-200 bg-white shadow-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="font-bold">ချို့ယွင်းချက် စစ်ဆေးစာရင်း</h3>
@@ -944,8 +1122,8 @@ const TrackIssuesAdminPage = () => {
                             setFindingAIReview(item);
                           }}
                           className="m-2 inline-flex w-10 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-700 transition hover:bg-violet-100"
-                          title="AI ချို့ယွင်းချက်သုံးသပ်ချက်"
-                          aria-label={`AI သုံးသပ်ချက် - ${defectLabel(item.defect_type)}`}
+                          title="ချို့ယွင်းချက်သုံးသပ်ချက်"
+                          aria-label={`သုံးသပ်ချက် - ${defectLabel(item.defect_type)}`}
                         >
                           <Bot className="h-4 w-4" />
                         </button>
@@ -970,8 +1148,8 @@ const TrackIssuesAdminPage = () => {
                               type="button"
                               onClick={() => setFindingAIReview(selectedFinding)}
                               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
-                              title="AI ချို့ယွင်းချက်သုံးသပ်ချက်"
-                              aria-label="AI ချို့ယွင်းချက်သုံးသပ်ချက်"
+                              title="ချို့ယွင်းချက်သုံးသပ်ချက်"
+                              aria-label="ချို့ယွင်းချက်သုံးသပ်ချက်"
                             >
                               <Bot className="h-4 w-4" />
                             </button>
@@ -1026,7 +1204,7 @@ const TrackIssuesAdminPage = () => {
       <ReviewModal
         open={caseAIReviewOpen && Boolean(selectedCase)}
         onClose={() => setCaseAIReviewOpen(false)}
-        title="AI Caseသုံးသပ်ချက်"
+        title="Caseသုံးသပ်ချက်"
         subtitle={selectedCase ? caseDisplayName(selectedCase) : ''}
       >
         {selectedCase && (
@@ -1037,7 +1215,7 @@ const TrackIssuesAdminPage = () => {
       <ReviewModal
         open={Boolean(findingAIReview)}
         onClose={() => setFindingAIReview(null)}
-        title="AI ချို့ယွင်းချက်သုံးသပ်ချက်"
+        title="ချို့ယွင်းချက်သုံးသပ်ချက်"
         subtitle={findingAIReview ? defectLabel(findingAIReview.defect_type) : ''}
       >
         {findingAIReview && (

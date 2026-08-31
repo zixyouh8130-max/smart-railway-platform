@@ -38,7 +38,7 @@ const InspectionCaseAIReview = ({ inspectionCase, compact = false }) => {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Bot className="w-5 h-5 text-purple-600" />
-        <h3 className="font-bold text-gray-900">AI inspection summary</h3>
+        <h3 className="font-bold text-gray-900">inspection summary</h3>
         <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${priorityClass(inspectionCase?.ai_overall_priority)}`}>
           {humanize(inspectionCase?.ai_overall_priority)}
         </span>
@@ -103,7 +103,7 @@ const InspectionCaseAIReview = ({ inspectionCase, compact = false }) => {
               <p className="mt-2 text-sm text-gray-700">{snapshot.trend_assessment}</p>
             </div>
           )}
-          <ListBlock title="AI limitations" items={snapshot.limitations} />
+          <ListBlock title="limitations" items={snapshot.limitations} />
         </div>
       )}
 
