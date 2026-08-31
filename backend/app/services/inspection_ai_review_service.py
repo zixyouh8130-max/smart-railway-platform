@@ -1,22 +1,14 @@
-"""Railway inspection AI review generation for the Admin API.
+"""Railway inspection AI maintenance advisory service.
 
-The whole-inspection maintenance advisory is text/data based. Images are used
-ONLY for two narrow supplementary checks that mirror the Colab workflow:
-
-1. ``Rail Break`` -> apparent visual severity (limited/moderate/severe), stored
-   only when the model can make a HIGH-confidence visual assessment.
-2. ``Missing Fishplate Bolt`` -> whether a remaining fishplate nut is clearly
-   backed-off/displaced/separated in a way visually consistent with looseness.
-   Image analysis never claims a torque value or true mechanical tightness.
-
-The detector result is accepted as input. The vision model must not verify or
-reject the YOLO/RF-DETR class. All other defect classes remain text-only.
+The whole-inspection advisory is data-only: detector events, confidence,
+rail side, GPS/route distance, event aggregation, and spatial summaries.
+No inspection images are sent to an LLM for secondary visual inspection.
+Historical supplementary visual fields may remain in MongoDB but are
+ignored by the advisory pipeline.
 """
-
 from __future__ import annotations
 
 from collections import Counter
-import base64
 from functools import lru_cache
 import json
 import os
@@ -25,18 +17,12 @@ from typing import Any, Dict, List, Optional
 from ..core.config import settings
 
 
-AI_ADVISORY_VERSION = "railway_advisory_v8_gemini35_minimal_thinking_compact"
+AI_ADVISORY_VERSION = "railway_advisory_v9_text_data_only_gemini35_compact"
 AI_CLUSTER_GAP_M = 3.0
 AI_CLUSTER_MIN_EVENTS = 2
 AI_EVENT_AGGREGATION_GAP_M = 0.5
 
 
-# ONLY these detector classes are allowed to send images to an LLM.
-AI_SPECIAL_VISION_CLASSES = {
-    "Missing Fishplate Bolt",
-    "Rail Break",
-}
-AI_REQUIRED_VISUAL_CONFIDENCE = "high"
 
 ALLOWED_PRIORITIES = {
     "routine",
@@ -79,72 +65,6 @@ MYANMAR LANGUAGE OUTPUT REQUIREMENT:
 #
 # These schemas make Vertex/Gemini generate controlled JSON and allow the SDK's
 # parsed response to be used when available.
-
-FISHPLATE_VISUAL_JSON_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "loose_nut_visible": {
-            "type": "boolean",
-            "description": (
-                "True only when a remaining fishplate nut is clearly visibly "
-                "backed-off, displaced, or separated."
-            ),
-        },
-        "confidence": {
-            "type": "string",
-            "enum": ["high", "medium", "low"],
-        },
-        "finding": {
-            "type": "string",
-            "description": (
-                "Short Myanmar Unicode visual observation. Empty when no clear "
-                "positive visual finding is supported."
-            ),
-        },
-    },
-    "required": ["loose_nut_visible", "confidence", "finding"],
-    "additionalProperties": False,
-}
-
-RAIL_BREAK_VISUAL_JSON_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "severity_supported": {
-            "type": "boolean",
-            "description": (
-                "True only when the images clearly support an apparent visual "
-                "severity assessment."
-            ),
-        },
-        "confidence": {
-            "type": "string",
-            "enum": ["high", "medium", "low"],
-        },
-        "visual_severity": {
-            "anyOf": [
-                {
-                    "type": "string",
-                    "enum": ["limited", "moderate", "severe"],
-                },
-                {"type": "null"},
-            ],
-        },
-        "finding": {
-            "type": "string",
-            "description": (
-                "Short Myanmar Unicode visual description. Empty when a reliable "
-                "severity assessment cannot be made."
-            ),
-        },
-    },
-    "required": [
-        "severity_supported",
-        "confidence",
-        "visual_severity",
-        "finding",
-    ],
-    "additionalProperties": False,
-}
 
 ADVISORY_JSON_SCHEMA: Dict[str, Any] = {
     "type": "object",
@@ -317,16 +237,6 @@ def _apply_advisory_schema_limits() -> None:
 
 
 _apply_advisory_schema_limits()
-
-
-def _targeted_visual_schema(defect_type: str) -> Dict[str, Any]:
-    if defect_type == "Missing Fishplate Bolt":
-        return FISHPLATE_VISUAL_JSON_SCHEMA
-    if defect_type == "Rail Break":
-        return RAIL_BREAK_VISUAL_JSON_SCHEMA
-    raise ValueError(
-        f"No targeted visual JSON schema for defect class: {defect_type!r}"
-    )
 
 
 def _gemini_finish_reason(response: Any) -> Optional[str]:
@@ -684,60 +594,6 @@ def build_spatial_defect_summary(
     }
 
 
-def _supplementary_findings(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Reuse ONLY positive visual findings already saved by Colab/Gradio.
-
-    When event aggregation is enabled, one representative review may cover a
-    nearby same-class group. We therefore deduplicate by group_id (preferred)
-    or by event id.
-    """
-    findings: List[Dict[str, Any]] = []
-    seen_sources = set()
-
-    for event in events:
-        review = event.get("supplementary_visual_review") or {}
-        if review.get("performed") is not True:
-            continue
-
-        group_id = review.get("group_id") or (event.get("supplementary_visual_group") or {}).get("group_id")
-        source_key = group_id or str(event.get("id") or event.get("_id") or "")
-        if source_key in seen_sources:
-            continue
-        seen_sources.add(source_key)
-
-        gps = event.get("gps") or {}
-        distance = (
-            gps.get("distance_from_start_m")
-            if gps.get("distance_from_start_m") is not None
-            else event.get("distance_from_route_start_m")
-        )
-
-        for finding in review.get("findings") or []:
-            if not finding:
-                continue
-            findings.append(
-                {
-                    "rail_side": event.get("rail_side"),
-                    "route_distance_m": distance,
-                    "related_defect": event.get("defect_type"),
-                    "finding": finding,
-                }
-            )
-
-        severity = review.get("rail_break_visual_severity")
-        if severity:
-            findings.append(
-                {
-                    "rail_side": event.get("rail_side"),
-                    "route_distance_m": distance,
-                    "related_defect": "Rail Break",
-                    "rail_break_visual_severity": severity,
-                }
-            )
-
-    return findings
-
-
 def build_advisory_prompt(
     inspection: Dict[str, Any],
     events: List[Dict[str, Any]],
@@ -812,7 +668,6 @@ def build_advisory_prompt(
         ],
         "localized_defect_concentrations": compact_clusters,
         "localized_concentration_total_count": len(spatial_summary.get("clusters") or []),
-        "supplementary_visual_findings": _supplementary_findings(events),
     }
 
     return f"""
@@ -822,6 +677,8 @@ You are an AI railway maintenance advisory assistant.
 
 Analyze the supplied inspection facts. Object detection has already been done.
 Do not verify or reject detector classes.
+No images are provided to you. Base the advisory only on the structured
+detector/event/GPS facts supplied below.
 
 CORE INTERPRETATION:
 - raw_total_defect_events is the detector-event count.
@@ -837,8 +694,8 @@ SAFETY / ENGINEERING RULES:
 - Do not certify the track safe or unsafe.
 - Do not invent thresholds, dimensions, torque values, crack depth, or speed restrictions.
 - Do not diagnose causes; describe them only as possible contributing factors.
-- A Rail Break supplementary severity, when present, is apparent visual severity only.
-- A fishplate-nut supplementary finding is visual only and cannot establish torque/tightness.
+- Do not claim that images were independently reviewed by the LLM.
+- Treat detector classes/confidences as supplied inspection data, not as visually re-verified facts.
 - Final actions require applicable operator procedures and qualified field inspection.
 
 OUTPUT RULES:
@@ -861,359 +718,6 @@ INSPECTION FACTS:
 {json.dumps(factual_input, ensure_ascii=False, separators=(",", ":"))}
 """
 
-
-def _special_event_metadata(event: Dict[str, Any]) -> Dict[str, Any]:
-    gps = event.get("gps") or {}
-    return {
-        "event_id": str(event.get("id") or event.get("_id") or ""),
-        "rail_side": event.get("rail_side"),
-        "defect_type": event.get("defect_type"),
-        "detector_confidence": event.get("confidence"),
-        "route_distance_m": (
-            gps.get("distance_from_start_m")
-            if gps.get("distance_from_start_m") is not None
-            else event.get("distance_from_route_start_m")
-        ),
-        "representative_frame": event.get("representative_frame"),
-        "representative_timestamp": event.get("representative_timestamp"),
-    }
-
-
-def build_targeted_visual_prompt(event: Dict[str, Any]) -> str:
-    """Build the narrow image-inspection prompt for one eligible event."""
-    defect_type = event.get("defect_type")
-    metadata = _special_event_metadata(event)
-
-    if defect_type == "Missing Fishplate Bolt":
-        return f"""
-You are performing a very narrow supplementary visual check for a railway
-inspection system.
-
-{MYANMAR_OUTPUT_RULES}
-
-The railway detector has already recorded this event:
-
-{json.dumps(metadata, ensure_ascii=False, indent=2)}
-
-DO NOT verify or reject the detector's Missing Fishplate Bolt classification.
-
-Your ONLY task is to inspect the supplied context image and close-up crop for
-an ADDITIONAL visible issue on the fishplate/joint:
-
-Check whether any REMAINING fishplate nut appears clearly:
-- backed away from its normal seated position,
-- visibly displaced,
-- visibly separated from the fishplate/joint bar,
-- or otherwise visually consistent with a loose/backed-off nut.
-
-IMPORTANT:
-- You cannot determine tightening torque from an image.
-- You cannot prove mechanical tightness from an image.
-- Rust, dirt, shadows, blur, perspective, or discoloration alone are NOT
-  evidence that a nut is loose.
-- Do not infer looseness when the nut position is unclear.
-- Only set loose_nut_visible=true when the visual evidence is clear.
-- If uncertain, set loose_nut_visible=false.
-- Do not discuss whether the detector was correct.
-- Human-readable finding text must be Myanmar Unicode.
-- Return JSON only.
-
-Return exactly this shape:
-{{
-  "loose_nut_visible": true,
-  "confidence": "high | medium | low",
-  "finding": "မြန်မာဘာသာဖြင့် ရေးထားသော တိုတောင်းပြီး အချက်အလက်အခြေပြု မြင်ကွင်းဆိုင်ရာ မှတ်ချက်"
-}}
-
-When a loose/backed-off nut is NOT clearly visible, return:
-{{
-  "loose_nut_visible": false,
-  "confidence": "low",
-  "finding": ""
-}}
-"""
-
-    if defect_type == "Rail Break":
-        return f"""
-You are performing a narrow supplementary visual assessment for a railway
-inspection system.
-
-{MYANMAR_OUTPUT_RULES}
-
-The railway detector has already recorded this event:
-
-{json.dumps(metadata, ensure_ascii=False, indent=2)}
-
-DO NOT verify or reject the detector's Rail Break classification.
-
-Your ONLY task is to determine whether the supplied images clearly support a
-visual description of the APPARENT EXTENT of the detected rail break.
-
-Possible visual severity levels:
-- limited
-- moderate
-- severe
-
-Use "severe" only when there is clearly extensive visible discontinuity,
-separation, displacement, or major visible loss of rail continuity.
-
-IMPORTANT:
-- This is visual severity only, not a structural measurement.
-- Do not determine whether trains may safely operate.
-- Do not infer crack depth or internal fracture extent.
-- Do not estimate dimensions that are not measurable from the image.
-- Do not invent speed restrictions.
-- If image quality, angle, obstruction, or ambiguity prevents a reliable
-  assessment, do not provide severity.
-- Severity is stored only when confidence is HIGH.
-- Human-readable finding text must be Myanmar Unicode.
-- Return JSON only.
-
-Return exactly this shape:
-{{
-  "severity_supported": true,
-  "confidence": "high | medium | low",
-  "visual_severity": "limited | moderate | severe",
-  "finding": "မြန်မာဘာသာဖြင့် ရေးထားသော မြင်တွေ့ရသည့် အတိုင်းအတာဆိုင်ရာ တိုတောင်းပြီး အချက်အလက်အခြေပြု ဖော်ပြချက်"
-}}
-
-If a reliable severity assessment cannot be made, return:
-{{
-  "severity_supported": false,
-  "confidence": "low",
-  "visual_severity": null,
-  "finding": ""
-}}
-"""
-
-    raise ValueError(f"Unsupported targeted-vision defect class: {defect_type!r}")
-
-
-def _validate_targeted_visual_payload(
-    event: Dict[str, Any],
-    payload: Any,
-    *,
-    provider: str,
-    model: str,
-    fallback_used: bool,
-    primary_error: Optional[str] = None,
-) -> Dict[str, Any]:
-    if not isinstance(payload, dict):
-        raise ValueError("Targeted visual result must be a JSON object.")
-
-    defect_type = event.get("defect_type")
-    confidence = str(payload.get("confidence") or "low").strip().lower()
-    if confidence not in {"high", "medium", "low"}:
-        confidence = "low"
-
-    base = {
-        "review_version": AI_ADVISORY_VERSION,
-        "provider": provider,
-        "model": model,
-        "fallback_used": fallback_used,
-        "performed": True,
-        "execution": {
-            "primary_provider": "gemini_vertex",
-            "provider_used": provider,
-            "model_used": model,
-            "fallback_used": fallback_used,
-            "fallback_provider": "groq",
-            "primary_error": primary_error,
-        },
-    }
-
-    if defect_type == "Missing Fishplate Bolt":
-        loose_visible = payload.get("loose_nut_visible") is True
-        finding = str(payload.get("finding") or "").strip()
-        findings: List[Dict[str, Any]] = []
-
-        # Match the Colab workflow: only a HIGH-confidence positive observation
-        # becomes a supplementary maintenance finding.
-        if loose_visible and confidence == AI_REQUIRED_VISUAL_CONFIDENCE and finding:
-            findings.append(
-                {
-                    "type": "visibly_loose_or_backed_off_fishplate_nut",
-                    "confidence": "high",
-                    "description": finding,
-                    "important_note": (
-                        "This is a visual observation only. Nut torque and true "
-                        "mechanical tightness cannot be determined from imagery."
-                    ),
-                }
-            )
-
-        return {
-            **base,
-            "scope": "fishplate_nut_visual_check",
-            "visual_result": {
-                "loose_nut_visible": loose_visible,
-                "confidence": confidence,
-            },
-            "findings": findings,
-        }
-
-    if defect_type == "Rail Break":
-        supported = payload.get("severity_supported") is True
-        severity_level = payload.get("visual_severity")
-        finding = str(payload.get("finding") or "").strip()
-        severity = None
-
-        if (
-            supported
-            and confidence == AI_REQUIRED_VISUAL_CONFIDENCE
-            and severity_level in {"limited", "moderate", "severe"}
-            and finding
-        ):
-            severity = {
-                "level": severity_level,
-                "confidence": "high",
-                "description": finding,
-                "important_note": (
-                    "This is an apparent visual-severity assessment, not a "
-                    "structural measurement."
-                ),
-            }
-
-        return {
-            **base,
-            "scope": "rail_break_visual_severity",
-            "visual_result": {
-                "severity_supported": supported,
-                "confidence": confidence,
-                "visual_severity": severity_level,
-            },
-            "rail_break_visual_severity": severity,
-        }
-
-    raise ValueError(f"Unsupported targeted-vision defect class: {defect_type!r}")
-
-
-def _gemini_visual_call(
-    prompt: str,
-    context_image: Dict[str, Any],
-    crop_image: Dict[str, Any],
-    defect_type: str,
-) -> Dict[str, Any]:
-    from google.genai import types as genai_types
-
-    model = _setting("GEMINI_MODEL", "gemini-3.5-flash") or "gemini-3.5-flash"
-
-    contents = [
-        prompt,
-        genai_types.Part.from_bytes(
-            data=context_image["data"],
-            mime_type=context_image.get("mime_type") or "image/jpeg",
-        ),
-        genai_types.Part.from_bytes(
-            data=crop_image["data"],
-            mime_type=crop_image.get("mime_type") or "image/jpeg",
-        ),
-    ]
-
-    return _gemini_generate_structured_json(
-        model=model,
-        contents=contents,
-        response_json_schema=_targeted_visual_schema(defect_type),
-        temperature=0.0,
-        max_output_tokens=1200,
-        label=f"targeted-vision/{defect_type}",
-    )
-
-
-def _to_data_uri(image: Dict[str, Any]) -> str:
-    mime_type = image.get("mime_type") or "image/jpeg"
-    encoded = base64.b64encode(image["data"]).decode("ascii")
-    return f"data:{mime_type};base64,{encoded}"
-
-
-def _groq_visual_call(
-    prompt: str,
-    context_image: Dict[str, Any],
-    crop_image: Dict[str, Any],
-) -> Dict[str, Any]:
-    model = _setting("GROQ_MODEL", "qwen/qwen3.6-27b") or "qwen/qwen3.6-27b"
-
-    response = _groq_client().chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": _to_data_uri(context_image)},
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": _to_data_uri(crop_image)},
-                    },
-                ],
-            }
-        ],
-        response_format={"type": "json_object"},
-        reasoning_effort="none",
-        temperature=0.1,
-        max_completion_tokens=500,
-    )
-
-    content = response.choices[0].message.content or ""
-    if not content.strip():
-        raise RuntimeError("Groq/Qwen returned an empty targeted-vision response.")
-    return json.loads(content)
-
-
-def generate_targeted_visual_review(
-    event: Dict[str, Any],
-    context_image: Dict[str, Any],
-    crop_image: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Run the narrow Gemini -> Qwen visual check for ONE eligible event."""
-    defect_type = event.get("defect_type")
-    if defect_type not in AI_SPECIAL_VISION_CLASSES:
-        raise ValueError(f"Images are not allowed for defect class: {defect_type!r}")
-
-    if not context_image.get("data") or not crop_image.get("data"):
-        raise ValueError("Both context and crop evidence images are required.")
-
-    prompt = build_targeted_visual_prompt(event)
-    gemini_model = _setting("GEMINI_MODEL", "gemini-3.5-flash") or "gemini-3.5-flash"
-    groq_model = _setting("GROQ_MODEL", "qwen/qwen3.6-27b") or "qwen/qwen3.6-27b"
-
-    primary_error = None
-    try:
-        payload = _gemini_visual_call(prompt, context_image, crop_image, defect_type)
-        return _validate_targeted_visual_payload(
-            event,
-            payload,
-            provider="gemini_vertex",
-            model=gemini_model,
-            fallback_used=False,
-        )
-    except Exception as exc:
-        primary_error = f"{type(exc).__name__}: {exc}"
-        print(
-            "GEMINI TARGETED VISION FALLBACK | "
-            f"class={defect_type} | "
-            f"error={primary_error[:700]}"
-        )
-
-    try:
-        payload = _groq_visual_call(prompt, context_image, crop_image)
-        return _validate_targeted_visual_payload(
-            event,
-            payload,
-            provider="groq",
-            model=groq_model,
-            fallback_used=True,
-            primary_error=primary_error,
-        )
-    except Exception as fallback_exc:
-        raise RuntimeError(
-            "Both targeted-vision providers failed. "
-            f"Gemini: {primary_error}. "
-            f"Groq/Qwen: {type(fallback_exc).__name__}: {fallback_exc}"
-        ) from fallback_exc
 
 def _validate_advisory(payload: Any) -> Dict[str, Any]:
     if not isinstance(payload, dict):

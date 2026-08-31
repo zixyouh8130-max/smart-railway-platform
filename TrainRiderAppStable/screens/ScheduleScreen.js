@@ -11,7 +11,7 @@ import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import schedulesApi from '../api/schedules';
-import { formatRailwayTime } from '../utils/railwayDateTime';
+import { formatRailwayDate, formatRailwayTime } from '../utils/railwayDateTime';
 
 const ScheduleScreen = () => {
   const navigation = useNavigation();
@@ -88,10 +88,10 @@ const ScheduleScreen = () => {
     }
   };
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '';
-    return new Date(dateStr).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-  };
+  const formatDate = dateStr =>
+    dateStr
+      ? formatRailwayDate(dateStr, 'en-GB', { weekday: 'short' })
+      : '';
 
   const formatTime = (timeStr) => {
     if (!timeStr) return '--:--';

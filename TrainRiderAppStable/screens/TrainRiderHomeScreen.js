@@ -13,6 +13,11 @@ import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import api from '../api/axios';
 import { requestLocationPermission } from '../utils/locationPermission';
+import {
+  formatRailwayDate,
+  formatRailwayTime,
+  railwayDateTimeToInstant,
+} from '../utils/railwayDateTime';
 
 const POLL_INTERVAL = 15000; // keep pre-departure schedule/assignment changes in sync
 const ALERT_THRESHOLD = 15;   // minutes
@@ -97,22 +102,27 @@ const TrainRiderHomeScreen = () => {
 
   const calculateTimeToDeparture = () => {
     try {
-      const timeParts = todaySchedule.departure_time.split(':');
-      const departureDateTime = new Date(todaySchedule.assignment_date);
-      departureDateTime.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]), 0, 0);
-      const diffMs = departureDateTime.getTime() - new Date().getTime();
+      const serviceDate = String(todaySchedule.assignment_date).slice(0, 10);
+      const departureDateTime = railwayDateTimeToInstant(
+        `${serviceDate}T${todaySchedule.departure_time}:00`,
+      );
+
+      if (!departureDateTime) {
+        throw new Error('Invalid railway departure datetime');
+      }
+
+      const diffMs = departureDateTime.getTime() - Date.now();
       const diffMinutes = Math.floor(diffMs / 60000);
       setTimeToDeparture(diffMinutes);
-      if (diffMinutes <= ALERT_THRESHOLD && diffMinutes > 0 && !journeyActive) {
-        setShowAlert(true);
-      } else if (diffMinutes <= 0 && !journeyActive) {
-        setShowAlert(true);
-      } else {
-        setShowAlert(false);
-      }
+
+      setShowAlert(
+        !journeyActive &&
+          diffMinutes <= ALERT_THRESHOLD,
+      );
     } catch (err) {
       console.error('Error calculating departure time:', err);
       setTimeToDeparture(null);
+      setShowAlert(false);
     }
   };
 
@@ -147,6 +157,8 @@ const TrainRiderHomeScreen = () => {
         ...todaySchedule,
         schedule_id: response.data?.schedule_id || todaySchedule.schedule_id,
         status: response.data?.status || 'ACTIVE',
+        schedule_status: response.data?.schedule_status || 'ACTIVE',
+        tracking_ready: true,
       };
 
       setTodaySchedule(activeAssignment);
@@ -175,29 +187,13 @@ const TrainRiderHomeScreen = () => {
     fetchScheduleData(true);
   };
 
-  const formatTime = (timeStr) => {
-    if (!timeStr) return '--:--';
-    const parts = timeStr.split(':');
-    const hours = parseInt(parts[0]);
-    const minutes = parseInt(parts[1]);
-    const period = hours >= 12 ? 'PM' : 'AM';
-    const displayHours = hours % 12 || 12;
-    return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
-  };
+  const formatTime = timeStr =>
+    formatRailwayTime(timeStr, 'en-US', { hour12: true });
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '';
-    try {
-      return new Date(dateStr).toLocaleDateString('my-MM', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      });
-    } catch {
-      return dateStr;
-    }
-  };
+  const formatDate = dateStr =>
+    dateStr
+      ? formatRailwayDate(dateStr, 'my-MM', { weekday: 'long' })
+      : '';
 
   const getTimeStatusText = () => {
     if (journeyActive) return 'ခရီးစဉ်အတွင်း';
@@ -383,7 +379,7 @@ const TrainRiderHomeScreen = () => {
         {/* Schedule Status */}
         <View style={styles.scheduleStatusRow}>
           <Text style={styles.scheduleStatusText}>
-            Status: {todaySchedule.status} | Last checked: {lastUpdated?.toLocaleTimeString() || 'Never'}
+            Assignment: {todaySchedule.status} | Schedule: {todaySchedule.schedule_status || todaySchedule.status} | Last checked: {lastUpdated?.toLocaleTimeString() || 'Never'}
           </Text>
         </View>
       </View>

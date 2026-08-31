@@ -1,66 +1,103 @@
 import api from './axios';
 
+const base = '/track-issues';
+
 const trackIssuesApi = {
-  getMine: async (includeResolved = false) => {
-    const response = await api.get('/track-issues/mine', {
-      params: { include_resolved: includeResolved },
+  getMine: async (includeCompleted = false) => {
+    const response = await api.get(`${base}/mine`, {
+      params: { include_completed: includeCompleted },
     });
     return response.data;
   },
 
   getNearby: async (latitude, longitude, radiusMiles = 5) => {
-    const response = await api.get('/track-issues/nearby', {
+    const response = await api.get(`${base}/nearby`, {
       params: {
         latitude,
         longitude,
         radius_miles: radiusMiles,
-        include_assigned_to_me: true,
       },
     });
     return response.data;
   },
 
-  getById: async (issueId) => {
-    const response = await api.get(`/track-issues/${issueId}`);
+  getById: async caseId => {
+    const response = await api.get(`${base}/${caseId}`);
     return response.data;
   },
 
-  claim: async (issueId) => {
-    const response = await api.post(`/track-issues/${issueId}/claim`);
+  claim: async caseId => {
+    const response = await api.post(`${base}/${caseId}/claim`);
     return response.data;
   },
 
-  checkLocation: async (issueId, latitude, longitude, accuracyMeters = null) => {
-    const response = await api.post(`/track-issues/${issueId}/location-check`, {
-      latitude,
-      longitude,
-      accuracy_meters: accuracyMeters,
-    });
+  checkLocation: async (caseId, issueId, payload) => {
+    const response = await api.post(
+      `${base}/${caseId}/issues/${issueId}/location-check`,
+      payload,
+    );
     return response.data;
   },
 
-  updateFieldVerification: async (issueId, verificationStatus, note) => {
-    const response = await api.patch(`/track-issues/${issueId}/field-verification`, {
-      verification_status: verificationStatus,
+  verifyFinding: async (caseId, issueId, verificationStatus, note) => {
+    const response = await api.patch(
+      `${base}/${caseId}/issues/${issueId}/field-verification`,
+      {
+        verification_status: verificationStatus,
+        note,
+      },
+    );
+    return response.data;
+  },
+
+  updateMaintenance: async (caseId, issueId, maintenanceStatus, note = null) => {
+    const response = await api.patch(
+      `${base}/${caseId}/issues/${issueId}/maintenance`,
+      {
+        maintenance_status: maintenanceStatus,
+        note,
+      },
+    );
+    return response.data;
+  },
+
+  updateStatus: async (caseId, status, note = null) => {
+    const response = await api.patch(`${base}/${caseId}/status`, {
+      status,
       note,
     });
     return response.data;
   },
 
-  updateStatus: async (issueId, status, note = null) => {
-    const response = await api.patch(`/track-issues/${issueId}/status`, {
-      status,
-      note: note || null,
+  addCaseComment: async (
+    caseId,
+    message,
+    messageKind = 'COMMENT',
+    parentActivityId = null,
+  ) => {
+    const response = await api.post(`${base}/${caseId}/comments`, {
+      message,
+      message_kind: messageKind,
+      parent_activity_id: parentActivityId,
     });
     return response.data;
   },
 
-  addComment: async (issueId, message, messageKind = 'UPDATE') => {
-    const response = await api.post(`/track-issues/${issueId}/comments`, {
-      message,
-      message_kind: messageKind,
-      parent_activity_id: null,
-    });
+  addIssueComment: async (
+    caseId,
+    issueId,
+    message,
+    messageKind = 'COMMENT',
+    parentActivityId = null,
+  ) => {
+    const response = await api.post(
+      `${base}/${caseId}/issues/${issueId}/comments`,
+      {
+        message,
+        message_kind: messageKind,
+        parent_activity_id: parentActivityId,
+      },
+    );
     return response.data;
   },
 };
