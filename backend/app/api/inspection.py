@@ -29,6 +29,7 @@ from ..core.database import get_db
 from ..core.security import decode_access_token
 from ..models.user import User, UserRole
 from ..services.inspection_ai_review_service import (
+    AI_EVENT_AGGREGATION_GAP_M,
     AI_SPECIAL_VISION_CLASSES,
     generate_inspection_ai_review,
     generate_targeted_visual_review,
@@ -42,11 +43,6 @@ from ..services.inspection_ai_review_service import (
 # The signature is NOT the user's JWT.  It grants read-only access only to one
 # inspection video side and expires automatically.
 MEDIA_URL_TTL_SECONDS = 60 * 60  # 60 minutes
-
-# Cloud Run has a 32 MiB HTTP/1 response limit for non-streamed responses.
-# Keep each proxied video byte-range comfortably below that limit so native
-# HTML5 video playback can request the next segment as needed.
-VIDEO_PROXY_RANGE_BYTES = 8 * 1024 * 1024  # 8 MiB
 
 _optional_bearer = HTTPBearer(auto_error=False)
 
@@ -624,6 +620,239 @@ async def _download_drive_file_bytes(
     }
 
 
+def _visual_event_id(event: Dict[str, Any]) -> str:
+    return str(event.get("id") or event.get("_id") or "")
+
+
+def _visual_event_distance(event: Dict[str, Any]) -> Optional[float]:
+    gps = event.get("gps") or {}
+    value = gps.get("distance_from_start_m")
+    if value is None:
+        value = event.get("distance_from_route_start_m")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _visual_event_confidence(event: Dict[str, Any]) -> float:
+    try:
+        return float(event.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _has_visual_evidence_paths(event: Dict[str, Any]) -> bool:
+    media = event.get("media") or {}
+    return bool(media.get("context_relpath") and media.get("crop_relpath"))
+
+
+def _full_visual_review_exists(event: Dict[str, Any]) -> bool:
+    review = event.get("supplementary_visual_review") or {}
+    return review.get("performed") is True and bool(review.get("scope"))
+
+
+def _select_visual_group_representative(group_events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def score(event: Dict[str, Any]):
+        review = event.get("supplementary_visual_review") or {}
+        has_existing = 1 if _full_visual_review_exists(event) else 0
+        has_positive = 1 if (review.get("findings") or review.get("rail_break_visual_severity")) else 0
+        has_evidence = 1 if _has_visual_evidence_paths(event) else 0
+        distance = _visual_event_distance(event)
+        return (
+            has_positive,
+            has_existing,
+            has_evidence,
+            _visual_event_confidence(event),
+            -(abs(distance) if distance is not None else 1e12),
+        )
+
+    return max(group_events, key=score)
+
+
+def _build_targeted_visual_event_groups(
+    event_docs: List[Dict[str, Any]],
+    group_gap_m: float = AI_EVENT_AGGREGATION_GAP_M,
+) -> List[Dict[str, Any]]:
+    eligible = [
+        event
+        for event in event_docs
+        if event.get("defect_type") in AI_SPECIAL_VISION_CLASSES
+    ]
+
+    buckets: Dict[tuple, List[Dict[str, Any]]] = {}
+    singletons: List[Dict[str, Any]] = []
+
+    for event in eligible:
+        distance = _visual_event_distance(event)
+        key = (event.get("rail_side"), event.get("defect_type"))
+        if distance is None:
+            representative = _select_visual_group_representative([event])
+            singletons.append(
+                {
+                    "group_id": f"{key[0]}|{key[1]}|single|{_visual_event_id(event)}",
+                    "rail_side": key[0],
+                    "defect_type": key[1],
+                    "start_distance_m": None,
+                    "end_distance_m": None,
+                    "span_m": None,
+                    "member_count": 1,
+                    "events": [event],
+                    "representative_event": representative,
+                }
+            )
+            continue
+        buckets.setdefault(key, []).append(event)
+
+    groups: List[Dict[str, Any]] = []
+
+    for (rail_side, defect_type), bucket in buckets.items():
+        bucket.sort(key=lambda ev: _visual_event_distance(ev) or 0.0)
+        current = [bucket[0]]
+
+        def finalize(cluster: List[Dict[str, Any]]) -> None:
+            representative = _select_visual_group_representative(cluster)
+            distances = [
+                _visual_event_distance(ev)
+                for ev in cluster
+                if _visual_event_distance(ev) is not None
+            ]
+            start_distance = min(distances) if distances else None
+            end_distance = max(distances) if distances else None
+            group_id = (
+                f"{rail_side}|{defect_type}|"
+                f"{(start_distance if start_distance is not None else 0):.2f}|"
+                f"{(end_distance if end_distance is not None else 0):.2f}|{len(cluster)}"
+            )
+            groups.append(
+                {
+                    "group_id": group_id,
+                    "rail_side": rail_side,
+                    "defect_type": defect_type,
+                    "start_distance_m": round(start_distance, 2) if start_distance is not None else None,
+                    "end_distance_m": round(end_distance, 2) if end_distance is not None else None,
+                    "span_m": round(end_distance - start_distance, 2) if (start_distance is not None and end_distance is not None) else None,
+                    "member_count": len(cluster),
+                    "events": cluster,
+                    "representative_event": representative,
+                }
+            )
+
+        for event in bucket[1:]:
+            prev = current[-1]
+            gap = (_visual_event_distance(event) or 0.0) - (_visual_event_distance(prev) or 0.0)
+            if gap <= group_gap_m:
+                current.append(event)
+            else:
+                finalize(current)
+                current = [event]
+
+        finalize(current)
+
+    groups.extend(singletons)
+    groups.sort(
+        key=lambda group: (
+            str(group.get("rail_side") or ""),
+            str(group.get("defect_type") or ""),
+            float(group.get("start_distance_m") or 0.0),
+        )
+    )
+    return groups
+
+
+def _build_group_metadata(group: Dict[str, Any]) -> Dict[str, Any]:
+    representative = group["representative_event"]
+    return {
+        "group_id": group.get("group_id"),
+        "rail_side": group.get("rail_side"),
+        "defect_type": group.get("defect_type"),
+        "start_distance_m": group.get("start_distance_m"),
+        "end_distance_m": group.get("end_distance_m"),
+        "span_m": group.get("span_m"),
+        "member_count": group.get("member_count"),
+        "representative_event_id": _visual_event_id(representative),
+        "representative_route_distance_m": _visual_event_distance(representative),
+        "aggregation_gap_m": AI_EVENT_AGGREGATION_GAP_M,
+    }
+
+
+async def _persist_group_review_to_events(
+    group: Dict[str, Any],
+    review: Dict[str, Any],
+    *,
+    error_text: Optional[str] = None,
+) -> None:
+    group_metadata = _build_group_metadata(group)
+    representative = group["representative_event"]
+    representative_id = _visual_event_id(representative)
+    review_time = datetime.now(timezone.utc)
+
+    # Keep the full review ONLY on the representative event to avoid duplicating
+    # one grouped visual result across many raw detector events. Non-
+    # representatives receive a lightweight reference + group metadata.
+    for event in group.get("events") or []:
+        raw_event_id = event.get("_id") or event.get("id")
+        if not raw_event_id or not ObjectId.is_valid(str(raw_event_id)):
+            continue
+
+        is_representative = _visual_event_id(event) == representative_id
+        event["supplementary_visual_group"] = group_metadata
+        event["supplementary_visual_grouped_at"] = review_time
+
+        if is_representative:
+            full_review = dict(review)
+            full_review["group_id"] = group_metadata["group_id"]
+            full_review["group_member_count"] = group_metadata["member_count"]
+            full_review["is_group_representative"] = True
+            event["supplementary_visual_review"] = full_review
+            event["supplementary_visual_reviewed_at"] = review_time
+            update_doc = {
+                "$set": {
+                    "supplementary_visual_group": group_metadata,
+                    "supplementary_visual_grouped_at": review_time,
+                    "supplementary_visual_review": full_review,
+                    "supplementary_visual_reviewed_at": review_time,
+                },
+                "$unset": {
+                    "supplementary_visual_review_error": "",
+                    "supplementary_visual_review_ref": "",
+                },
+            }
+        else:
+            review_ref = {
+                "group_id": group_metadata["group_id"],
+                "source_event_id": representative_id,
+                "scope": review.get("scope"),
+                "performed": review.get("performed"),
+                "provider": review.get("provider"),
+                "model": review.get("model"),
+                "review_version": review.get("review_version"),
+            }
+            event["supplementary_visual_review_ref"] = review_ref
+            event.pop("supplementary_visual_review", None)
+            update_doc = {
+                "$set": {
+                    "supplementary_visual_group": group_metadata,
+                    "supplementary_visual_grouped_at": review_time,
+                    "supplementary_visual_review_ref": review_ref,
+                },
+                "$unset": {
+                    "supplementary_visual_review": "",
+                    "supplementary_visual_review_error": "",
+                },
+            }
+
+        if error_text and is_representative:
+            update_doc.setdefault("$set", {})["supplementary_visual_review_error"] = error_text
+
+        await inspection_events_collection.update_one(
+            {"_id": ObjectId(str(raw_event_id))},
+            update_doc,
+        )
+
+
 async def _load_event_visual_evidence(
     inspection: Dict[str, Any],
     event: Dict[str, Any],
@@ -674,260 +903,186 @@ async def _run_targeted_visual_checks(
     inspection: Dict[str, Any],
     event_docs: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """
-    Run image analysis ONLY for Rail Break and Missing Fishplate Bolt.
+    """Run image analysis ONLY for Rail Break and Missing Fishplate Bolt.
 
-    Performance note:
-    Eligible events are processed with bounded concurrency instead of one by
-    one. This keeps the exact same per-event safety rules and MongoDB schema,
-    but avoids waiting for every Drive + Gemini round-trip serially.
-
-    Existing successful supplementary reviews are reused and never re-run.
+    A lightweight event aggregator groups nearby same-class events on the same
+    rail side so that likely repeated detections of one physical issue trigger
+    one visual review instead of many duplicate visual calls.
     """
     folder_cache: Dict[str, str] = {}
-
-    # Keep this deliberately small. These are network-bound Drive/Gemini calls;
-    # 3 concurrent checks gives a large latency improvement without creating an
-    # uncontrolled burst of model/API requests from one Cloud Run instance.
-    visual_concurrency = 3
-    semaphore = asyncio.Semaphore(visual_concurrency)
+    total_events = len(event_docs)
+    eligible_events = [
+        event for event in event_docs
+        if event.get("defect_type") in AI_SPECIAL_VISION_CLASSES
+    ]
+    grouped_events = _build_targeted_visual_event_groups(event_docs)
 
     summary = {
-        "eligible_event_count": 0,
+        "eligible_event_count": len(eligible_events),
+        "aggregated_group_count": len(grouped_events),
+        "aggregated_reduction_event_count": max(len(eligible_events) - len(grouped_events), 0),
+        "aggregation_gap_m": AI_EVENT_AGGREGATION_GAP_M,
         "reused_existing_count": 0,
         "performed_count": 0,
         "failed_count": 0,
+        "covered_member_event_count": 0,
         "positive_fishplate_loose_nut_findings": 0,
         "rail_break_severity_assessments": 0,
         "classes_using_images": sorted(AI_SPECIAL_VISION_CLASSES),
-        "max_concurrency": visual_concurrency,
+        "group_summaries": [],
     }
 
-    pending_events: List[Dict[str, Any]] = []
-
-    # First pass: identify only the two image-eligible classes and reuse any
-    # successful visual review already generated by Colab/Gradio/Admin.
-    for event in event_docs:
-        defect_type = event.get("defect_type")
-        if defect_type not in AI_SPECIAL_VISION_CLASSES:
-            continue
-
-        summary["eligible_event_count"] += 1
-        existing = event.get("supplementary_visual_review") or {}
-
-        if existing.get("performed") is True:
-            summary["reused_existing_count"] += 1
-
-            print(
-                "AI VISION REUSE | "
-                f"event_id={event.get('_id') or event.get('id')} | "
-                f"class={defect_type} | "
-                f"provider={existing.get('provider')} | "
-                f"model={existing.get('model')}"
-            )
-
-            if existing.get("findings"):
-                summary["positive_fishplate_loose_nut_findings"] += len(
-                    existing.get("findings") or []
-                )
-
-            if existing.get("rail_break_visual_severity"):
-                summary["rail_break_severity_assessments"] += 1
-
-            continue
-
-        pending_events.append(event)
-
-    pending_total = len(pending_events)
-    started = time.perf_counter()
-
-    skipped_count = len(event_docs) - summary["eligible_event_count"]
     print(
         "AI VISION FILTER | "
-        f"total_events={len(event_docs)} | "
-        f"eligible={summary['eligible_event_count']} | "
-        f"skipped_non_visual={skipped_count} | "
-        f"reused={summary['reused_existing_count']} | "
-        f"pending={pending_total} | "
-        f"allowed_classes={sorted(AI_SPECIAL_VISION_CLASSES)} | "
-        f"concurrency={visual_concurrency}"
+        f"total_events={total_events} | "
+        f"eligible={len(eligible_events)} | "
+        f"skipped_non_visual={total_events - len(eligible_events)} | "
+        f"allowed_classes={sorted(AI_SPECIAL_VISION_CLASSES)}"
+    )
+    print(
+        "AI VISION AGGREGATOR | "
+        f"raw_eligible={len(eligible_events)} | "
+        f"groups={len(grouped_events)} | "
+        f"reduced_by={summary['aggregated_reduction_event_count']} | "
+        f"gap_m={AI_EVENT_AGGREGATION_GAP_M}"
     )
 
-    async def _process_one(
-        event: Dict[str, Any],
-        index: int,
-    ) -> Dict[str, Any]:
-        defect_type = event.get("defect_type")
-        raw_event_id = event.get("_id") or event.get("id")
-        event_started = time.perf_counter()
+    for index, group in enumerate(grouped_events, start=1):
+        representative = group["representative_event"]
+        defect_type = group.get("defect_type")
+        member_count = int(group.get("member_count") or 0)
+        group_id = str(group.get("group_id") or "")
+        started = time.perf_counter()
 
-        async with semaphore:
-            try:
+        print(
+            "AI VISION GROUP | "
+            f"group_id={group_id} | "
+            f"class={defect_type} | "
+            f"rail_side={group.get('rail_side')} | "
+            f"members={member_count} | "
+            f"start_distance_m={group.get('start_distance_m')} | "
+            f"end_distance_m={group.get('end_distance_m')} | "
+            f"representative_event_id={_visual_event_id(representative)}"
+        )
+
+        try:
+            existing = representative.get("supplementary_visual_review") or {}
+            if existing.get("performed") is True:
+                review = dict(existing)
+                review["group_id"] = group_id
+                review["group_member_count"] = member_count
+                review["is_group_representative"] = True
+                summary["reused_existing_count"] += 1
+            else:
                 evidence = await _load_event_visual_evidence(
                     inspection,
-                    event,
+                    representative,
                     folder_cache,
                 )
-
-                media = event.get("media") or {}
-                context_data = evidence["context"].get("data") or b""
-                crop_data = evidence["crop"].get("data") or b""
-
-                # Safe audit log: proves which event/class reached the visual
-                # pipeline and that both image payloads are non-empty.
-                # Never log image bytes or base64 content.
                 print(
                     "AI VISION INPUT READY | "
-                    f"event_id={raw_event_id} | "
+                    f"event_id={_visual_event_id(representative)} | "
                     f"class={defect_type} | "
-                    f"context_relpath={media.get('context_relpath')} | "
-                    f"crop_relpath={media.get('crop_relpath')} | "
-                    f"context_bytes={len(context_data)} | "
-                    f"crop_bytes={len(crop_data)} | "
+                    f"context_relpath={(representative.get('media') or {}).get('context_relpath')} | "
+                    f"crop_relpath={(representative.get('media') or {}).get('crop_relpath')} | "
+                    f"context_bytes={len(evidence['context'].get('data') or b'')} | "
+                    f"crop_bytes={len(evidence['crop'].get('data') or b'')} | "
                     f"context_mime={evidence['context'].get('mime_type')} | "
                     f"crop_mime={evidence['crop'].get('mime_type')}"
                 )
-
-                # This is immediately before generate_targeted_visual_review().
-                # That service function contains a second class allow-list check
-                # and sends the context + crop image bytes to Gemini (or fallback).
                 print(
                     "AI VISION CALL START | "
-                    f"event_id={raw_event_id} | "
+                    f"event_id={_visual_event_id(representative)} | "
                     f"class={defect_type} | "
-                    f"two_images_present={bool(context_data and crop_data)}"
+                    f"two_images_present=True | "
+                    f"group_member_count={member_count}"
                 )
-
                 review = await asyncio.to_thread(
                     generate_targeted_visual_review,
-                    event,
+                    representative,
                     evidence["context"],
                     evidence["crop"],
                 )
+                review["group_id"] = group_id
+                review["group_member_count"] = member_count
+                review["is_group_representative"] = True
+                summary["performed_count"] += 1
 
-                print(
-                    "AI VISION RESULT | "
-                    f"event_id={raw_event_id} | "
-                    f"class={defect_type} | "
-                    f"performed={review.get('performed')} | "
-                    f"provider={review.get('provider')} | "
-                    f"model={review.get('model')} | "
-                    f"scope={review.get('scope')} | "
-                    f"fallback_used={review.get('fallback_used')}"
-                )
+            await _persist_group_review_to_events(group, review)
+            summary["covered_member_event_count"] += member_count
 
-                reviewed_at = datetime.now(timezone.utc)
-                event["supplementary_visual_review"] = review
-                event["supplementary_visual_reviewed_at"] = reviewed_at
+            if review.get("findings"):
+                summary["positive_fishplate_loose_nut_findings"] += len(review.get("findings") or [])
+            if review.get("rail_break_visual_severity"):
+                summary["rail_break_severity_assessments"] += 1
 
-                if raw_event_id and ObjectId.is_valid(str(raw_event_id)):
-                    await inspection_events_collection.update_one(
-                        {"_id": ObjectId(str(raw_event_id))},
-                        {
-                            "$set": {
-                                "supplementary_visual_review": review,
-                                "supplementary_visual_reviewed_at": reviewed_at,
-                            },
-                            "$unset": {
-                                "supplementary_visual_review_error": ""
-                            },
-                        },
-                    )
-
-                elapsed = round(time.perf_counter() - event_started, 2)
-                print(
-                    "AI VISION EVENT COMPLETE | "
-                    f"{index}/{pending_total}, "
-                    f"class={defect_type}, "
-                    f"elapsed={elapsed}s"
-                )
-
-                return {
-                    "performed": 1,
-                    "failed": 0,
-                    "positive_findings": len(review.get("findings") or []),
-                    "severity_assessments": (
-                        1
-                        if review.get("rail_break_visual_severity")
-                        else 0
-                    ),
+            summary["group_summaries"].append(
+                {
+                    "group_id": group_id,
+                    "defect_type": defect_type,
+                    "rail_side": group.get("rail_side"),
+                    "member_count": member_count,
+                    "start_distance_m": group.get("start_distance_m"),
+                    "end_distance_m": group.get("end_distance_m"),
+                    "representative_event_id": _visual_event_id(representative),
+                    "performed": True,
+                    "provider": review.get("provider"),
+                    "model": review.get("model"),
+                    "reused_existing": existing.get("performed") is True,
                 }
+            )
 
-            except Exception as exc:
-                error_text = f"{type(exc).__name__}: {exc}"[:1000]
+            print(
+                "AI VISION RESULT | "
+                f"event_id={_visual_event_id(representative)} | "
+                f"class={defect_type} | "
+                f"performed={review.get('performed')} | "
+                f"provider={review.get('provider')} | "
+                f"model={review.get('model')} | "
+                f"scope={review.get('scope')} | "
+                f"fallback_used={review.get('fallback_used')} | "
+                f"group_member_count={member_count}"
+            )
+            print(
+                "AI VISION EVENT COMPLETE | "
+                f"{index}/{len(grouped_events)}, class={defect_type}, members={member_count}, "
+                f"elapsed={time.perf_counter() - started:.2f}s"
+            )
 
-                failed_review = {
-                    "review_version": "targeted_visual_check_failed",
+        except Exception as exc:
+            summary["failed_count"] += 1
+            error_text = f"{type(exc).__name__}: {exc}"[:1000]
+            failed_review = {
+                "review_version": "targeted_visual_check_failed",
+                "performed": False,
+                "scope": (
+                    "rail_break_visual_severity"
+                    if defect_type == "Rail Break"
+                    else "fishplate_nut_visual_check"
+                ),
+                "error": error_text,
+                "group_id": group_id,
+                "group_member_count": member_count,
+                "is_group_representative": True,
+            }
+            await _persist_group_review_to_events(group, failed_review, error_text=error_text)
+            summary["group_summaries"].append(
+                {
+                    "group_id": group_id,
+                    "defect_type": defect_type,
+                    "rail_side": group.get("rail_side"),
+                    "member_count": member_count,
+                    "start_distance_m": group.get("start_distance_m"),
+                    "end_distance_m": group.get("end_distance_m"),
+                    "representative_event_id": _visual_event_id(representative),
                     "performed": False,
-                    "scope": (
-                        "rail_break_visual_severity"
-                        if defect_type == "Rail Break"
-                        else "fishplate_nut_visual_check"
-                    ),
                     "error": error_text,
                 }
-
-                reviewed_at = datetime.now(timezone.utc)
-                event["supplementary_visual_review"] = failed_review
-                event["supplementary_visual_reviewed_at"] = reviewed_at
-
-                if raw_event_id and ObjectId.is_valid(str(raw_event_id)):
-                    await inspection_events_collection.update_one(
-                        {"_id": ObjectId(str(raw_event_id))},
-                        {
-                            "$set": {
-                                "supplementary_visual_review": failed_review,
-                                "supplementary_visual_review_error": error_text,
-                                "supplementary_visual_reviewed_at": reviewed_at,
-                            }
-                        },
-                    )
-
-                elapsed = round(time.perf_counter() - event_started, 2)
-                print(
-                    "AI VISION FAILED | "
-                    f"{index}/{pending_total}, "
-                    f"class={defect_type}, "
-                    f"elapsed={elapsed}s, "
-                    f"error={error_text[:300]}"
-                )
-
-                return {
-                    "performed": 0,
-                    "failed": 1,
-                    "positive_findings": 0,
-                    "severity_assessments": 0,
-                }
-
-    if pending_events:
-        results = await asyncio.gather(
-            *[
-                _process_one(event, index)
-                for index, event in enumerate(pending_events, start=1)
-            ]
-        )
-
-        for result in results:
-            summary["performed_count"] += result["performed"]
-            summary["failed_count"] += result["failed"]
-            summary["positive_fishplate_loose_nut_findings"] += (
-                result["positive_findings"]
             )
-            summary["rail_break_severity_assessments"] += (
-                result["severity_assessments"]
+            print(
+                "AI VISION GROUP FAILED | "
+                f"group_id={group_id} | class={defect_type} | members={member_count} | error={error_text}"
             )
-
-    summary["visual_check_elapsed_seconds"] = round(
-        time.perf_counter() - started,
-        2,
-    )
-
-    print(
-        "AI VISION SUMMARY | "
-        f"performed={summary['performed_count']}, "
-        f"failed={summary['failed_count']}, "
-        f"elapsed={summary['visual_check_elapsed_seconds']}s"
-    )
 
     return summary
 
@@ -1010,72 +1165,6 @@ async def _resolve_drive_video(
     )
 
 
-def _bounded_video_range(range_header: Optional[str]) -> str:
-    """
-    Return a single bounded byte range suitable for Cloud Run video proxying.
-
-    Browsers commonly request ``Range: bytes=START-`` for HTML5 video. Passing
-    that open-ended range straight through to Google Drive can produce a 206
-    body larger than Cloud Run's HTTP/1 non-streaming response-size limit.
-
-    We intentionally satisfy only a bounded subset (8 MiB by default). A 206
-    response is self-describing through Content-Range, so the browser can ask
-    for the next segment when it needs more data or when the user seeks.
-    """
-    default_range = f"bytes=0-{VIDEO_PROXY_RANGE_BYTES - 1}"
-
-    if not range_header:
-        return default_range
-
-    value = str(range_header).strip()
-    if not value.lower().startswith("bytes="):
-        return default_range
-
-    # HTML5 video normally asks for one range. If a client sends several,
-    # proxy the first one rather than creating a multipart/byteranges response.
-    spec = value.split("=", 1)[1].split(",", 1)[0].strip()
-    if "-" not in spec:
-        return default_range
-
-    start_text, end_text = spec.split("-", 1)
-    start_text = start_text.strip()
-    end_text = end_text.strip()
-
-    try:
-        # Normal/open-ended form: bytes=START-END or bytes=START-
-        if start_text:
-            start = int(start_text)
-            if start < 0:
-                return default_range
-
-            max_end = start + VIDEO_PROXY_RANGE_BYTES - 1
-
-            if end_text:
-                requested_end = int(end_text)
-                if requested_end < start:
-                    # Let Drive return a standards-compliant 416 for malformed
-                    # ranges rather than silently returning unrelated bytes.
-                    return f"bytes={start}-{requested_end}"
-                end = min(requested_end, max_end)
-            else:
-                end = max_end
-
-            return f"bytes={start}-{end}"
-
-        # Suffix form: bytes=-N
-        if end_text:
-            suffix_length = int(end_text)
-            if suffix_length <= 0:
-                return default_range
-            suffix_length = min(suffix_length, VIDEO_PROXY_RANGE_BYTES)
-            return f"bytes=-{suffix_length}"
-
-    except (TypeError, ValueError):
-        return default_range
-
-    return default_range
-
-
 async def _proxy_drive_video(
     file_id: str,
     request: Request,
@@ -1083,13 +1172,13 @@ async def _proxy_drive_video(
 ):
     token = await _get_drive_access_token()
 
-    requested_range = request.headers.get("range")
-    upstream_range = _bounded_video_range(requested_range)
-
     upstream_headers = {
         "Authorization": f"Bearer {token}",
-        "Range": upstream_range,
     }
+
+    range_header = request.headers.get("range")
+    if range_header:
+        upstream_headers["Range"] = range_header
 
     url = (
         "https://www.googleapis.com/drive/v3/files/"
@@ -1122,13 +1211,6 @@ async def _proxy_drive_video(
         await upstream_response.aclose()
         await http_client.aclose()
 
-        # Preserve 416 semantics for an invalid/unsatisfiable browser seek.
-        if upstream_response.status_code == 416:
-            raise HTTPException(
-                status_code=416,
-                detail="Requested video byte range is not satisfiable.",
-            )
-
         raise HTTPException(
             status_code=502,
             detail=(
@@ -1151,49 +1233,20 @@ async def _proxy_drive_video(
     response_headers = {
         "Accept-Ranges": "bytes",
         "Content-Disposition": f'inline; filename="{filename}"',
-        "Cache-Control": "private, no-store",
+        "Cache-Control": "no-store",
     }
 
-    # Content-Range is required/important for browser seeking with 206.
-    content_range = upstream_response.headers.get("content-range")
-    if content_range:
-        response_headers["Content-Range"] = content_range
-
-    # Each requested Drive range is intentionally bounded to 8 MiB, so keeping
-    # Content-Length for a 206 response is safe and helps browser media logic.
-    # If Drive unexpectedly ignores Range and returns a large 200 response,
-    # omit Content-Length so StreamingResponse/Uvicorn can use chunked transfer.
-    raw_content_length = upstream_response.headers.get("content-length")
-    if raw_content_length:
-        try:
-            content_length = int(raw_content_length)
-        except (TypeError, ValueError):
-            content_length = None
-
-        if (
-            content_length is not None
-            and content_length <= VIDEO_PROXY_RANGE_BYTES
-        ):
-            response_headers["Content-Length"] = str(content_length)
-
-    for source_name, output_name in {
+    header_map = {
+        "content-length": "Content-Length",
+        "content-range": "Content-Range",
         "etag": "ETag",
         "last-modified": "Last-Modified",
-    }.items():
+    }
+
+    for source_name, output_name in header_map.items():
         value = upstream_response.headers.get(source_name)
         if value:
             response_headers[output_name] = value
-
-    # Helpful during deployment verification. Avoid logging auth tokens or
-    # signed URLs; this logs only byte-range metadata.
-    print(
-        "Drive video proxy:",
-        f"requested_range={requested_range!r}",
-        f"proxied_range={upstream_range!r}",
-        f"upstream_status={upstream_response.status_code}",
-        f"content_range={content_range!r}",
-        f"content_length={raw_content_length!r}",
-    )
 
     return StreamingResponse(
         iter_video(),
@@ -2023,22 +2076,16 @@ async def generate_inspection_ai_review_endpoint(
         # only positive/high-confidence targeted findings through event_docs.
         # google-genai and groq SDK calls are synchronous, so run this final
         # advisory call in a worker thread.
-        final_advisory_started = time.perf_counter()
         ai_result = await asyncio.to_thread(
             generate_inspection_ai_review,
             inspection_for_ai,
             event_docs,
         )
-        print(
-            "AI final maintenance advisory completed: "
-            f"elapsed={round(time.perf_counter() - final_advisory_started, 2)}s, "
-            f"provider={ai_result.get('provider')}, "
-            f"model={ai_result.get('model')}"
-        )
 
         generated_at = datetime.now(timezone.utc)
         advisory = ai_result["overall_advisory"]
         spatial_summary = ai_result["spatial_summary"]
+        event_aggregation_summary = ai_result.get("event_aggregation_summary") or {}
 
         await inspections_collection.update_one(
             {"_id": object_id},
@@ -2051,6 +2098,7 @@ async def generate_inspection_ai_review_endpoint(
                     "ai_fallback_used": ai_result["fallback_used"],
                     "ai_execution": ai_result["execution"],
                     "ai_spatial_summary": spatial_summary,
+                    "ai_event_aggregation_summary": event_aggregation_summary,
                     "supplementary_visual_summary": supplementary_visual_summary,
                     "ai_advisory": advisory,
                     "ai_advisory_generated_at": generated_at,

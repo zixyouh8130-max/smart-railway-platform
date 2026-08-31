@@ -25,9 +25,11 @@ from typing import Any, Dict, List, Optional
 from ..core.config import settings
 
 
-AI_ADVISORY_VERSION = "railway_advisory_v4_targeted_vision_gemini_primary_qwen_fallback"
+AI_ADVISORY_VERSION = "railway_advisory_v6_targeted_vision_event_aggregator"
 AI_CLUSTER_GAP_M = 3.0
 AI_CLUSTER_MIN_EVENTS = 2
+AI_EVENT_AGGREGATION_GAP_M = 1.5
+
 
 # ONLY these detector classes are allowed to send images to an LLM.
 AI_SPECIAL_VISION_CLASSES = {
@@ -64,6 +66,348 @@ MYANMAR LANGUAGE OUTPUT REQUIREMENT:
 """
 
 
+# ---------------------------------------------------------------------------
+# Gemini structured-output schemas
+# ---------------------------------------------------------------------------
+#
+# The previous implementation only requested `application/json` and then called
+# json.loads(response.text). Gemini could still return a truncated JSON string
+# (for example when the output budget was too small), which caused errors such
+# as:
+#
+#   JSONDecodeError: Unterminated string ...
+#
+# These schemas make Vertex/Gemini generate controlled JSON and allow the SDK's
+# parsed response to be used when available.
+
+FISHPLATE_VISUAL_JSON_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "loose_nut_visible": {
+            "type": "boolean",
+            "description": (
+                "True only when a remaining fishplate nut is clearly visibly "
+                "backed-off, displaced, or separated."
+            ),
+        },
+        "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+        },
+        "finding": {
+            "type": "string",
+            "description": (
+                "Short Myanmar Unicode visual observation. Empty when no clear "
+                "positive visual finding is supported."
+            ),
+        },
+    },
+    "required": ["loose_nut_visible", "confidence", "finding"],
+    "additionalProperties": False,
+}
+
+RAIL_BREAK_VISUAL_JSON_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "severity_supported": {
+            "type": "boolean",
+            "description": (
+                "True only when the images clearly support an apparent visual "
+                "severity assessment."
+            ),
+        },
+        "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+        },
+        "visual_severity": {
+            "anyOf": [
+                {
+                    "type": "string",
+                    "enum": ["limited", "moderate", "severe"],
+                },
+                {"type": "null"},
+            ],
+        },
+        "finding": {
+            "type": "string",
+            "description": (
+                "Short Myanmar Unicode visual description. Empty when a reliable "
+                "severity assessment cannot be made."
+            ),
+        },
+    },
+    "required": [
+        "severity_supported",
+        "confidence",
+        "visual_severity",
+        "finding",
+    ],
+    "additionalProperties": False,
+}
+
+ADVISORY_JSON_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "overall_priority": {
+            "type": "string",
+            "enum": [
+                "routine",
+                "monitor",
+                "priority_inspection",
+                "urgent_manual_review",
+            ],
+        },
+        "executive_summary": {"type": "string"},
+        "key_findings": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "areas_of_attention": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "rail_side": {
+                        "type": "string",
+                        "enum": ["left", "right"],
+                    },
+                    "start_distance_m": {"type": "number"},
+                    "end_distance_m": {"type": "number"},
+                    "event_count": {"type": "integer"},
+                    "defect_counts": {
+                        "type": "object",
+                        "additionalProperties": {"type": "integer"},
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": [
+                            "routine",
+                            "monitor",
+                            "priority_inspection",
+                            "urgent_manual_review",
+                        ],
+                    },
+                    "assessment": {"type": "string"},
+                    "recommended_checks": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": [
+                    "rail_side",
+                    "start_distance_m",
+                    "end_distance_m",
+                    "event_count",
+                    "defect_counts",
+                    "priority",
+                    "assessment",
+                    "recommended_checks",
+                ],
+            },
+        },
+        "individual_high_priority_events": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "rail_side": {
+                        "type": "string",
+                        "enum": ["left", "right"],
+                    },
+                    "route_distance_m": {"type": "number"},
+                    "defect_type": {"type": "string"},
+                    "priority": {
+                        "type": "string",
+                        "enum": [
+                            "priority_inspection",
+                            "urgent_manual_review",
+                        ],
+                    },
+                    "assessment": {"type": "string"},
+                    "recommended_checks": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": [
+                    "rail_side",
+                    "route_distance_m",
+                    "defect_type",
+                    "priority",
+                    "assessment",
+                    "recommended_checks",
+                ],
+            },
+        },
+        "defect_type_assessments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "defect_type": {"type": "string"},
+                    "event_count": {"type": "integer"},
+                    "maintenance_significance": {"type": "string"},
+                    "recommended_response": {"type": "string"},
+                },
+                "required": [
+                    "defect_type",
+                    "event_count",
+                    "maintenance_significance",
+                    "recommended_response",
+                ],
+            },
+        },
+        "possible_contributing_factors": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "defect_type": {"type": "string"},
+                    "factors": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "context": {"type": "string"},
+                },
+                "required": ["defect_type", "factors", "context"],
+            },
+        },
+        "recommended_actions": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "trend_assessment": {"type": "string"},
+        "limitations": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+    "required": [
+        "overall_priority",
+        "executive_summary",
+        "key_findings",
+        "areas_of_attention",
+        "individual_high_priority_events",
+        "defect_type_assessments",
+        "possible_contributing_factors",
+        "recommended_actions",
+        "trend_assessment",
+        "limitations",
+    ],
+}
+
+
+def _targeted_visual_schema(defect_type: str) -> Dict[str, Any]:
+    if defect_type == "Missing Fishplate Bolt":
+        return FISHPLATE_VISUAL_JSON_SCHEMA
+    if defect_type == "Rail Break":
+        return RAIL_BREAK_VISUAL_JSON_SCHEMA
+    raise ValueError(
+        f"No targeted visual JSON schema for defect class: {defect_type!r}"
+    )
+
+
+def _gemini_finish_reason(response: Any) -> Optional[str]:
+    """Best-effort diagnostic helper without depending on one SDK version."""
+    try:
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            return None
+        reason = getattr(candidates[0], "finish_reason", None)
+        if reason is None:
+            return None
+        return str(reason)
+    except Exception:
+        return None
+
+
+def _parsed_gemini_json(response: Any, *, label: str) -> Dict[str, Any]:
+    """
+    Prefer the SDK's parsed structured-output object, then safely fall back to
+    response.text. A malformed/truncated response gets a useful diagnostic
+    instead of leaking raw model output.
+    """
+    parsed = getattr(response, "parsed", None)
+
+    if isinstance(parsed, dict):
+        return parsed
+
+    if parsed is not None and hasattr(parsed, "model_dump"):
+        dumped = parsed.model_dump()
+        if isinstance(dumped, dict):
+            return dumped
+
+    text = (getattr(response, "text", None) or "").strip()
+    if not text:
+        finish_reason = _gemini_finish_reason(response)
+        raise RuntimeError(
+            f"Gemini returned an empty {label} response"
+            + (
+                f" (finish_reason={finish_reason})."
+                if finish_reason
+                else "."
+            )
+        )
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        finish_reason = _gemini_finish_reason(response)
+        raise RuntimeError(
+            f"Gemini returned malformed/truncated {label} JSON: "
+            f"{type(exc).__name__}: {exc}; "
+            f"text_chars={len(text)}"
+            + (
+                f"; finish_reason={finish_reason}"
+                if finish_reason
+                else ""
+            )
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            f"Gemini {label} structured response was not a JSON object."
+        )
+
+    return payload
+
+
+def _gemini_generate_structured_json(
+    *,
+    model: str,
+    contents: Any,
+    response_json_schema: Dict[str, Any],
+    temperature: float,
+    max_output_tokens: int,
+    label: str,
+) -> Dict[str, Any]:
+    """
+    One controlled Vertex/Gemini JSON call.
+
+    `response_json_schema` prevents free-form/truncated JSON formatting issues.
+    Automatic function calling is explicitly disabled because this workflow
+    uses no tools/functions and should be a single deterministic model call.
+    """
+    from google.genai import types as genai_types
+
+    response = _gemini_client().models.generate_content(
+        model=model,
+        contents=contents,
+        config=genai_types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            response_mime_type="application/json",
+            response_json_schema=response_json_schema,
+            automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
+        ),
+    )
+
+    return _parsed_gemini_json(response, label=label)
+
+
 def _setting(name: str, default: Optional[str] = None) -> Optional[str]:
     value = getattr(settings, name, None)
     if value not in (None, ""):
@@ -94,6 +438,126 @@ def _event_key(event: Dict[str, Any]) -> str:
         f"{event.get('representative_frame')}|"
         f"{event.get('start_timestamp')}"
     )
+
+
+def _event_id_str(event: Dict[str, Any]) -> str:
+    raw = event.get("id") or event.get("_id") or ""
+    return str(raw)
+
+
+def _event_confidence(event: Dict[str, Any]) -> float:
+    try:
+        return float(event.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def build_event_aggregation_summary(
+    events: List[Dict[str, Any]],
+    *,
+    group_gap_m: float = AI_EVENT_AGGREGATION_GAP_M,
+) -> Dict[str, Any]:
+    """Group likely repeated detections into likely physical issue groups.
+
+    This does NOT replace the raw detector events in MongoDB. It gives the AI
+    review a more realistic summary so repeated nearby detections of the same
+    defect on the same rail side are treated as one likely issue group.
+    """
+    defect_events = [event for event in events if event.get("defect_type")]
+
+    grouped: Dict[tuple, List[Dict[str, Any]]] = {}
+    no_distance_groups: List[Dict[str, Any]] = []
+
+    for event in defect_events:
+        distance = _event_distance(event)
+        if distance is None:
+            no_distance_groups.append(
+                {
+                    "group_id": f"single|{event.get('rail_side')}|{event.get('defect_type')}|{_event_id_str(event)}",
+                    "rail_side": event.get("rail_side"),
+                    "defect_type": event.get("defect_type"),
+                    "start_distance_m": None,
+                    "end_distance_m": None,
+                    "span_m": None,
+                    "member_event_count": 1,
+                    "member_event_ids": [_event_id_str(event)],
+                    "representative_event_id": _event_id_str(event),
+                    "representative_confidence": round(_event_confidence(event), 4),
+                }
+            )
+            continue
+        grouped.setdefault((event.get("rail_side"), event.get("defect_type")), []).append(event)
+
+    groups: List[Dict[str, Any]] = []
+
+    for (rail_side, defect_type), bucket in grouped.items():
+        bucket.sort(key=lambda ev: _event_distance(ev) or 0.0)
+        current = [bucket[0]]
+
+        def finalize(cluster: List[Dict[str, Any]]) -> None:
+            distances = [
+                _event_distance(ev)
+                for ev in cluster
+                if _event_distance(ev) is not None
+            ]
+            if not distances:
+                return
+            representative = max(cluster, key=_event_confidence)
+            start_distance = min(distances)
+            end_distance = max(distances)
+            groups.append(
+                {
+                    "group_id": (
+                        f"{rail_side}|{defect_type}|"
+                        f"{start_distance:.2f}|{end_distance:.2f}|{len(cluster)}"
+                    ),
+                    "rail_side": rail_side,
+                    "defect_type": defect_type,
+                    "start_distance_m": round(start_distance, 2),
+                    "end_distance_m": round(end_distance, 2),
+                    "span_m": round(end_distance - start_distance, 2),
+                    "member_event_count": len(cluster),
+                    "member_event_ids": [_event_id_str(ev) for ev in cluster],
+                    "representative_event_id": _event_id_str(representative),
+                    "representative_confidence": round(_event_confidence(representative), 4),
+                }
+            )
+
+        for event in bucket[1:]:
+            prev = current[-1]
+            gap = (_event_distance(event) or 0.0) - (_event_distance(prev) or 0.0)
+            if gap <= group_gap_m:
+                current.append(event)
+            else:
+                finalize(current)
+                current = [event]
+
+        finalize(current)
+
+    groups.extend(no_distance_groups)
+    groups.sort(
+        key=lambda g: (
+            str(g.get("rail_side") or ""),
+            str(g.get("defect_type") or ""),
+            float(g.get("start_distance_m") or 0.0),
+        )
+    )
+
+    grouped_class_counts = Counter(group.get("defect_type") for group in groups)
+    repeated_group_count = sum(1 for group in groups if (group.get("member_event_count") or 0) > 1)
+    reduced_event_count = len(defect_events) - len(groups)
+
+    return {
+        "group_gap_m": group_gap_m,
+        "raw_event_count": len(defect_events),
+        "aggregated_group_count": len(groups),
+        "repeated_group_count": repeated_group_count,
+        "singleton_group_count": len(groups) - repeated_group_count,
+        "reduction_event_count": reduced_event_count,
+        "reduction_ratio": round((reduced_event_count / len(defect_events)), 4) if defect_events else 0.0,
+        "grouped_class_counts": dict(grouped_class_counts),
+        "groups": groups,
+    }
 
 
 def build_spatial_defect_summary(
@@ -194,13 +658,32 @@ def build_spatial_defect_summary(
 
 
 def _supplementary_findings(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Reuse ONLY positive visual findings already saved by Colab/Gradio."""
+    """Reuse ONLY positive visual findings already saved by Colab/Gradio.
+
+    When event aggregation is enabled, one representative review may cover a
+    nearby same-class group. We therefore deduplicate by group_id (preferred)
+    or by event id.
+    """
     findings: List[Dict[str, Any]] = []
+    seen_sources = set()
 
     for event in events:
         review = event.get("supplementary_visual_review") or {}
+        if review.get("performed") is not True:
+            continue
+
+        group_id = review.get("group_id") or (event.get("supplementary_visual_group") or {}).get("group_id")
+        source_key = group_id or str(event.get("id") or event.get("_id") or "")
+        if source_key in seen_sources:
+            continue
+        seen_sources.add(source_key)
+
         gps = event.get("gps") or {}
-        distance = gps.get("distance_from_start_m")
+        distance = (
+            gps.get("distance_from_start_m")
+            if gps.get("distance_from_start_m") is not None
+            else event.get("distance_from_route_start_m")
+        )
 
         for finding in review.get("findings") or []:
             if not finding:
@@ -265,14 +748,33 @@ def build_advisory_prompt(
         for cluster in spatial_summary.get("clusters") or []
     ]
 
+    event_aggregation = build_event_aggregation_summary(events)
+    compact_issue_groups = [
+        {
+            "group_id": group.get("group_id"),
+            "rail_side": group.get("rail_side"),
+            "defect_type": group.get("defect_type"),
+            "start_distance_m": group.get("start_distance_m"),
+            "end_distance_m": group.get("end_distance_m"),
+            "span_m": group.get("span_m"),
+            "member_event_count": group.get("member_event_count"),
+        }
+        for group in event_aggregation.get("groups") or []
+    ]
+
     factual_input = {
         "inspection_model": inspection.get("model") or {},
         "route_distance_m": route.get("distance_m"),
-        "total_defect_events": len(event_data),
-        "class_counts": spatial_summary.get("class_counts") or {},
+        "raw_total_defect_events": len(event_data),
+        "raw_class_counts": spatial_summary.get("class_counts") or {},
+        "aggregated_issue_group_count": event_aggregation.get("aggregated_group_count"),
+        "aggregated_grouped_class_counts": event_aggregation.get("grouped_class_counts") or {},
+        "aggregation_gap_m": event_aggregation.get("group_gap_m"),
+        "aggregation_reduction_event_count": event_aggregation.get("reduction_event_count"),
         "rail_counts": spatial_summary.get("rail_counts") or {},
         "events_per_10m": spatial_summary.get("events_per_10m"),
         "localized_defect_concentrations": compact_clusters,
+        "aggregated_issue_groups": compact_issue_groups,
         "defect_events": event_data,
         "supplementary_visual_findings": _supplementary_findings(events),
     }
@@ -299,7 +801,8 @@ Focus on:
 7. railway-maintenance significance,
 8. which locations deserve greater maintenance attention,
 9. recommended field inspection and maintenance checks,
-10. possible contributing causes ONLY when they provide useful engineering context.
+10. possible contributing causes ONLY when they provide useful engineering context,
+11. treat aggregated_issue_groups as the better approximation of likely physical issue groups than raw event count alone.
 
 PRIORITY LEVELS:
 
@@ -364,6 +867,13 @@ OUTPUT DISCIPLINE:
   never as diagnosed causes.
 - Do not attribute a defect to poor maintenance, neglect, incorrect installation
   or a specific environmental cause unless supporting evidence is supplied.
+
+AGGREGATION NOTE:
+
+- raw_total_defect_events is the raw detector event count.
+- aggregated_issue_group_count and aggregated_issue_groups are the heuristic event-aggregator output and are a better approximation of likely distinct physical issue locations.
+- Do not simply equate every raw detector event with a distinct physical defect.
+- Use aggregated_issue_groups when judging whether issues are isolated or repeated in a short section.
 
 INSPECTION DATA:
 
@@ -652,10 +1162,12 @@ def _gemini_visual_call(
     prompt: str,
     context_image: Dict[str, Any],
     crop_image: Dict[str, Any],
+    defect_type: str,
 ) -> Dict[str, Any]:
     from google.genai import types as genai_types
 
     model = _setting("GEMINI_MODEL", "gemini-3.5-flash") or "gemini-3.5-flash"
+
     contents = [
         prompt,
         genai_types.Part.from_bytes(
@@ -668,20 +1180,14 @@ def _gemini_visual_call(
         ),
     ]
 
-    response = _gemini_client().models.generate_content(
+    return _gemini_generate_structured_json(
         model=model,
         contents=contents,
-        config=genai_types.GenerateContentConfig(
-            temperature=0.1,
-            max_output_tokens=500,
-            response_mime_type="application/json",
-        ),
+        response_json_schema=_targeted_visual_schema(defect_type),
+        temperature=0.0,
+        max_output_tokens=1200,
+        label=f"targeted-vision/{defect_type}",
     )
-
-    text = (response.text or "").strip()
-    if not text:
-        raise RuntimeError("Gemini returned an empty targeted-vision response.")
-    return json.loads(text)
 
 
 def _to_data_uri(image: Dict[str, Any]) -> str:
@@ -746,7 +1252,7 @@ def generate_targeted_visual_review(
 
     primary_error = None
     try:
-        payload = _gemini_visual_call(prompt, context_image, crop_image)
+        payload = _gemini_visual_call(prompt, context_image, crop_image, defect_type)
         return _validate_targeted_visual_payload(
             event,
             payload,
@@ -756,6 +1262,11 @@ def generate_targeted_visual_review(
         )
     except Exception as exc:
         primary_error = f"{type(exc).__name__}: {exc}"
+        print(
+            "GEMINI TARGETED VISION FALLBACK | "
+            f"class={defect_type} | "
+            f"error={primary_error[:700]}"
+        )
 
     try:
         payload = _groq_visual_call(prompt, context_image, crop_image)
@@ -830,24 +1341,18 @@ def _gemini_client():
 
 
 def _call_gemini(prompt: str) -> Dict[str, Any]:
-    from google.genai import types as genai_types
-
     model = _setting("GEMINI_MODEL", "gemini-3.5-flash") or "gemini-3.5-flash"
-    response = _gemini_client().models.generate_content(
+
+    payload = _gemini_generate_structured_json(
         model=model,
         contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            temperature=0.2,
-            max_output_tokens=1800,
-            response_mime_type="application/json",
-        ),
+        response_json_schema=ADVISORY_JSON_SCHEMA,
+        temperature=0.1,
+        max_output_tokens=4096,
+        label="maintenance-advisory",
     )
 
-    text = (response.text or "").strip()
-    if not text:
-        raise RuntimeError("Gemini returned an empty response.")
-
-    return _validate_advisory(json.loads(text))
+    return _validate_advisory(payload)
 
 
 @lru_cache(maxsize=1)
@@ -909,10 +1414,15 @@ def generate_inspection_ai_review(
             },
             "version": AI_ADVISORY_VERSION,
             "spatial_summary": spatial_summary,
+            "event_aggregation_summary": build_event_aggregation_summary(events),
             "overall_advisory": advisory,
         }
     except Exception as exc:
         primary_error = f"{type(exc).__name__}: {exc}"
+        print(
+            "GEMINI ADVISORY FALLBACK | "
+            f"error={primary_error[:700]}"
+        )
 
     try:
         advisory = _call_groq(prompt)
@@ -930,6 +1440,7 @@ def generate_inspection_ai_review(
             },
             "version": AI_ADVISORY_VERSION,
             "spatial_summary": spatial_summary,
+            "event_aggregation_summary": build_event_aggregation_summary(events),
             "overall_advisory": advisory,
         }
     except Exception as fallback_exc:
