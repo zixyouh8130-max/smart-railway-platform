@@ -1987,7 +1987,27 @@ async def generate_inspection_ai_review_endpoint(
                 "ai_advisory_started_at": started_at,
             },
             "$unset": {
+                # Clear any stale/previous WHOLE-INSPECTION advisory as soon as
+                # a new generation is claimed. This prevents the Admin UI from
+                # showing an old or partially incompatible advisory while the
+                # new review is processing or if the new attempt later fails.
+                #
+                # IMPORTANT: event-level supplementary_visual_review fields are
+                # intentionally NOT cleared. Successful targeted image reviews
+                # remain reusable and avoid unnecessary Gemini image calls.
+                "ai_advisory": "",
+                "ai_advisory_version": "",
+                "ai_provider": "",
+                "ai_model": "",
+                "ai_fallback_used": "",
+                "ai_execution": "",
+                "ai_spatial_summary": "",
+                "ai_event_aggregation_summary": "",
+                "supplementary_visual_summary": "",
+                "ai_advisory_generated_at": "",
+                "ai_advisory_failed_at": "",
                 "ai_advisory_error": "",
+                "ai_review_status": "",
             },
         },
         return_document=ReturnDocument.AFTER,
