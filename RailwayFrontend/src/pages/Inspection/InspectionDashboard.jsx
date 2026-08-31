@@ -1355,11 +1355,6 @@ function EventCard({ event, index, selected, onSelect }) {
           {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
         </div>
       )}
-              {finding.description}
-            </div>
-          ))}
-        </div>
-      )}
     </button>
   );
 }
