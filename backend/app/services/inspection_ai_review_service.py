@@ -28,7 +28,7 @@ from ..core.config import settings
 AI_ADVISORY_VERSION = "railway_advisory_v6_targeted_vision_event_aggregator"
 AI_CLUSTER_GAP_M = 3.0
 AI_CLUSTER_MIN_EVENTS = 2
-AI_EVENT_AGGREGATION_GAP_M = 1.5
+AI_EVENT_AGGREGATION_GAP_M = 0.5
 
 
 # ONLY these detector classes are allowed to send images to an LLM.
