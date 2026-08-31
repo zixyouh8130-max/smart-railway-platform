@@ -43,6 +43,11 @@ from ..services.inspection_ai_review_service import (
 # inspection video side and expires automatically.
 MEDIA_URL_TTL_SECONDS = 60 * 60  # 60 minutes
 
+# Cloud Run has a 32 MiB HTTP/1 response limit for non-streamed responses.
+# Keep each proxied video byte-range comfortably below that limit so native
+# HTML5 video playback can request the next segment as needed.
+VIDEO_PROXY_RANGE_BYTES = 8 * 1024 * 1024  # 8 MiB
+
 _optional_bearer = HTTPBearer(auto_error=False)
 
 
@@ -846,6 +851,72 @@ async def _resolve_drive_video(
     )
 
 
+def _bounded_video_range(range_header: Optional[str]) -> str:
+    """
+    Return a single bounded byte range suitable for Cloud Run video proxying.
+
+    Browsers commonly request ``Range: bytes=START-`` for HTML5 video. Passing
+    that open-ended range straight through to Google Drive can produce a 206
+    body larger than Cloud Run's HTTP/1 non-streaming response-size limit.
+
+    We intentionally satisfy only a bounded subset (8 MiB by default). A 206
+    response is self-describing through Content-Range, so the browser can ask
+    for the next segment when it needs more data or when the user seeks.
+    """
+    default_range = f"bytes=0-{VIDEO_PROXY_RANGE_BYTES - 1}"
+
+    if not range_header:
+        return default_range
+
+    value = str(range_header).strip()
+    if not value.lower().startswith("bytes="):
+        return default_range
+
+    # HTML5 video normally asks for one range. If a client sends several,
+    # proxy the first one rather than creating a multipart/byteranges response.
+    spec = value.split("=", 1)[1].split(",", 1)[0].strip()
+    if "-" not in spec:
+        return default_range
+
+    start_text, end_text = spec.split("-", 1)
+    start_text = start_text.strip()
+    end_text = end_text.strip()
+
+    try:
+        # Normal/open-ended form: bytes=START-END or bytes=START-
+        if start_text:
+            start = int(start_text)
+            if start < 0:
+                return default_range
+
+            max_end = start + VIDEO_PROXY_RANGE_BYTES - 1
+
+            if end_text:
+                requested_end = int(end_text)
+                if requested_end < start:
+                    # Let Drive return a standards-compliant 416 for malformed
+                    # ranges rather than silently returning unrelated bytes.
+                    return f"bytes={start}-{requested_end}"
+                end = min(requested_end, max_end)
+            else:
+                end = max_end
+
+            return f"bytes={start}-{end}"
+
+        # Suffix form: bytes=-N
+        if end_text:
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                return default_range
+            suffix_length = min(suffix_length, VIDEO_PROXY_RANGE_BYTES)
+            return f"bytes=-{suffix_length}"
+
+    except (TypeError, ValueError):
+        return default_range
+
+    return default_range
+
+
 async def _proxy_drive_video(
     file_id: str,
     request: Request,
@@ -853,13 +924,13 @@ async def _proxy_drive_video(
 ):
     token = await _get_drive_access_token()
 
+    requested_range = request.headers.get("range")
+    upstream_range = _bounded_video_range(requested_range)
+
     upstream_headers = {
         "Authorization": f"Bearer {token}",
+        "Range": upstream_range,
     }
-
-    range_header = request.headers.get("range")
-    if range_header:
-        upstream_headers["Range"] = range_header
 
     url = (
         "https://www.googleapis.com/drive/v3/files/"
@@ -892,6 +963,13 @@ async def _proxy_drive_video(
         await upstream_response.aclose()
         await http_client.aclose()
 
+        # Preserve 416 semantics for an invalid/unsatisfiable browser seek.
+        if upstream_response.status_code == 416:
+            raise HTTPException(
+                status_code=416,
+                detail="Requested video byte range is not satisfiable.",
+            )
+
         raise HTTPException(
             status_code=502,
             detail=(
@@ -914,20 +992,49 @@ async def _proxy_drive_video(
     response_headers = {
         "Accept-Ranges": "bytes",
         "Content-Disposition": f'inline; filename="{filename}"',
-        "Cache-Control": "no-store",
+        "Cache-Control": "private, no-store",
     }
 
-    header_map = {
-        "content-length": "Content-Length",
-        "content-range": "Content-Range",
+    # Content-Range is required/important for browser seeking with 206.
+    content_range = upstream_response.headers.get("content-range")
+    if content_range:
+        response_headers["Content-Range"] = content_range
+
+    # Each requested Drive range is intentionally bounded to 8 MiB, so keeping
+    # Content-Length for a 206 response is safe and helps browser media logic.
+    # If Drive unexpectedly ignores Range and returns a large 200 response,
+    # omit Content-Length so StreamingResponse/Uvicorn can use chunked transfer.
+    raw_content_length = upstream_response.headers.get("content-length")
+    if raw_content_length:
+        try:
+            content_length = int(raw_content_length)
+        except (TypeError, ValueError):
+            content_length = None
+
+        if (
+            content_length is not None
+            and content_length <= VIDEO_PROXY_RANGE_BYTES
+        ):
+            response_headers["Content-Length"] = str(content_length)
+
+    for source_name, output_name in {
         "etag": "ETag",
         "last-modified": "Last-Modified",
-    }
-
-    for source_name, output_name in header_map.items():
+    }.items():
         value = upstream_response.headers.get(source_name)
         if value:
             response_headers[output_name] = value
+
+    # Helpful during deployment verification. Avoid logging auth tokens or
+    # signed URLs; this logs only byte-range metadata.
+    print(
+        "Drive video proxy:",
+        f"requested_range={requested_range!r}",
+        f"proxied_range={upstream_range!r}",
+        f"upstream_status={upstream_response.status_code}",
+        f"content_range={content_range!r}",
+        f"content_length={raw_content_length!r}",
+    )
 
     return StreamingResponse(
         iter_video(),
