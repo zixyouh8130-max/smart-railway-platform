@@ -9,7 +9,7 @@ from ..models.schedule import Schedule
 from ..models.train import Train
 from ..models.station import Station
 
-router = APIRouter(prefix="/routes-and-stations", tags=["Routes & Stations"])
+router = APIRouter(tags=["Routes & Stations"])
 
 
 @router.get("/active-trains")

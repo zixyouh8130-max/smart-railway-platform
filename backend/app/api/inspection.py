@@ -593,6 +593,9 @@ async def _proxy_drive_video(
 
     upstream_headers = {
         "Authorization": f"Bearer {token}",
+        # Keep byte ranges stable and avoid a decoded-length mismatch while
+        # proxying video data.
+        "Accept-Encoding": "identity",
     }
 
     range_header = request.headers.get("range")
@@ -655,8 +658,12 @@ async def _proxy_drive_video(
         "Cache-Control": "no-store",
     }
 
+    # Do not forward Google Drive's Content-Length for the full video. When
+    # Content-Length is present, Cloud Run treats the HTTP/1 response as a
+    # non-streamed response and rejects videos larger than 32 MiB. Leaving it
+    # unset allows Uvicorn to send Transfer-Encoding: chunked while preserving
+    # Content-Range for browser seek requests.
     header_map = {
-        "content-length": "Content-Length",
         "content-range": "Content-Range",
         "etag": "ETag",
         "last-modified": "Last-Modified",
