@@ -11,13 +11,13 @@ import Login from '@/pages/auth/Login';
 import Register from '@/pages/auth/Register';
 import HomePage from '@/pages/Home/HomePage';
 import TrainSearchResults from '@/pages/Train/TrainSearchResults';
+import RunningTrainsPage from '@/pages/Train/RunningTrainsPage';
 import BookingPage from '@/pages/Booking/BookingPage';
 import TicketStatusPage from '@/pages/Booking/TicketStatusPage';
 import AdminRoutes from '@/routes/AdminRoutes';
 
 import TrainRiderLayout from '@/layouts/TrainRiderLayout';
 import LiveTrackingPage from '@/pages/TrainRider/LiveTrackingPage';
-import StaffLoginPage from '@/pages/TrainRider/StaffLoginPage';
 import RoleAwareStaffHome from '@/pages/TrainRider/RoleAwareStaffHome';
 import ScheduleTab from '@/pages/TrainRider/ScheduleTab';
 import TrackEngineerCasesPage from '@/pages/TrackEngineer/TrackEngineerCasesPage';
@@ -58,6 +58,10 @@ export default function AppRouter() {
           <Route
             path="/pnr-status"
             element={<TicketStatusPage />}
+          />
+          <Route
+            path="/running-trains"
+            element={<RunningTrainsPage />}
           />
           <Route path="/booking" element={<Navigate to="/" replace />} />
           <Route path="/status" element={<Navigate to="/pnr-status" replace />} />

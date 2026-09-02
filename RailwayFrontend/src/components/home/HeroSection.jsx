@@ -301,14 +301,14 @@ const HeroSection = () => {
         </div>
       </div>
 
-      <div className="absolute top-40 right-1/4 hidden lg:block">
+      {/* <div className="absolute top-40 right-1/4 hidden lg:block">
         <div className="bg-white/15 backdrop-blur-md rounded-2xl p-3 shadow-2xl border border-white/20" style={{ animation: 'float 3s ease-in-out infinite' }}>
           <div className="flex items-center space-x-2">
             <Shield className="w-4 h-4 text-yellow-400" />
             <p className="text-white text-xs">256-bit SSL လုံခြုံရေး</p>
           </div>
         </div>
-      </div>
+      </div> */}
 
       {/* Main Content */}
       <div className="relative w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-32 pb-20">
@@ -359,8 +359,7 @@ const HeroSection = () => {
             <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 mb-8 bg-white/10 rounded-xl p-1.5 backdrop-blur-sm">
               {[
                 { id: 'booking', label: 'လက်မှတ်ဝယ်ရန်', icon: <Train className="w-4 h-4" /> },
-                { id: 'schedule', label: 'အချိန်ဇယား', icon: <Clock className="w-4 h-4" /> },
-                { id: 'pnr', label: 'ခရီးစဉ်စစ်ရန်', icon: <Search className="w-4 h-4" /> },
+                
               ].map((tab) => (
                 <button
                   key={tab.id}

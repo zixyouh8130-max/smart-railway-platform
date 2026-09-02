@@ -98,13 +98,6 @@ const AdminLayout = () => {
       myanmarLabel: 'အသုံးပြုသူများ',
       badge: null
     },
-    {
-      icon: <Settings className="w-5 h-5" />,
-      label: 'Settings',
-      path: '/admin/settings',
-      myanmarLabel: 'ဆက်တင်များ',
-      badge: null
-    },
   ];
 
   const handleLogout = async () => {

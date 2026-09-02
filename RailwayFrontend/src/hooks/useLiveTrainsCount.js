@@ -1,30 +1,36 @@
-// src/hooks/useLiveTrainsCount.js
-import { useState, useEffect } from 'react';
-import { apiService } from '@/services/api';
+import { useEffect, useState } from 'react';
+
+import adminDashboardApi from '@/api/adminDashboard';
 
 export const useLiveTrainsCount = () => {
   const [count, setCount] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+
     const fetchCount = async () => {
       try {
-        const activeCount = await apiService.getActiveTrainsCount();
-        setCount(activeCount);
+        const payload = await adminDashboardApi.getActiveTrains();
+        if (mounted) setCount(Number(payload?.active_count ?? payload?.trains?.length ?? 0));
       } catch (error) {
         console.error('Failed to fetch live trains count:', error);
-        setCount('--');
+        if (mounted) setCount('--');
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
 
     fetchCount();
+    const interval = window.setInterval(fetchCount, 30000);
 
-    // Refresh count every 30 seconds
-    const interval = setInterval(fetchCount, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
   }, []);
 
   return { count, loading };
 };
+
+export default useLiveTrainsCount;

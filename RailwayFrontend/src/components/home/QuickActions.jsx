@@ -1,81 +1,66 @@
-import React from 'react';
-import { Ticket, Clock, RefreshCw, AlertCircle, Gift, Map, ArrowRight } from 'lucide-react';
-import Card from '@/components/ui/card';
+import { ArrowRight, BellRing, TicketCheck, TrainFront } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const QuickActions = () => {
   const actions = [
     {
-      icon: <Ticket className="w-6 h-6" />,
-      title: 'E-Ticket Booking',
-      description: 'Book tickets online with instant confirmation',
-      color: 'bg-railway-red-100 text-railway-red-500',
+      icon: TicketCheck,
+      eyebrow: 'လက်မှတ်ဝယ်ရန်',
+      title: 'ခရီးစဉ်ရှာပြီး ထိုင်ခုံရွေးပါ',
+      description: 'ပင်မစာမျက်နှာအပေါ်ပိုင်းမှ ဘူတာနှစ်ခုနှင့် ရက်စွဲရွေးပြီး ရရှိနိုင်သော အချိန်ဇယားများကို တိုက်ရိုက်ရှာနိုင်ပါသည်။',
+      to: '/',
+      action: 'ခရီးစဉ်ရှာမည်',
     },
     {
-      icon: <Clock className="w-6 h-6" />,
-      title: 'Train Schedule',
-      description: 'Check timings and route information',
-      color: 'bg-railway-orange-100 text-railway-orange-500',
+      icon: BellRing,
+      eyebrow: 'လက်မှတ်အခြေအနေ',
+      title: 'သင့်ရထား စတင်ပြေးဆွဲမှုကို စောင့်ကြည့်ပါ',
+      description: 'လက်မှတ်နံပါတ်နှင့် ရထားအချက်အလက်ဖြင့် booking status၊ schedule နှင့် ပြေးဆွဲချိန် live updates ကို စစ်ဆေးနိုင်ပါသည်။',
+      to: '/pnr-status',
+      action: 'အခြေအနေစစ်မည်',
     },
     {
-      icon: <RefreshCw className="w-6 h-6" />,
-      title: 'PNR Status',
-      description: 'Track your booking status instantly',
-      color: 'bg-railway-green-100 text-railway-green-500',
-    },
-    {
-      icon: <AlertCircle className="w-6 h-6" />,
-      title: 'Live Updates',
-      description: 'Real-time running status and delays',
-      color: 'bg-railway-yellow-100 text-railway-yellow-600',
-    },
-    {
-      icon: <Gift className="w-6 h-6" />,
-      title: 'Special Offers',
-      description: 'Exclusive deals and seasonal discounts',
-      color: 'bg-railway-red-100 text-railway-red-500',
-    },
-    {
-      icon: <Map className="w-6 h-6" />,
-      title: 'Route Map',
-      description: 'Interactive railway network visualization',
-      color: 'bg-railway-orange-100 text-railway-orange-500',
+      icon: TrainFront,
+      eyebrow: 'လက်ရှိပြေးဆွဲမှု',
+      title: 'ယခုလက်ရှိ ရထားအားလုံးကို ကြည့်ပါ',
+      description: 'ACTIVE ဖြစ်နေသော ရထားများ၏ လက်ရှိ/နောက်တစ်ဘူတာ၊ တိုးတက်မှု၊ နောက်ကျချိန်နှင့် GPS update ကို ကြည့်နိုင်ပါသည်။',
+      to: '/running-trains',
+      action: 'အားလုံးကြည့်မည်',
     },
   ];
 
   return (
-    <section className="py-20 bg-gray-50 w-full">
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-12">
-          <div className="inline-flex items-center space-x-2 bg-railway-red-100 text-railway-red-600 rounded-full px-4 py-1.5 text-sm font-medium mb-4">
-            <span className="w-2 h-2 bg-railway-red-500 rounded-full animate-pulse-soft mr-2" />
-            Quick Access
-          </div>
-          <p className="text-xl text-center text-gray-600 mx-auto">
-            All essential railway services at your fingertips
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {actions.map((action, index) => (
-            <Card key={index} className="group cursor-pointer">
-              <div className="flex items-start space-x-4">
-                <div className={`p-3 rounded-xl ${action.color} transition-transform duration-300 group-hover:scale-110 group-hover:shadow-lg`}>
-                  {action.icon}
+    <section className="relative z-10 -mt-6 px-4 pb-12 sm:-mt-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl rounded-[28px] border border-slate-200 bg-white p-4 shadow-xl shadow-slate-900/8 sm:p-5">
+        <div className="grid gap-3 lg:grid-cols-3">
+          {actions.map((item, index) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.to + item.eyebrow}
+                to={item.to}
+                onClick={() => {
+                  if (item.to === '/') window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className={`group rounded-2xl p-5 text-left transition-all hover:bg-slate-50 ${index < actions.length - 1 ? 'lg:border-r lg:border-slate-100' : ''}`}
+              >
+                <div className="flex items-start gap-4">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700 transition-colors group-hover:bg-blue-700 group-hover:text-white">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-blue-700">{item.eyebrow}</p>
+                    <h2 className="mt-2 !mb-0 !text-lg !font-bold !leading-7 text-slate-950">{item.title}</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{item.description}</p>
+                    <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700">
+                      {item.action}
+                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                    </span>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-gray-900 mb-1">{action.title}</h3>
-                  <p className="text-sm text-gray-600 mb-4">{action.description}</p>
-                  <a
-                    href="#"
-                    className="inline-flex items-center text-sm font-medium text-railway-red-500 hover:text-railway-red-600"
-                  >
-                    Get Started
-                    <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" />
-                  </a>
-                </div>
-              </div>
-            </Card>
-          ))}
+              </Link>
+            );
+          })}
         </div>
       </div>
     </section>
