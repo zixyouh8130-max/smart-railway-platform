@@ -122,64 +122,101 @@ const Register = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 flex items-center justify-center p-4">
-      {/* Animated Background Pattern */}
-      <div className="absolute inset-0 overflow-hidden opacity-10">
-        <div className="absolute inset-0" style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-        }} />
-        <div className="absolute top-20 left-10 w-72 h-72 bg-blue-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob" />
-        <div className="absolute bottom-20 right-10 w-72 h-72 bg-purple-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000" />
+    <div className="relative min-h-screen overflow-hidden bg-slate-50 px-4 py-8 sm:px-6">
+      {/* Soft decorative background */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-40 -top-40 h-96 w-96 rounded-full bg-blue-200/50 blur-3xl" />
+        <div className="absolute -right-40 bottom-0 h-[28rem] w-[28rem] rounded-full bg-sky-200/50 blur-3xl" />
+
+        <div
+          className="absolute inset-0 opacity-[0.035]"
+          style={{
+            backgroundImage:
+              'linear-gradient(#2563eb 1px, transparent 1px), linear-gradient(90deg, #2563eb 1px, transparent 1px)',
+            backgroundSize: '36px 36px',
+          }}
+        />
       </div>
 
-      <div className="w-full max-w-md relative">
-        {/* Logo & Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-white/10 backdrop-blur-sm rounded-2xl mb-6 shadow-lg hover:scale-105 transition-transform duration-300">
-            <Train className="w-10 h-10 text-white" />
+      <div className="relative z-10 mx-auto w-full max-w-[500px]">
+        {/* Header */}
+        <div className="mb-6 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-blue-100 bg-white shadow-[0_10px_30px_rgba(37,99,235,0.12)]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600">
+              <Train className="h-5 w-5 text-white" />
+            </div>
           </div>
-          <h1 className="text-4xl font-bold text-white mb-2">Create Account</h1>
-          <p className="text-blue-200 text-lg">Start your journey with RailConnect</p>
+
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-[28px]">
+            Create Account
+          </h1>
+          <p className="mt-1.5 text-sm text-slate-500">
+            Start your journey with RailConnect
+          </p>
         </div>
 
-        {/* Steps Indicator */}
-        <div className="flex items-center justify-center space-x-4 mb-8">
-          {[1, 2].map((s) => (
-            <React.Fragment key={s}>
-              <div className="flex items-center">
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold transition-all duration-300 ${
-                  step > s
-                    ? 'bg-green-500 text-white scale-110'
-                    : step === s
-                      ? 'bg-white text-blue-600 scale-110 shadow-lg'
-                      : 'bg-white/20 text-blue-200'
-                }`}>
-                  {step > s ? <Check className="w-5 h-5" /> : s}
+        {/* Step indicator */}
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center">
+            {[1, 2].map((s) => (
+              <React.Fragment key={s}>
+                <div className="flex min-w-0 items-center">
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all duration-300 ${
+                      step > s
+                        ? 'bg-emerald-500 text-white'
+                        : step === s
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                          : 'bg-slate-100 text-slate-400'
+                    }`}
+                  >
+                    {step > s ? <Check className="h-4 w-4" /> : s}
+                  </div>
+
+                  <div className="ml-2.5 hidden sm:block">
+                    <p
+                      className={`text-xs font-semibold ${
+                        step === s ? 'text-slate-800' : 'text-slate-400'
+                      }`}
+                    >
+                      Step {s}
+                    </p>
+                    <p
+                      className={`text-xs ${
+                        step === s ? 'text-blue-600' : 'text-slate-400'
+                      }`}
+                    >
+                      {s === 1 ? 'Personal Info' : 'Security'}
+                    </p>
+                  </div>
                 </div>
-                <span className={`ml-2 text-sm font-medium hidden sm:block ${
-                  step === s ? 'text-white' : 'text-blue-200'
-                }`}>
-                  {s === 1 ? 'Personal Info' : 'Security'}
-                </span>
-              </div>
-              {s < 2 && (
-                <div className={`flex-1 h-0.5 transition-all duration-300 ${
-                  step > s ? 'bg-green-500' : 'bg-white/20'
-                }`} />
-              )}
-            </React.Fragment>
-          ))}
+
+                {s < 2 && (
+                  <div
+                    className={`mx-3 h-px flex-1 transition-colors duration-300 ${
+                      step > s ? 'bg-emerald-400' : 'bg-slate-200'
+                    }`}
+                  />
+                )}
+              </React.Fragment>
+            ))}
+          </div>
         </div>
 
-        {/* Registration Card */}
-        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 shadow-2xl border border-white/20 hover:border-white/30 transition-all duration-300">
-          {/* Error Alert */}
+        {/* Registration card */}
+        <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] sm:p-8">
           {(serverError || authError) && (
-            <div className="mb-6 p-4 bg-red-500/20 backdrop-blur-sm border border-red-400/30 rounded-xl flex items-start space-x-3 animate-fadeIn">
-              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 p-4">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-100">
+                <AlertCircle className="h-4 w-4 text-red-600" />
+              </div>
               <div>
-                <p className="text-sm font-medium text-red-200">{serverError || authError}</p>
-                <p className="text-xs text-red-300 mt-1">Please try again or contact support</p>
+                <p className="pt-0.5 text-sm font-medium leading-5 text-red-700">
+                  {serverError || authError}
+                </p>
+                <p className="mt-1 text-xs text-red-500">
+                  Please try again or contact support
+                </p>
               </div>
             </div>
           )}
@@ -189,11 +226,11 @@ const Register = () => {
               <>
                 {/* Full Name */}
                 <div>
-                  <label className="block text-sm font-medium text-blue-200 mb-2">
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
                     Full Name
                   </label>
-                  <div className="relative group">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-300 group-focus-within:text-white transition-colors" />
+                  <div className="group relative">
+                    <User className="absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-600" />
                     <input
                       type="text"
                       name="full_name"
@@ -201,14 +238,16 @@ const Register = () => {
                       onChange={handleChange}
                       placeholder="John Doe"
                       autoComplete="name"
-                      className={`w-full pl-10 pr-4 py-3.5 bg-white/5 border rounded-xl text-white placeholder:text-blue-300/50 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white/10 transition-all ${
-                        errors.full_name ? 'border-red-400 focus:ring-red-400' : 'border-white/20 hover:border-white/40'
+                      className={`w-full rounded-xl border bg-slate-50/70 py-3.5 pl-11 pr-4 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all ${
+                        errors.full_name
+                          ? 'border-red-300 bg-red-50/40 focus:border-red-400 focus:ring-4 focus:ring-red-50'
+                          : 'border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50'
                       }`}
                     />
                   </div>
                   {errors.full_name && (
-                    <p className="mt-1.5 text-sm text-red-400 flex items-center">
-                      <AlertCircle className="w-3 h-3 mr-1" />
+                    <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-red-600">
+                      <AlertCircle className="h-3.5 w-3.5" />
                       {errors.full_name}
                     </p>
                   )}
@@ -216,11 +255,11 @@ const Register = () => {
 
                 {/* Email */}
                 <div>
-                  <label className="block text-sm font-medium text-blue-200 mb-2">
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
                     Email Address
                   </label>
-                  <div className="relative group">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-300 group-focus-within:text-white transition-colors" />
+                  <div className="group relative">
+                    <Mail className="absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-600" />
                     <input
                       type="email"
                       name="email"
@@ -228,14 +267,16 @@ const Register = () => {
                       onChange={handleChange}
                       placeholder="john@example.com"
                       autoComplete="email"
-                      className={`w-full pl-10 pr-4 py-3.5 bg-white/5 border rounded-xl text-white placeholder:text-blue-300/50 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white/10 transition-all ${
-                        errors.email ? 'border-red-400 focus:ring-red-400' : 'border-white/20 hover:border-white/40'
+                      className={`w-full rounded-xl border bg-slate-50/70 py-3.5 pl-11 pr-4 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all ${
+                        errors.email
+                          ? 'border-red-300 bg-red-50/40 focus:border-red-400 focus:ring-4 focus:ring-red-50'
+                          : 'border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50'
                       }`}
                     />
                   </div>
                   {errors.email && (
-                    <p className="mt-1.5 text-sm text-red-400 flex items-center">
-                      <AlertCircle className="w-3 h-3 mr-1" />
+                    <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-red-600">
+                      <AlertCircle className="h-3.5 w-3.5" />
                       {errors.email}
                     </p>
                   )}
@@ -243,11 +284,11 @@ const Register = () => {
 
                 {/* Phone */}
                 <div>
-                  <label className="block text-sm font-medium text-blue-200 mb-2">
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
                     Phone Number
                   </label>
-                  <div className="relative group">
-                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-300 group-focus-within:text-white transition-colors" />
+                  <div className="group relative">
+                    <Phone className="absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-600" />
                     <input
                       type="tel"
                       name="phone"
@@ -255,14 +296,16 @@ const Register = () => {
                       onChange={handleChange}
                       placeholder="+1 (555) 123-4567"
                       autoComplete="tel"
-                      className={`w-full pl-10 pr-4 py-3.5 bg-white/5 border rounded-xl text-white placeholder:text-blue-300/50 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white/10 transition-all ${
-                        errors.phone ? 'border-red-400 focus:ring-red-400' : 'border-white/20 hover:border-white/40'
+                      className={`w-full rounded-xl border bg-slate-50/70 py-3.5 pl-11 pr-4 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all ${
+                        errors.phone
+                          ? 'border-red-300 bg-red-50/40 focus:border-red-400 focus:ring-4 focus:ring-red-50'
+                          : 'border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50'
                       }`}
                     />
                   </div>
                   {errors.phone && (
-                    <p className="mt-1.5 text-sm text-red-400 flex items-center">
-                      <AlertCircle className="w-3 h-3 mr-1" />
+                    <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-red-600">
+                      <AlertCircle className="h-3.5 w-3.5" />
                       {errors.phone}
                     </p>
                   )}
@@ -272,11 +315,11 @@ const Register = () => {
               <>
                 {/* Password */}
                 <div>
-                  <label className="block text-sm font-medium text-blue-200 mb-2">
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
                     Password
                   </label>
-                  <div className="relative group">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-300 group-focus-within:text-white transition-colors" />
+                  <div className="group relative">
+                    <Lock className="absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-600" />
                     <input
                       type={showPassword ? 'text' : 'password'}
                       name="password"
@@ -284,62 +327,101 @@ const Register = () => {
                       onChange={handleChange}
                       placeholder="Create a strong password"
                       autoComplete="new-password"
-                      className={`w-full pl-10 pr-12 py-3.5 bg-white/5 border rounded-xl text-white placeholder:text-blue-300/50 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white/10 transition-all ${
-                        errors.password ? 'border-red-400 focus:ring-red-400' : 'border-white/20 hover:border-white/40'
+                      className={`w-full rounded-xl border bg-slate-50/70 py-3.5 pl-11 pr-12 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all ${
+                        errors.password
+                          ? 'border-red-300 bg-red-50/40 focus:border-red-400 focus:ring-4 focus:ring-red-50'
+                          : 'border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50'
                       }`}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-300 hover:text-white transition-colors p-1"
+                      className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
-                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      {showPassword ? (
+                        <EyeOff className="h-[18px] w-[18px]" />
+                      ) : (
+                        <Eye className="h-[18px] w-[18px]" />
+                      )}
                     </button>
                   </div>
+
                   {errors.password && (
-                    <p className="mt-1.5 text-sm text-red-400 flex items-center">
-                      <AlertCircle className="w-3 h-3 mr-1" />
+                    <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-red-600">
+                      <AlertCircle className="h-3.5 w-3.5" />
                       {errors.password}
                     </p>
                   )}
 
-                  {/* Password Strength Indicator */}
+                  {/* Password Strength */}
                   {formData.password && (
-                    <div className="mt-3 p-4 bg-white/5 rounded-xl border border-white/10">
-                      <div className="flex gap-1.5 mb-3">
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="mb-3 flex gap-1.5">
                         {[1, 2, 3, 4, 5].map((level) => (
                           <div
                             key={level}
                             className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${
                               level <= passwordStrength.score
-                                ? passwordStrength.colors[passwordStrength.score - 1]
-                                : 'bg-white/10'
+                                ? passwordStrength.colors[
+                                    passwordStrength.score - 1
+                                  ]
+                                : 'bg-slate-200'
                             }`}
                           />
                         ))}
                       </div>
-                      <p className="text-xs font-medium text-blue-300 mb-3">
-                        Password Strength: <span className="text-white">{passwordStrength.labels[passwordStrength.score - 1] || 'Very Weak'}</span>
+
+                      <p className="mb-3 text-xs font-semibold text-slate-500">
+                        Password Strength:{' '}
+                        <span className="text-slate-800">
+                          {passwordStrength.labels[passwordStrength.score - 1] ||
+                            'Very Weak'}
+                        </span>
                       </p>
-                      <div className="space-y-2">
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         {[
-                          { label: 'At least 8 characters', test: formData.password.length >= 8 },
-                          { label: 'One lowercase letter', test: /(?=.*[a-z])/.test(formData.password) },
-                          { label: 'One uppercase letter', test: /(?=.*[A-Z])/.test(formData.password) },
-                          { label: 'One number', test: /(?=.*\d)/.test(formData.password) },
-                          { label: 'One special character', test: /(?=.*[!@#$%^&*(),.?":{}|<>])/.test(formData.password) },
+                          {
+                            label: 'At least 8 characters',
+                            test: formData.password.length >= 8,
+                          },
+                          {
+                            label: 'One lowercase letter',
+                            test: /(?=.*[a-z])/.test(formData.password),
+                          },
+                          {
+                            label: 'One uppercase letter',
+                            test: /(?=.*[A-Z])/.test(formData.password),
+                          },
+                          {
+                            label: 'One number',
+                            test: /(?=.*\d)/.test(formData.password),
+                          },
+                          {
+                            label: 'One special character',
+                            test: /(?=.*[!@#$%^&*(),.?":{}|<>])/.test(
+                              formData.password
+                            ),
+                          },
                         ].map(({ label, test }) => (
                           <div key={label} className="flex items-center text-xs">
-                            <div className={`w-4 h-4 rounded-full flex items-center justify-center mr-2 ${
-                              test ? 'bg-green-500/20' : 'bg-white/10'
-                            }`}>
+                            <div
+                              className={`mr-2 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
+                                test ? 'bg-emerald-100' : 'bg-slate-200'
+                              }`}
+                            >
                               {test ? (
-                                <Check className="w-3 h-3 text-green-400" />
+                                <Check className="h-3 w-3 text-emerald-600" />
                               ) : (
-                                <div className="w-1.5 h-1.5 rounded-full bg-blue-300/50" />
+                                <div className="h-1.5 w-1.5 rounded-full bg-slate-400" />
                               )}
                             </div>
-                            <span className={test ? 'text-green-400' : 'text-blue-300/70'}>
+                            <span
+                              className={
+                                test ? 'text-emerald-600' : 'text-slate-500'
+                              }
+                            >
                               {label}
                             </span>
                           </div>
@@ -351,11 +433,11 @@ const Register = () => {
 
                 {/* Confirm Password */}
                 <div>
-                  <label className="block text-sm font-medium text-blue-200 mb-2">
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
                     Confirm Password
                   </label>
-                  <div className="relative group">
-                    <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-300 group-focus-within:text-white transition-colors" />
+                  <div className="group relative">
+                    <Shield className="absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-600" />
                     <input
                       type="password"
                       name="confirmPassword"
@@ -363,17 +445,21 @@ const Register = () => {
                       onChange={handleChange}
                       placeholder="Confirm your password"
                       autoComplete="new-password"
-                      className={`w-full pl-10 pr-4 py-3.5 bg-white/5 border rounded-xl text-white placeholder:text-blue-300/50 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white/10 transition-all ${
-                        errors.confirmPassword ? 'border-red-400 focus:ring-red-400' : 'border-white/20 hover:border-white/40'
+                      className={`w-full rounded-xl border bg-slate-50/70 py-3.5 pl-11 pr-12 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all ${
+                        errors.confirmPassword
+                          ? 'border-red-300 bg-red-50/40 focus:border-red-400 focus:ring-4 focus:ring-red-50'
+                          : 'border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50'
                       }`}
                     />
-                    {formData.confirmPassword && formData.password === formData.confirmPassword && (
-                      <Check className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-green-400" />
-                    )}
+                    {formData.confirmPassword &&
+                      formData.password === formData.confirmPassword && (
+                        <Check className="absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-emerald-500" />
+                      )}
                   </div>
+
                   {errors.confirmPassword && (
-                    <p className="mt-1.5 text-sm text-red-400 flex items-center">
-                      <AlertCircle className="w-3 h-3 mr-1" />
+                    <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-red-600">
+                      <AlertCircle className="h-3.5 w-3.5" />
                       {errors.confirmPassword}
                     </p>
                   )}
@@ -381,52 +467,58 @@ const Register = () => {
               </>
             )}
 
-            {/* Navigation Buttons */}
-            <div className="flex gap-3 pt-2">
+            {/* Navigation */}
+            <div className="flex gap-3 pt-1">
               {step === 2 && (
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setStep(1)}
-                  className="flex-1"
-                  icon={<ArrowLeft className="w-4 h-4" />}
+                  className="!rounded-xl border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  icon={<ArrowLeft className="h-4 w-4" />}
                 >
                   Back
                 </Button>
               )}
+
               <Button
                 type="submit"
-                variant="secondary"
                 size="lg"
-                className="flex-1 group"
+                className="group flex-1 !rounded-xl !bg-blue-600 !text-white shadow-lg shadow-blue-600/20 transition-all hover:!bg-blue-700 hover:shadow-blue-600/30"
                 disabled={loading}
               >
                 {loading ? (
                   <div className="flex items-center justify-center">
-                    <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mr-2" />
+                    <div className="mr-2 h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
                     Creating Account...
                   </div>
                 ) : step === 1 ? (
                   <>
                     Continue
-                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                    <ArrowRight className="ml-1 h-5 w-5 transition-transform group-hover:translate-x-0.5" />
                   </>
                 ) : (
                   <>
                     Create Account
-                    <Check className="w-5 h-5" />
+                    <Check className="ml-1 h-5 w-5" />
                   </>
                 )}
               </Button>
             </div>
           </form>
 
-          {/* Login Link */}
-          <p className="mt-8 text-center text-sm text-blue-200">
+          {/* Login link */}
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-slate-100" />
+            <span className="text-xs text-slate-400">OR</span>
+            <div className="h-px flex-1 bg-slate-100" />
+          </div>
+
+          <p className="text-center text-sm text-slate-500">
             Already have an account?{' '}
             <Link
               to="/login"
-              className="font-medium text-white hover:text-blue-200 transition-colors underline-offset-4 hover:underline"
+              className="font-semibold text-blue-600 transition-colors hover:text-blue-700 hover:underline underline-offset-4"
             >
               Sign in
             </Link>
@@ -434,15 +526,20 @@ const Register = () => {
         </div>
 
         {/* Footer */}
-        <p className="mt-8 text-center text-sm text-blue-300/70">
+        <p className="mt-6 text-center text-xs text-slate-400">
           By creating an account, you agree to our{' '}
-          <a href="#" className="text-white hover:underline">Terms of Service</a>
-          {' '}and{' '}
-          <a href="#" className="text-white hover:underline">Privacy Policy</a>
+          <a href="#" className="text-slate-500 hover:text-blue-600 hover:underline">
+            Terms of Service
+          </a>{' '}
+          and{' '}
+          <a href="#" className="text-slate-500 hover:text-blue-600 hover:underline">
+            Privacy Policy
+          </a>
         </p>
       </div>
     </div>
   );
+
 };
 
 export default Register;
