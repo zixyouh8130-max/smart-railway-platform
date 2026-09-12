@@ -23,7 +23,7 @@ from .api.chatbot.router import router as chatbot_router
 from .api.inspection import router as inspection_router
 from .api.track_issues import router as track_issues_router
 from .api.routes_and_stations import router as routes_and_station_router
-from backend.app.api.railways.router import router as railway_router
+from .api.railways.router import router as railway_router
 
 # Import database models for Alembic metadata
 from .core.database import Base, SessionLocal
