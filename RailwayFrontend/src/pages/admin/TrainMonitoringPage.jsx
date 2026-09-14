@@ -195,7 +195,7 @@ const TrainMonitoringPage = () => {
             ) : (
               <span className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-sm border border-emerald-200">
                 <Wifi className="w-4 h-4" />
-                လက်ဖြင့် အပ်ဒိတ်
+                Manual အပ်ဒိတ်
               </span>
             )}
             <Button 
