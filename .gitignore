@@ -99,7 +99,6 @@ database_backup/
 secrets/
 **/secrets/
 
-TrainRiderAppStable/
 
 google_drive_token.json
 google_drive_credentials.json
